@@ -6,6 +6,16 @@ adaptive timing precision, execution witnesses and sustained processing checks.
 The maintained contract is [the performance guide](../../../triad-performance.md).
 It does not qualify ordinary Robust integration or radio sensitivity.
 
+This is a historical study of the retired Python performance harness. Each
+current harness archive retains three JSON case/path definitions; source, test
+and workflow files were removed. The current proof archive retains 50 data/report
+files after six experimental drivers were removed. The
+[retirement manifest](../archive-content-retirement.json) records the original
+and repacked hashes and unchanged retained leaves. The source snapshots and
+reproduction instructions below refer to the original packages, not runnable
+contents of the current archives. Current testing guidance is in the
+[build guide](../../../building.md#testing-stages).
+
 ## First complete campaign: retained diagnostic protocol
 
 The first complete CPU campaign used the fixed-confirmation v2 protocol on an
@@ -14,8 +24,9 @@ unrestricted 12-logical-CPU affinity. The actual processor is recorded rather
 than relabeled as a 5560U. Source identities, individual observations and counts
 are retained in [the compact report](cpu-001-summary.json), derived from an
 84,383,148-byte raw backend report whose SHA256 is included in that summary.
-The [harness snapshot](cpu-001-harness.tar.gz) and
-[individual source hashes](cpu-001-harness-sha256.json) preserve that protocol.
+The [original harness snapshot](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-trace/cpu-001-harness.tar.gz) and
+[individual source hashes](cpu-001-harness-sha256.json) identify that protocol;
+the [current archive](cpu-001-harness.tar.gz) retains only its three JSON definitions.
 The immutable receiver baseline is `242ea15fa032ee117b9113a7f3cd07cc6e9f0254`.
 
 The complete suite took **1,739.77 seconds** including supervision; the backend
@@ -85,8 +96,10 @@ is retained as old evidence; it is not silently upgraded to the new protocol.
 
 [CPU002](cpu-002-summary.json) used the next v3 protocol, pinned to logical CPUs
 2 and 4, which are different physical cores on this host. Python numerical work
-used two threads, native work one. Its [harness snapshot](cpu-002-harness.tar.gz)
-and [file hashes](cpu-002-harness-sha256.json) preserve the measured code.
+used two threads, native work one. Its
+[original harness snapshot](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-trace/cpu-002-harness.tar.gz)
+and [file hashes](cpu-002-harness-sha256.json) identify the measured code;
+the [current archive](cpu-002-harness.tar.gz) retains only its three JSON definitions.
 All 14 cases completed in **1,606.92 seconds** including supervision
 (1,600.01 seconds in the backend). Twelve predictions qualified/passed;
 narrow-HF and free-crystal FFT models stayed unqualified. Ten of 14 cases met
@@ -207,8 +220,11 @@ CPU003's ordinary cases gain a new failure. The guard is labeled an engineering
 calibration failure with unqualified false-failure rate. It is not a new timing
 experiment or a statistical proof of future mean performance. The
 [post-measurement delta](post-measurement-release-guard.json) and
-[final source snapshot](release-gate-harness.tar.gz) separate it from the
-[harness actually timed for CPU003](routine-v2-harness.tar.gz).
+[original final source snapshot](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-trace/release-gate-harness.tar.gz) separate it from the
+[original harness actually timed for CPU003](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-trace/routine-v2-harness.tar.gz).
+The current [release-guard](release-gate-harness.tar.gz) and
+[CPU003](routine-v2-harness.tar.gz) archives retain their JSON definitions, not
+those source overlays.
 
 The final [FFT sustained check](fft-sustained-summary.json) selected the largest
 eligible saved forecast by bank size. Free-crystal was ineligible, so this was
@@ -225,27 +241,31 @@ the native test, without another calibration campaign.
 All **156 focused tests passed** in 10.235 seconds after the final release guard;
 independent reviews covered the statistical distinction, historical proof,
 FFT/native integration, focused-case selection and release-status propagation.
-The tests verify the harness contracts, while the measurements above establish
+Those historical tests verified the harness contracts, while the measurements above establish
 its demonstrated predictive behavior. Do not replace either with the other.
 
 The source base is `38209d0131de2c90ad9db4075025741198ec168d`; the immutable receiver
 reference is `242ea15fa032ee117b9113a7f3cd07cc6e9f0254`. Local timing used the
 actual Ryzen 5 PRO 5650U, CPU mask `2,4`, two Python workers and one native worker.
 [Reproduction metadata](reproduction.json) lists exact commands, input hashes,
-source overlays and reference-build provenance. Restore overlays only into an
-isolated checkout of the stated base. Raw focused reports, anchors, commitments,
-and experimental drivers are in the 3.77 MB [proof archive](raw-proof.tar.gz),
-with a [member manifest](raw-proof-manifest.json). Full CPU reports remain in
-ignored local evidence; their exact hashes/sizes and compact derived results
-are retained. The archive excludes binaries and sampled waveform caches, which
-can be rebuilt from the declared source and plans.
+source overlays and reference-build provenance. Historical replay requires the
+original overlays in an isolated checkout of the stated base. Raw focused
+reports, anchors, commitments and experimental drivers were packaged in the
+original 3.77 MB [proof archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-trace/raw-proof.tar.gz),
+with a retained [original member manifest](raw-proof-manifest.json). The
+[current proof archive](raw-proof.tar.gz) contains the 50 retained data/report
+files, not the six retired drivers. Full CPU reports were kept outside the
+package in ignored local evidence; their exact hashes/sizes and compact derived
+results are retained. Binaries and sampled waveform caches were excluded and
+would require the declared historical source, build and plans to reconstruct.
 
-For ordinary use, retain `--anchor-directory` and run the maintained CLI with
-`--validation-mode auto`. To investigate only an affected case, use repeatable
-`--case ID` selection; it retains the full profile confidence multiplicity and
-is explicitly incomplete for normal CI. Source/binary changes in timed receiver
-code still require affected-case qualification. Reporting-only compatible
-changes do not. Cross-revision model transfer without that qualification,
+The historical CLI's ordinary-use recipe retained `--anchor-directory` and
+selected `--validation-mode auto`. Its repeatable `--case ID` selection limited
+an investigation to affected cases while retaining the full profile confidence
+multiplicity; such selection was explicitly incomplete for normal CI. That CLI
+is retired. Under that protocol, source/binary changes in timed receiver code
+required affected-case qualification; reporting-only compatible changes did not.
+Cross-revision model transfer without that qualification,
 universal detection of 30% full-size-only regressions from one noisy endpoint,
 and sub-ten-minute complete runs on this allocation remain **unestablished**.
 No further threshold widening or retries were used to erase the free-crystal
@@ -253,7 +273,7 @@ warning or missed precision targets.
 
 ## Execution and qualification limits
 
-The first campaign's raw JSON remains under ignored `local-evidence/` with the
+The first campaign's raw JSON was kept under ignored `local-evidence/` with the
 hash recorded above. The compact report retains predictions, confirmation
 observations, work counters, sampling-call counts, gates, source identities and
 sustained results. It omits repeated raw per-trial metadata, so it is an audited

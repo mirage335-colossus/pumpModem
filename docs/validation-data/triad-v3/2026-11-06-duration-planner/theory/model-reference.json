@@ -1,0 +1,165 @@
+{
+  "schema": "triad-duration-Gaussian-reference-v1",
+  "scope": "Discretized known covariance with two independently resolved Gaussian-spectrum rays; independent exponential draws. No waveform acquisition, selective modulation, moving delay or audio. Seeded PRNG here is statistical quadrature, not transmitted background noise.",
+  "seed": 20261126000,
+  "points": [
+    {
+      "cn0": 8.0,
+      "data_seconds": 23.2,
+      "threshold": 48.09773376056052,
+      "prediction": {
+        "model": "equal-mode Gaussian covariance likelihood",
+        "energy_n0": 146.38210391940484,
+        "effective_modes": 41.768703551280275,
+        "energy_per_mode": 3.504588159881204,
+        "mean_true_atom_log_lr": 83.51617571343,
+        "modeled_detection_probability": 0.9514036807777668,
+        "modeled_detection_lower_bound": 0.7687737271228422,
+        "log_miss_bound": -1.4643585116281825,
+        "tail_method": "analytic Gamma lower-tail Chernoff; probability uses Gamma CDF",
+        "tail_scope": "Bound for the equal-mode surrogate, not for the sampled channel/receiver"
+      },
+      "reference_eigenvalues": 1024,
+      "energy_trace": 146.38210391940487,
+      "likelihood_mean": 79.14535444099322,
+      "misses": 7427,
+      "trials": 100000,
+      "miss_probability_ci95": [
+        0.072652200819865,
+        0.07591254314359129
+      ]
+    },
+    {
+      "cn0": 8.0,
+      "data_seconds": 34.8,
+      "threshold": 48.09773376056052,
+      "prediction": {
+        "model": "equal-mode Gaussian covariance likelihood",
+        "energy_n0": 219.57315587910728,
+        "effective_modes": 62.32636447743947,
+        "energy_per_mode": 3.522957864140898,
+        "mean_true_atom_log_lr": 125.51231482753485,
+        "modeled_detection_probability": 0.9992026077368679,
+        "modeled_detection_lower_bound": 0.9940334926786818,
+        "log_miss_bound": -5.121593561084462,
+        "tail_method": "analytic Gamma lower-tail Chernoff; probability uses Gamma CDF",
+        "tail_scope": "Bound for the equal-mode surrogate, not for the sampled channel/receiver"
+      },
+      "reference_eigenvalues": 1024,
+      "energy_trace": 219.5731558791073,
+      "likelihood_mean": 118.9987159999655,
+      "misses": 177,
+      "trials": 100000,
+      "miss_probability_ci95": [
+        0.0015190237725233827,
+        0.0020505426952811645
+      ]
+    },
+    {
+      "cn0": 8.0,
+      "data_seconds": 46.4,
+      "threshold": 48.09773376056052,
+      "prediction": {
+        "model": "equal-mode Gaussian covariance likelihood",
+        "energy_n0": 292.7642078388097,
+        "effective_modes": 82.8857244329899,
+        "energy_per_mode": 3.5321427162707484,
+        "mean_true_atom_log_lr": 167.50772930789998,
+        "modeled_detection_probability": 0.9999931962235862,
+        "modeled_detection_lower_bound": 0.9999341400011338,
+        "log_miss_bound": -9.627979298230942,
+        "tail_method": "analytic Gamma lower-tail Chernoff; probability uses Gamma CDF",
+        "tail_scope": "Bound for the equal-mode surrogate, not for the sampled channel/receiver"
+      },
+      "reference_eigenvalues": 1024,
+      "energy_trace": 292.7642078388097,
+      "likelihood_mean": 158.8524378980115,
+      "misses": 1,
+      "trials": 100000,
+      "miss_probability_ci95": [
+        2.531780477933314e-07,
+        5.571516034774275e-05
+      ]
+    },
+    {
+      "cn0": 5.0,
+      "data_seconds": 34.8,
+      "threshold": 48.09773376056052,
+      "prediction": {
+        "model": "equal-mode Gaussian covariance likelihood",
+        "energy_n0": 110.0472625738596,
+        "effective_modes": 62.32636447743947,
+        "energy_per_mode": 1.76566150611422,
+        "mean_true_atom_log_lr": 46.643907924673094,
+        "modeled_detection_probability": 0.4419476992090421,
+        "modeled_detection_lower_bound": -0.0,
+        "log_miss_bound": 0.0,
+        "tail_method": "analytic Gamma lower-tail Chernoff; probability uses Gamma CDF",
+        "tail_scope": "Bound for the equal-mode surrogate, not for the sampled channel/receiver"
+      },
+      "reference_eigenvalues": 1024,
+      "energy_trace": 110.04726257385961,
+      "likelihood_mean": 44.33937398412413,
+      "misses": 62558,
+      "trials": 100000,
+      "miss_probability_ci95": [
+        0.6225717531653212,
+        0.6285809615325568
+      ]
+    },
+    {
+      "cn0": 5.0,
+      "data_seconds": 81.2,
+      "threshold": 48.09773376056052,
+      "prediction": {
+        "model": "equal-mode Gaussian covariance likelihood",
+        "energy_n0": 256.7769460056724,
+        "effective_modes": 144.56668457015965,
+        "energy_per_mode": 1.7761834046976155,
+        "mean_true_atom_log_lr": 109.16321374847726,
+        "modeled_detection_probability": 0.9990177468518742,
+        "modeled_detection_lower_bound": 0.9923975013775233,
+        "log_miss_bound": -4.87927831960623,
+        "tail_method": "analytic Gamma lower-tail Chernoff; probability uses Gamma CDF",
+        "tail_scope": "Bound for the equal-mode surrogate, not for the sampled channel/receiver"
+      },
+      "reference_eigenvalues": 1024,
+      "energy_trace": 256.7769460056724,
+      "likelihood_mean": 103.81937836676623,
+      "misses": 204,
+      "trials": 100000,
+      "miss_probability_ci95": [
+        0.0017698801184066165,
+        0.002339621248522657
+      ]
+    },
+    {
+      "cn0": 5.0,
+      "data_seconds": 92.8,
+      "threshold": 48.09773376056052,
+      "prediction": {
+        "model": "equal-mode Gaussian covariance likelihood",
+        "energy_n0": 293.45936686362563,
+        "effective_modes": 165.12736231824536,
+        "energy_per_mode": 1.7771698326898093,
+        "mean_true_atom_log_lr": 124.79293491765758,
+        "modeled_detection_probability": 0.9998829873939195,
+        "modeled_detection_lower_bound": 0.9989574588016467,
+        "log_miss_bound": -6.8660940862680215,
+        "tail_method": "analytic Gamma lower-tail Chernoff; probability uses Gamma CDF",
+        "tail_scope": "Bound for the equal-mode surrogate, not for the sampled channel/receiver"
+      },
+      "reference_eigenvalues": 1024,
+      "energy_trace": 293.4593668636256,
+      "likelihood_mean": 118.68977848690153,
+      "misses": 33,
+      "trials": 100000,
+      "miss_probability_ci95": [
+        0.00022716736193907598,
+        0.00046341177012288473
+      ]
+    }
+  ],
+  "cpu_seconds": 10.7424391,
+  "source_sha256": "7ab98c534f0c83b9f57894cda457706ec3c0b41f3f00919be168424df07fed06"
+}

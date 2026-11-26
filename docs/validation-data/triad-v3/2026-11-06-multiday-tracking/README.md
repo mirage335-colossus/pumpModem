@@ -190,10 +190,17 @@ check these formulas.
 ## Reproduction and cost discipline
 
 Use [campaign-protocol.json](campaign-protocol.json),
-[phase-protocol.json](phase-protocol.json) and the commands retained in
-`evidence.zip`. All raw compact reports and NPZ sufficient statistics are
-included; large regenerable sample streams and cloud account records are not.
-`evidence-index.json` binds archive members to SHA256 hashes.
+[phase-protocol.json](phase-protocol.json) and the historical commands recorded
+in `evidence.zip` to understand the original setup. The current repacked archive
+is 3,214,134 bytes, SHA-256
+`3e82b193f72fba9c0384991bd0b5ef2a6c08f22791e280900392e9d9c2c2c67b` and has 252
+retained leaves, as recorded in the
+[archive-retirement manifest](../archive-content-retirement.json). The original
+archive hash, `4e5d4d924b29faf07f21181f0f31d14bcbe44f5fd490a4464da13991210d8f42`,
+is preserved in `evidence-index.json`. The current archive retains compact
+reports and NPZ sufficient statistics; large regenerable sample streams and
+cloud account records are not included. The evidence index binds the original
+archive members to SHA-256 hashes.
 
 The main 24-case campaign cost **552.58 child CPU seconds / 554.12 wall seconds**
 including generation, subprocess imports and analyses. Source/channel refinement
@@ -202,6 +209,18 @@ finite-state signal trials plus null and exports add 81.96 CPU s. These are
 separate work boundaries, not an end-to-end production latency forecast.
 Run only affected focused checks routinely; do not replay historical long
 campaigns to obtain a green check. No ordinary-receiver regressions were run.
+
+The command block below preserves the original campaign and focused-phase
+invocations. It is historical and does not run in the current checkout:
+`tools/triad_multiday_campaign.py`, `tools/triad_multiday_block_mc.py` and the
+`triad_tracking_export` target are absent. The retirement manifest records nine
+removed source/diagnostic files from the current `evidence.zip`, including the
+source-cohort exporters and theory diagnostic. The original source identities
+remain in [evidence-index.json](evidence-index.json), and the pre-retirement
+tree is available at the
+[pinned Git revision](https://github.com/mirage335-colossus/pumpModem/tree/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-multiday-tracking).
+That source history is provenance; it does not establish that a current build
+reconstructs the historical executable or campaign.
 
 ```sh
 ./build.sh configure --cli
@@ -225,12 +244,14 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 "$PYTHON" tools/triad_multiday_block_mc
 For a CPU diagnostic, change device to `cpu` and both trial counts to 128; that
 changes the noise cohort and its confidence interval. Exact full source/build
 hashes will differ after the metadata-only native server and provenance fixes.
-The canonical waveform is unchanged. Exact historical driver sources are
-retained in `source-cohorts/` inside the archive. One main-campaign run loaded
-the old scalar reset code while its finish-time source hash observed a newer
-vectorized reduction; this known provenance exception is retained explicitly.
-A paired equivalence comparison accompanies the source snapshots. Subsequent
-source/input guards prevent silently qualifying such an event.
+The original report states that the canonical waveform is unchanged. Exact
+historical driver source files were removed from `source-cohorts/` in the
+retirement pass; their hashes and the run's source identity remain in the
+evidence index. One main-campaign run loaded the old scalar reset code while
+its finish-time source hash observed a newer vectorized reduction; this known
+provenance exception remains recorded explicitly. A paired equivalence
+comparison accompanies the source snapshots. Subsequent source/input guards
+prevent silently qualifying such an event.
 
 ## Outstanding boundaries
 

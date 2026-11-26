@@ -171,8 +171,17 @@ an end-to-end prediction.
 
 ## Reproduction and retained evidence
 
-From the repository root, build/reuse the narrow native exporter and run the
-current protocol with fresh output paths:
+The commands below record the historical protocol and output paths used by
+this study. They do not run against the current checkout: `tools/triad-performance.py`
+and its five helper modules have been retired. Each current sanitized harness
+archive retains only `tools/triad-performance-cases.json`; the other six
+measured source files were removed. The original harness sources and build
+instructions remain available in the
+[pre-retirement measured-bounded archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance/measured-bounded-harness.tar.gz)
+and [measured-cost-guard archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance/measured-cost-guard-harness.tar.gz).
+For current performance work, follow the maintained
+[Triad performance guide](../../../triad-performance.md). The original
+commands were:
 
 ```sh
 ./build.sh configure --cli --build-dir build/dev-cli -- \
@@ -197,19 +206,29 @@ absolute monotonic deadlines removed; numerical evidence and source hashes
 remain. Each report records the actual harness, candidate, fixed reference,
 exporter and fixture identities.
 
-Two seven-file source archives preserve the measured variants:
+The original seven-file source archives preserved the measured variants.
+Their current sanitized replacements each retain the case configuration file;
+the [archive retirement manifest](../archive-content-retirement.json) records
+the removed harness modules and verifies retained bytes:
 
 - [Measured bounded harness](measured-bounded-harness.tar.gz): every harness
-  digest matches both the earlier Ryzen bounded and CUDA reports.
+  source digest in the original archive matches both the earlier Ryzen bounded
+  and CUDA reports.
 - [Measured cost-guard harness](measured-cost-guard-harness.tar.gz): every harness
-  digest matches the latest Ryzen cost-guard report.
+  source digest in the original archive matches the latest Ryzen cost-guard
+  report.
 
-For either measured protocol, use a clean checkout of
-`242ea15fa032ee117b9113a7f3cd07cc6e9f0254`, overlay its archive at the checkout
-root, then build and run with the relevant numerical stack and commands above.
-The commit supplies the unchanged receiver/runtime, frozen input plans and
-tensor backend. The older EPYC full-retry policy is separately identified by
-its report and is not asserted to match either archive.
+The current archive links above point to sanitized replacements containing
+only `tools/triad-performance-cases.json`; they cannot supply the harness
+sources for replay. To reproduce either historical protocol, use its original
+source archive from Git revision
+[`357a509`](https://github.com/mirage335-colossus/pumpModem/tree/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance)
+with a clean checkout of `242ea15fa032ee117b9113a7f3cd07cc6e9f0254`, overlay
+the corresponding seven-file original harness at the checkout root, then
+build and run with the relevant numerical stack and commands above. That commit
+supplies the unchanged receiver/runtime, frozen input plans and tensor backend.
+The older EPYC full-retry policy is separately identified by its report and is
+not asserted to match either archive.
 
 The native exporter used for these measurements had SHA256
 `9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47`.

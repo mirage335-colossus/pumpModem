@@ -254,7 +254,8 @@ censored, this does not support a speedup ratio. Other GPU timing comparisons
 also have right-censored CPU references and are retained as such in the
 analysis.
 
-SHA-256 hashes of the archived study sources:
+SHA-256 hashes of the study sources in the original archive (historical source
+identities, not files in the current repacked archive):
 
 | Archived file | SHA-256 |
 |---|---|
@@ -265,24 +266,37 @@ SHA-256 hashes of the archived study sources:
 | `triad/tools/triad-static-frequency-study.py` | `5622df804c6ebd1c1233b761d62eeb84a10dd34c451743069f1778ac852b9363` |
 
 The [source provenance manifest](source-provenance.json) records the deployed
-archive hash and current-tree source hashes separately. The verified
-[technical archive](technical-results.tar.gz) and
-[file index](technical-results.index.json) cover 2,113 technical artifacts,
-including source snapshots, input manifests, export metadata,
-scores and result JSON. Raw projection and sample arrays are not included;
+archive hash and the source-tree hashes checked by the original study separately.
+The [original file index](technical-results.index.json) covered 2,113 technical
+artifacts, including source snapshots, input manifests, export metadata, scores
+and result JSON. The current [technical archive](technical-results.tar.gz)
+retains 2,006 data/report files after 107 source/build/driver files were removed.
+Its SHA-256 is `5994e39af4fd4aa86ca044bbb2be78dac94dedea9d1850e0ad389a4089315b13`;
+the [retirement manifest](../archive-content-retirement.json) records both
+container identities and verifies unchanged retained leaves. The original
+source payload remains available in the
+[historical archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-diversity/technical-results.tar.gz).
+Raw projection and sample arrays are not included;
 their hashes are recorded in the archived manifests/reports. Provider and
 account metadata are excluded.
 
-The [`artifact-checksums.json`](artifact-checksums.json) manifest binds the
-maintained report artifacts by hash.
+The [`artifact-checksums.json`](artifact-checksums.json) manifest records the
+original report, source and archive hashes. Its source entries describe retired
+files, and its archive entry identifies the original container; use the
+retirement manifest for the current repacked container hash. Retained report
+bytes are unchanged.
 
 The final analysis covered 164 reports with zero parse errors and zero strict
-score-NPZ versus report mismatches. Detailed analyses and tests are retained
-alongside the archive. The captured software checks include 33 noise-study
+score-NPZ versus report mismatches. Detailed analysis results and test receipts
+remain alongside the archive; the retired analysis/test programs belong to the
+historical source record. The captured software checks include 33 noise-study
 unit tests passing, seven static-frequency tests passing, and the focused triad
 CTest group passing 13/13. Negative parser/calibration cases intentionally
-print argparse usage/errors before their assertions pass. The numerical Python
-tests require NumPy, SciPy and PyTorch. Reproduce with:
+print argparse usage/errors before their assertions pass. The original numerical
+Python tests required NumPy, SciPy and PyTorch. Their recorded commands below
+also require the retired study sources and matching historical build. The two
+Python test suites are absent from the current checkout; today's `triad` group
+checks the current native stack and cannot reproduce this historical test result:
 
 ```sh
 python3 -m unittest discover -s tests -p 'test_triad_noise*.py' -v
@@ -311,7 +325,7 @@ counted as misses or successes.
   channel/noise conditions.
 - The fixed-duration detectors do not constitute a complete operational
   duration planner. The new triad configuration is not supported by the
-  current `triad_long --mode plan`; continuous rolling scheduling, outages,
+  study's then-current `triad_long --mode plan`; continuous rolling scheduling, outages,
   changing channel state and physical uncertainty still need integration into
   a planner with explicit reception and false-admission targets.
 - The false-admission accounting covers the declared fixed protocol, method

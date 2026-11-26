@@ -1,6 +1,6 @@
 # Native sampled parity receipt
 
-This is a bounded parity check for the isolated FFT timing implementation, not a modem sensitivity trial. The actual native binary was reused without rebuilding: `build/dev-cli/triad_long`, SHA-256 `9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47`.
+This is a bounded parity check for the isolated FFT timing implementation, not a modem sensitivity trial. The actual native binary was reused without rebuilding: `build/dev-cli/triad_long`, SHA-256 `9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47`. The receipt identifies the binary used for this historical run; the matching `tools/triad-long.cpp` source is no longer present in the current tree ([pinned source](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/tools/triad-long.cpp)).
 
 ## Inputs and scope
 
@@ -26,7 +26,14 @@ The original rate1200 8-second fixture did not actually cross a private-tile bou
 
 ## Reproduction
 
-The recorded fixture-generation commands are `python local-evidence/triad-fft-timing/native-parity/run_parity.py` (flat and exploratory rate640), `python local-evidence/triad-fft-timing/native-parity/run_rate1200.py` (8-second stress fixture), and `python local-evidence/triad-fft-timing/native-parity/run_rate1200_wait40.py` (40-second burst fixture). The longer-capture receiver commands and exact accepted source hash are in `receiver-run-receipt.json`; the original invocations are also retained in their logs. The raw verification command is:
+The recorded fixture-generation commands are `python local-evidence/triad-fft-timing/native-parity/run_parity.py` (flat and exploratory rate640), `python local-evidence/triad-fft-timing/native-parity/run_rate1200.py` (8-second stress fixture), and `python local-evidence/triad-fft-timing/native-parity/run_rate1200_wait40.py` (40-second burst fixture). These commands are historical. All five
+associated scripts (`run_parity.py`, `run_rate1200.py`,
+`run_rate1200_wait40.py`, `run_fft_wait40.py` and `verify_parity.py`) were
+removed from the current tree; their original bytes remain in the
+[pinned Git record](https://github.com/mirage335-colossus/pumpModem/tree/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-fft-timing/parity).
+The longer-capture receiver commands and exact accepted source hash are in
+`receiver-run-receipt.json`; the original invocations are also retained in
+their logs. The raw verification command was:
 
 ```sh
 /tmp/triad-weak-env/bin/python local-evidence/triad-fft-timing/native-parity/verify_parity.py
@@ -36,7 +43,7 @@ The scripts use one CPU thread and cap each child at 60 seconds, with native exp
 
 ## Provenance and reproduction limits
 
-`source-hashes.json` binds the FFT and native binary versions to each result. The copied Python scripts are exact evidence copies from the ignored local run directory; their original invocations refer to `local-evidence/triad-fft-timing/native-parity/`. The scripts are not standalone from this promoted documentation directory because their generated capture arrays were intentionally excluded. To reproduce, rebuild the three sampled workspaces with `build/dev-cli/triad_long` using the recorded `--mode export-sampled` and `--mode export-group-stats` argument arrays in the original native status/log receipts, preserving each fixture's seed roots and explicit arrival prior. Then run the scoring and raw-product verifier with the listed source hashes. The promoted result records observation/mask/template hashes and all parity metrics; it does not claim a portable capture archive.
+`source-hashes.json` binds the FFT and native binary versions to each result. The original package included exact Python evidence copies from the ignored local run directory; their invocations refer to `local-evidence/triad-fft-timing/native-parity/`. Those copies were later removed as noted above. Even the original package was not standalone because generated capture arrays were intentionally excluded. The historical reproduction procedure rebuilt the three sampled workspaces with `build/dev-cli/triad_long` using the recorded `--mode export-sampled` and `--mode export-group-stats` argument arrays in the original native status/log receipts, preserving each fixture's seed roots and explicit arrival prior. It then ran the scoring and raw-product verifier with the listed source hashes. That procedure requires the historical sources and matching build. The promoted result records observation/mask/template hashes and all parity metrics; it does not claim a portable capture archive.
 
 ## Independent final-source review replay
 

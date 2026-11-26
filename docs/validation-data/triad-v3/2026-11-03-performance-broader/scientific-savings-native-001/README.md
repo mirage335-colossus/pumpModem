@@ -23,12 +23,22 @@ gzip payloads reconstruct each original file with its original indentation and
 newline; original byte counts and SHA256 digests are checked. The plan's semantic
 digest starts `fda3d09f`; its distinct file digest starts `5ef04c05`.
 
-`matching-source.tar.gz` contains the exact experiment script (`d8a594ea`) and
-the five helper/config files identified by its plan. No later direct-route
-implementation or active GPU result is included. Native executables are omitted;
-their hashes, build provenance, arguments, input seeds, and historical anchor
-remain in the records. `reproduction.json` is a derived recipe, explicitly not a
-retained historical outer command.
+The original `matching-source.tar.gz` (SHA256
+`d6bb1f14f7f29eaadf8da560f70a0354a76f11357c03b391a56b628b57c8a833`) contained
+the exact experiment script (`d8a594ea`) and the five helper/config files
+identified by its plan. Its current sanitized replacement retains one member;
+five source members were removed. The
+[retirement manifest](../../archive-content-retirement.json) records the
+current archive SHA256 as
+`00a59ac140aa25771162ab492adcebbce5b8cda4d92c556f69f621b9f9ebc71d` and lists
+the removed files. No later direct-route implementation or active GPU result is
+included. Native executables are omitted; their hashes, build provenance,
+arguments, input seeds, and historical anchor remain in the records.
+`reproduction.json` is a derived recipe, explicitly not a retained historical
+outer command.
 
 This independent append leaves the earlier scientific bundle unchanged. No
-benchmark was rerun to create it. Run `python3 verify.py` for integrity checks.
+benchmark was rerun to create it. The historical `python3 verify.py` command
+is not available in the current checkout; `SHA256SUMS` and the preservation
+records retain the archive's integrity evidence.
+The README checksum in `SHA256SUMS` predates these status clarifications.

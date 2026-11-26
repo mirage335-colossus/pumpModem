@@ -16,7 +16,11 @@ The full matrix snapshot is in `provenance/tools/triad-performance-coverage.json
 
 ## Reproduction command
 
-The recorded capture command was:
+The recorded capture command is historical: the
+`tools/triad_perf_python_coverage.py` runner is no longer present in this
+checkout. Its original source is available at the
+[captured source snapshot](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-complete/coverage/python/attempt-04-dependency-closed/sources/tools/triad_perf_python_coverage.py).
+The command was:
 
 ```sh
 taskset -c 6,8 /tmp/triad-weak-env/bin/python \
@@ -26,4 +30,15 @@ taskset -c 6,8 /tmp/triad-weak-env/bin/python \
   --output local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/summary.json
 ```
 
-The raw `.coverage` database and coverage JSON, captured test logs, all 16 coverage-source snapshots, the 19 matrix-declared source dependencies, 21 test source snapshots, and the collector source are retained here. `SHA256SUMS` covers the archived files.
+The raw `.coverage` database and coverage JSON, captured test logs, and
+source/dependency hash provenance are retained here. The original package also
+contained 16 coverage-source snapshots, 19 matrix-declared source dependencies,
+21 test-source snapshots and the collector source. These overlapping categories
+covered 42 source files, which were
+later removed under the material-retention policy. The test logs and provenance
+JSON are receipts, not copies of the `.py` files. The
+[retirement manifest](../../../../archive-content-retirement.json)
+records the removed paths. The local `SHA256SUMS` is the original capture
+checksum list, including its original README digest; that document digest
+predates this clarification. The recorded coverage artifact hashes remain as
+captured.

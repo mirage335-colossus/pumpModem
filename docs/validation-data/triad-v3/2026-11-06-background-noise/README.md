@@ -94,9 +94,16 @@ explicit narrow reuse of cable evidence, not an exact-final-binary cable claim.
   check could not operate under the sandbox's ptrace; its failed environment
   log is retained separately. The same test passed outside that tracing layer.
 
-Run `tools/triad_noise_qualification.py --output NEW_DIR` in the prepared
-research environment for the cheap digital check. Add `--live --live-only
---device hw:1,0` for the four short physical captures. Use a fresh directory.
+The commands below are the original qualification recipes. The current
+sanitized `evidence.tar.gz` removed `source/tools/triad_noise_qualification.py`
+and its associated source snapshot, and the script is also absent from the
+current checkout. The commands cannot be run from either. The original script is in the
+[pre-retirement archive at source revision
+357a509](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-background-noise/evidence.tar.gz).
+With that historical source in the prepared research environment, the cheap
+digital check used `tools/triad_noise_qualification.py --output NEW_DIR`.
+Adding `--live --live-only --device hw:1,0` selected the four short physical
+captures. Each run used a fresh directory.
 Native watt-reference reproducer:
 
 ```sh

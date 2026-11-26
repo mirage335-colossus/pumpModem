@@ -189,8 +189,16 @@ qualified.
 
 ## Reproduction and cheap regression
 
-Use the prepared NumPy/SciPy research environment and an already configured
-compatible build. These commands do not access an audio device:
+The historical checks used a prepared NumPy/SciPy research environment and an
+already configured compatible build; they did not access an audio device.
+
+These are the original qualification recipes. The current sanitized
+`evidence.tar.gz` removed `source/tools/triad_fullrate_noise_qualification.py`
+and the matching source snapshot, and the script is also absent from the
+current checkout. The command cannot run from either. The historical script is in the
+[pre-retirement archive at source revision
+357a509](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-background-noise-fullrate/evidence.tar.gz).
+With that source and a compatible configured build, the recorded check was:
 
 ```sh
 ./build.sh configure --cli --web-worker --build-dir build/dev-cli
@@ -204,7 +212,9 @@ python3 tools/triad_fullrate_noise_qualification.py \
   --tool build/dev-cli/background_noise --output local-evidence/noise-fullrate-new
 ```
 
-Use a fresh output directory. Routine validation should combine the focused
-shared-output/provider/CLI contracts with this short bandwidth check; do not
-repeat historical weak-signal, multi-day or GPU campaigns merely to qualify
-noise placement. No GPU or cloud resources were needed for this work.
+The historical check used a fresh output directory. Its routine validation
+combined focused shared-output/provider/CLI contracts with the short bandwidth
+check; it did not repeat weak-signal, multi-day or GPU campaigns to qualify
+noise placement. For current checks, follow the maintained
+[background-noise guide](../../../triad-background-noise.md). No GPU or cloud
+resources were needed for this work.

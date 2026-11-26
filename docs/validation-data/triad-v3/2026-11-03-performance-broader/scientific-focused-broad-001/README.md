@@ -21,17 +21,28 @@ hardware-health pass. The original incomplete CPU/GPU reports remain unchanged;
 the CPU run's 1684.791382 s and this component's 206.889412 s are not one measured
 complete-run wall time.
 
-The archive retains both wrappers, expected-source sidecars, all 14 measured
-source files, additional declared native/worker identities, raw JSONL responses,
-precision/preflight/measurement receipts, endpoint guards, and original anchors.
+The original record retained both wrappers, expected-source
+sidecars, all 14 measured source files, additional declared native/worker
+identities, raw JSONL responses, precision/preflight/measurement receipts,
+endpoint guards, and original anchors. Archive cleanup later removed 23 source
+files from `matching-source.tar.gz`, leaving two JSON configuration/identity
+files. The loose `verify.py` and compressed `run.py.gz` were removed separately;
+source indexes, hashes, receipts and results remain in this record. See the
+[retirement manifest](../../archive-content-retirement.json).
 `source-index.json.gz` binds 25 exact file versions at 168 recorded identities.
+The retained [SHA256SUMS](SHA256SUMS) includes the original README digest; it
+predates this source-availability clarification. The evidence and artifact
+hashes themselves are unchanged.
 The wrappers and sidecars were byte-identical on CPU/GPU. Prior health reports are
 linked by their original digests in `external-inputs.json`. Physical arrays and
 executables are omitted. The original focused-check archive did not include a
 separate array audit; the subsequent cache assembly below records one.
 
-No receiver work was rerun while archiving. Run `python3 verify.py` for exact-byte,
-source, sidecar, anchor, and outcome checks.
+No receiver work was rerun while archiving. The original `python3 verify.py`
+command is a historical recipe: its verifier and helper `run.py.gz` were
+removed from the current record. The verifier is available in the
+[pinned source history](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-broader/scientific-focused-broad-001/verify.py)
+and the helper's original archive path is in that same [pinned record](https://github.com/mirage335-colossus/pumpModem/tree/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-broader/scientific-focused-broad-001/records/focused-broad-cache-repair-script). The command and its value as audit provenance are retained; it is not runnable from this checkout.
 
 The separate [cache assembly receipt and procedure](cache-assembly/README.md)
 records a reusable GPU cache assembled after all measurements. Its 20 public

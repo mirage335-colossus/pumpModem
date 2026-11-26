@@ -404,11 +404,14 @@ The Git base is `eab77e0754d401c4b1e123e3b2e68d8dda4eb133`. The legacy campaign
 native exporter SHA256 is `3d94458f4b85c73bc9b3364477c550da6cde96dfdd7841f88148588aebc3e4fa`;
 the corrected-power v5 binary is
 `41662b4b302d77821353f03245c8c328362cf5e4a88b774adb204273332dff77`.
-The compact archive contains exact v1/v2/v3/v4/v5 source overlays, protocol/input/gate
-identities, raw JSONL results, failed receipts, analysis scripts and summaries.
-Large regenerable I/Q arrays and the duplicate full source tree are omitted;
-their hashes and production commands remain in the input inventory. Source
-versions must not be mixed when reproducing a historical score.
+The original campaign archive inventory listed exact v1/v2/v3/v4/v5 source
+overlays, protocol/input/gate identities, raw JSONL results, failed receipts,
+analysis scripts and summaries. The retirement manifest lists implementation
+source files and analysis scripts removed from the current archive; their
+identities remain in the historical inventories. Large regenerable I/Q arrays and the
+duplicate full source tree were also omitted, with their hashes and production
+commands recorded in the input inventory. Source versions must not be mixed
+when interpreting a historical score.
 
 The original compact archive was 72,063,592 bytes and contained 9,286 entries,
 including source overlays, protocol/input/gate identities, raw JSONL results,

@@ -6,7 +6,7 @@
 
 The latest capture is [`attempt-04-dependency-closed`](attempt-04-dependency-closed/summary.json). It ran coverage.py 7.17.1 with Python 3.13.5, Torch 2.8.0+cpu, and CPUs 6 and 8. All **16/16 focused test files passed** within the 60-second per-file limit; the full instrumented invocation took 53.43 seconds. All 16 expected Python source rows were present.
 
-Before and after the instrumented run, the collector hashed the frozen coverage matrix, every runtime/helper source in the matrix-derived 19-path union, all selected and matrix-declared test sources, the declared study fixture, and the collector itself. The matrix SHA256 was unchanged at `1860b045b4078da56db5b8928cbb3b71660844a94d0c5da3ddb1eab5382e5a33`; dependency and test hashes were stable. The report records 41 dependency hashes for the matrix union plus declared tests/helpers and retains pre/post maps. The exact matrix snapshot, dependencies, 21 test source snapshots, runtime rows, raw coverage data, and per-file logs are archived beside the report.
+Before and after the instrumented run, the collector hashed the frozen coverage matrix, every runtime/helper source in the matrix-derived 19-path union, all selected and matrix-declared test sources, the declared study fixture, and the collector itself. The matrix SHA256 was unchanged at `1860b045b4078da56db5b8928cbb3b71660844a94d0c5da3ddb1eab5382e5a33`; dependency and test hashes were stable. The report records 41 dependency hashes for the matrix union plus declared tests/helpers and retains pre/post maps. At capture time, the package also contained the exact matrix snapshot, dependencies, 21 test-source snapshots, runtime rows, raw coverage data, and per-file logs. The 17 source copies from attempt 03 and 42 from attempt 04 were later removed; their recorded hashes and reports remain, while the source contents do not. See the [retirement manifest](../../../archive-content-retirement.json).
 
 The performance wrapper's `check_coverage` accepted this receipt: all expected source rows matched, no declared dependencies were missing or changed, and `declared_dependency_status` was `matched`. The matrix hash is stored as capture provenance, separate from `dependency_sha256`, so later evidence/status-only edits to the matrix do not invalidate the captured DSP dependency set. This hash set covers the declared matrix union and identified tests/helpers; it is **not a claim of full dynamic import closure**.
 
@@ -18,7 +18,7 @@ The original 16-file invocation **failed**: 15 test files passed, while `test_tr
 
 This is split-run evidence: 15 unchanged prior passing files plus the corrected ray test. It is not one clean 16-file invocation. The attempt-02 raw `.coverage` database was amended by the focused append before the attempt-03 provenance copy was made. The original failure is preserved in the normalized test record and log; attempt-03 copies the amended raw database and JSON report.
 
-The follow-up's exact test source SHA256 is `982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3`; its runtime source SHA256 is `ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2`. All 16 runtime source snapshots in `attempt-03-reconciled/sources/tools/` were checked against their report hashes. The original test-source hashes were not captured: the 15 original test files and the pre-correction ray test have no source hash binding. No original test hash is inferred here. The copied ray test snapshot is the corrected follow-up version only.
+The follow-up's exact test source SHA256 is `982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3`; its runtime source SHA256 is `ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2`. The original attempt-03 audit checked all 16 runtime source snapshots in `attempt-03-reconciled/sources/tools/` against their report hashes; those source copies were later removed as noted below. The original test-source hashes were not captured: the 15 original test files and the pre-correction ray test have no source hash binding. No original test hash is inferred here. The copied ray test snapshot was the corrected follow-up version only.
 
 | Runtime source | Covered / executable arcs | SHA256 |
 |---|---:|---|
@@ -43,7 +43,12 @@ These are Python control-flow arcs. They do not establish semantic branch comple
 
 ## Reproduction record
 
-The original command was:
+The original collection command is retained as historical provenance; its
+`tools/triad_perf_python_coverage.py` runner is not present in this checkout.
+A later historical collector version is available at the
+[pinned revision](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/tools/triad_perf_python_coverage.py);
+it is not an exact-source attestation for this earlier command.
+The command was:
 
 ```sh
 taskset -c 6,8 /tmp/triad-weak-env/bin/python \
@@ -52,6 +57,11 @@ taskset -c 6,8 /tmp/triad-weak-env/bin/python \
   --output local-evidence/triad-performance-complete/python-coverage/attempt-02-main/summary.json
 ```
 
-That command was run before the ray test correction; the pre-correction test source was not snapshotted or hashed, so the original failure is not byte-for-byte reproducible from the archived test source. The focused corrected follow-up used coverage.py 7.17.1, `--branch --append`, the exact 16 runtime source includes, and `tests/test_triad_ray_frequency.py` on CPUs 6 and 8. Its raw appended database is retained. The corrected test source and runtime source snapshots are archived under `attempt-03-reconciled/sources/`.
+That command was run before the ray test correction; the pre-correction test source was not snapshotted or hashed, so the original failure is not byte-for-byte reproducible from the archived test source. The focused corrected follow-up used coverage.py 7.17.1, `--branch --append`, the exact 16 runtime source includes, and `tests/test_triad_ray_frequency.py` on CPUs 6 and 8. Its raw appended database is retained. The corrected test and runtime source snapshots were initially archived under `attempt-03-reconciled/sources/`; those 17 files were later removed. Their recorded hashes, logs and coverage results remain, but the source snapshots are not in the current checkout. See the [retirement manifest](../../../archive-content-retirement.json).
 
-`SHA256SUMS` covers the archived summary, raw database/JSON, logs, and available source snapshots.
+The historical [package checksum list](../../SHA256SUMS) retains hash entries
+for source snapshots that were removed, alongside checksums for the summary,
+raw database/JSON and logs. The recorded source hashes preserve identities, not
+source contents. Its README entry is the digest of the original document,
+before this status clarification; the captured result and artifact hashes are
+unchanged.

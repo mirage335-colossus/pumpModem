@@ -115,10 +115,15 @@ endpoints, operational logs and billing records are excluded. The archived
 analysis keeps allocation records distinct from the SHA-256 hashes of those
 records.
 
-The archive digest is recorded in the adjacent
+The current archive digest is recorded in the adjacent
 [`triad-ci-null-64-scientific.tar.xz.sha256`](triad-ci-null-64-scientific.tar.xz.sha256)
-file. After extracting the archive, replay the frozen analyzer with the pinned
-Python 3.12 / SciPy environment:
+file. The current archive retains the frozen inputs and observations but omits
+the frozen analyzer and build overlay. The command below records the original
+replay recipe; it is not runnable from the current sanitized archive. The
+historical analyzer is available in the
+[pre-retirement archive at source revision 357a509](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-04-ci-null/triad-ci-null-64-scientific.tar.xz).
+With that original archive and its pinned Python 3.12 / SciPy environment,
+the recorded replay was:
 
 ```sh
 python3 frozen-inputs/triad_perf_ci_null-frozen-886395.py analyze \

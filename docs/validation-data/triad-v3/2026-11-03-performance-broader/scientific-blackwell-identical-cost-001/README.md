@@ -32,6 +32,16 @@ metadata applicability differences, not a measured forecast-residual failure.
 
 `source-index.json.gz` binds 22 exact source versions at 100 recorded identities,
 including wrapper `68940bb2` and the six measured helper files. Gzip payloads
-reconstruct original bytes and SHA256; sources are in `matching-source.tar.gz`.
-No receiver work was rerun. Run `python3 verify.py` for integrity checks. Later
-focused broad-FFT evidence belongs in a separate append.
+reconstruct original bytes and SHA256. The original `matching-source.tar.gz`
+had SHA256
+`b683f8fe1249a537e37fda7afc11ca1f9d14722f9b3e6dc00e41a7241f7ce938` and
+contained those source bytes; it is available at the
+[pinned historical revision](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-broader/scientific-blackwell-identical-cost-001/matching-source.tar.gz).
+The current checkout has no replacement archive: the
+[retirement manifest](../../archive-content-retirement.json) records 22 removed
+source members, zero retained leaves, and no sanitized archive hash. The
+original `python3 verify.py` command is not present in this checkout;
+`SHA256SUMS` and the preservation records remain historical integrity evidence.
+The README checksum in `SHA256SUMS` predates these status clarifications.
+No receiver work was rerun. Later focused broad-FFT evidence belongs in a
+separate append.

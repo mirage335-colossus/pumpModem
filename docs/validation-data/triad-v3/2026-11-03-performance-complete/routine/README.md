@@ -90,7 +90,7 @@ identities, work counters and intervals are in
 adjacent reports. Use the [guide](../../../../triad-performance.md) and
 [matrix](../../../../triad-performance-matrix.md) to select an affected case.
 Do not run this fifty-minute direct campaign for a documentation or reporting
-change. The measured complete invocation used:
+change. The original measured complete invocation used this historical command:
 
 ```sh
 taskset -c 2,4 python tools/triad_perf_complete.py \
@@ -111,15 +111,30 @@ is not an automatic transfer. The recorded report contains the concrete local
 paths and baseline revision.
 
 `preservation.json` lists exact uncompressed and compressed hashes for sixty
-raw records. `measured-source.tar.gz` preserves 95 measured source/protocol
-members. Native binary hashes are recorded; binary bytes and generated I/Q
+raw records. The original `measured-source.tar.gz` inventory contained 95
+measured source/protocol members. Its current sanitized archive retains five
+members and removes 90; the
+[retirement manifest](../../archive-content-retirement.json) records the
+original SHA256 `b4faff6e4603c309ad6ae829792c4bcdf6578972bfc705aa1094a0e60de73e40`,
+current SHA256 `a886a1822b946d5e26589016c091339b9e76ac8c1a6ac8a1064814786a82eefc`,
+and removed paths. The historical command above invokes
+`tools/triad_perf_complete.py`, which is absent from this checkout. The original
+archive is also available at the
+[pinned historical revision](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/measured-source.tar.gz);
+that source link does not by itself reproduce the campaign environment or
+results. Native binary hashes are recorded; binary bytes and generated I/Q
 fixtures are omitted. Later reporting/coverage fixes belong to the separate
-final-code snapshot and must not be relabeled as this measured source.
+historical final-code snapshot and must not be relabeled as this measured source.
 
-Run `python verify.py` from this directory to verify bytes without a receiver
-execution. `python reclassify.py` applies the current wrapper's reporting rules
-to the archived timings and writes `classification-replay.json`. The retained
-replay marks warm decisions complete and full scope incomplete. It deliberately
-retains the original coverage receipts; the separately reviewed fresh coverage
-receipts are documented in the parent record. Neither command performs a new
-timing experiment or upgrades a failed prediction model.
+The historical `python verify.py` and `python reclassify.py` commands are not
+present in this checkout. The former checked exact bytes without receiver work;
+the latter applied the then-current wrapper's reporting rules to archived
+timings and wrote `classification-replay.json`. That file retains the reporting
+replay: warm decisions are marked complete and full scope incomplete. It
+deliberately retains the original coverage receipts; the separately reviewed
+fresh coverage receipts are documented in the parent record. The original
+commands did not perform a new timing experiment or upgrade a failed prediction
+model.
+
+The [parent checksum list](../SHA256SUMS) retains the original README digest,
+which predates these status clarifications; the evidence files are unchanged.

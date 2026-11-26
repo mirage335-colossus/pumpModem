@@ -75,6 +75,13 @@ production playback remain different experiments.
 
 ## Historical local gain comparison
 
+At the time of the original comparison, the campaign source was loaded from
+its exact archived bytes. The compact archive has since been reduced under the
+material-retention policy: 54 source, script and build entries were removed.
+The retained archive manifest and report preserve the identities and outcomes
+that remain; they do not make every original command runnable from this
+checkout. See the [retirement record](../archive-content-retirement.json).
+
 The original 72 successful-capture signal observations were compared with five
 exactly re-quantized forward predictions at signal-gain offsets −1, −0.5, 0,
 +0.5 and +1 dB. Original physical scores, receiver and gates remain unchanged;
@@ -223,23 +230,36 @@ The final **98 focused Python tests passed in 3.40 seconds**; eight strong-signa
 functional checks also selected the correct bit in both frontends. These checks
 support the implementation and do not replace physical evidence.
 
-The [compact archive](compact-evidence.tar.gz) contains the protocols, source
-snapshots, gates, per-record outcomes, raw diagnostic estimates and reproduction
-scripts. The [manifest](artifact-manifest.json) binds every retained entry.
-Large raw PCM/native arrays/workspaces remain in ignored
+The [compact archive](compact-evidence.tar.gz) contains the protocols, gates,
+per-record outcomes, raw diagnostic estimates, reproduction material and
+source-identity records. The [original manifest](artifact-manifest.json) binds
+the original container and its entries, including files subsequently removed.
+Cleanup removed 54 source, script and build files from the
+original package; their names and hashes are recorded in the
+[archive-retirement manifest](../archive-content-retirement.json).
+Large raw PCM/native arrays/workspaces were kept outside the package in ignored
 `local-evidence/triad-live-margin-bounds-001/`, with a streamed hash inventory.
 Their historical physical noise cannot be regenerated from seeds. Native fixture
 and model provenance also refers to the preceding reception study.
 
-Fast hardware-free checks:
+The following fast hardware-free test command is retained from the original
+campaign. Its `test_triad_live_*.py` test family was retired with the captured
+source files, so this is historical provenance rather than a current test
+command:
 
 ```sh
 OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 -m unittest discover \
   -s tests -p 'test_triad_live_*.py'
 ```
 
-Rescore the existing independent capture with the final frozen calibration,
-using a fresh output directory and the matching numerical environment:
+The following is the original rescore recipe, retained as historical provenance.
+Its `tools/triad_live_frontend_compare.py` runner is no longer in the current
+source tree. The script is available at the
+[pinned historical source revision](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/tools/triad_live_frontend_compare.py).
+It is not a current replay command. The referenced `local-evidence/` paths are
+local working data and may or may not remain on a given machine. The recipe
+records how the existing independent capture was rescored with frozen
+calibration:
 
 ```sh
 OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 tools/triad_live_frontend_compare.py \
@@ -250,10 +270,14 @@ OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 tools/triad_live_frontend_compa
   --output local-evidence/triad-live-margin-bounds-rescore
 ```
 
-The physical preparer is `tools/triad_live_level_probe.py`; repeated-waveform
-diagnosis is `tools/triad_live_level_analysis.py`. New physical records require
+The original physical preparer was `tools/triad_live_level_probe.py` and
+repeated-waveform diagnosis used `tools/triad_live_level_analysis.py`. These
+source files were also removed from the current tree; their historical versions
+remain at the [pinned probe](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/tools/triad_live_level_probe.py)
+and [analysis tool](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/tools/triad_live_level_analysis.py).
+Under the original procedure, new physical records required
 explicit `triad_live_alsa.py --live --exclusive` raw endpoints and complete
-continuity receipts. The frontend comparison also requires the receipt's exact
+continuity receipts. The frontend comparison also required the receipt's exact
 transmitted-input hash. Legacy native receipts lacking that binding are not
 accepted by this new comparison path. Use the frozen plans and
 [Live/Duplex guide](../../../triad-live-duplex.md) rather than rerunning old long

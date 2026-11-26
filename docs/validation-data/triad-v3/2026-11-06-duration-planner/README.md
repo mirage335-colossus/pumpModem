@@ -1,10 +1,12 @@
 # Weak-receiver duration selection: theory and brief sampled validation
 
-This study adds an automatic, **provisional** duration selector for the isolated
-Helper-assisted weak receiver. It replaces manual duration selection when using
-`tools/triad_weak_plan.py --target-cn0 …`; it does not change the ordinary Robust
-receiver or reinterpret the native exporter's noise-injection `--cn0` option.
-See the maintained [algorithm and operating guide](../../../triad-duration-planning.md).
+This study evaluated an automatic, **provisional** duration selector for the
+isolated Helper-assisted weak receiver. At the time, the experimental Python
+interface was `tools/triad_weak_plan.py --target-cn0 …`; that implementation
+has since been retired. Current native duration planning is described in the
+maintained [algorithm and operating guide](../../../triad-duration-planning.md).
+The study did not change the ordinary Robust receiver or reinterpret the native
+exporter's noise-injection `--cn0` option.
 
 The selector uses received energy, finite-span channel covariance, original
 search size, operational attempt/duration budgets, declared outages, and the
@@ -149,21 +151,37 @@ establishing that these longer durations are physically necessary or optimal.
 
 ## Reproduction, cost and remaining work
 
-`summary.json` and `evidence.tar.gz` retain forecasts, protocol, commands,
-raw JSON results, model-reference script, initial failures, component-energy
-checks, source/binary/input hashes and frozen pre-correction sources. Base
+`summary.json` and the current sanitized `evidence.tar.gz` retain forecasts,
+protocol, recorded commands, raw JSON results, model-reference results, initial
+failures, component-energy checks, and source/binary/input hashes. The archive
+contains the data record; it removed executable source such as
+`model-reference.py`, `prepare.py`, the frozen receiver/model scripts and the
+`source-current/` tree. Those original source files are in the
+[pre-retirement archive at source revision
+357a509](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-duration-planner/evidence.tar.gz).
+The base
 revision is `e17d2c02b7a7cf17f4b2881a214749a93b35d2f5` plus the recorded source
 changes. HF was measured before the fallback correction; its narrowed-Helper
 branch is unchanged and covered by focused tests/review. Stable replay/live
 used the corrected branch. This source transfer is explicit, not a claim that
 the final source repeated every physical test.
 
-Large I/Q/PCM files remain in ignored `local-evidence/triad-duration-planner/`.
-The compact archive records their hashes. Ephemeral AES keys are not retained;
-fresh reruns reproduce the procedure/distribution, not the exact noise bytes.
-The retained local PCM supports exact replay of this run.
+The independent covariance calculation is now available separately as the
+[recovered mathematical reference](#recovered-covariance-calculation). This
+recovery does not restore the experimental receiver or alter the archive.
 
-Cheap routine checks (57 tests,0 failures/errors/skips;2.01s including imports):
+Large I/Q/PCM files were kept in ignored
+`local-evidence/triad-duration-planner/`; the compact archive records their
+hashes. Ephemeral AES keys are not retained; fresh reruns reproduce the
+procedure/distribution, not the exact noise bytes. The original local PCM
+supported exact replay of this run.
+
+The following 57-test check was a historical validation (0 failures, errors or
+skips; 2.01s including imports). Its Python test modules and corresponding
+source implementation were removed from the current checkout and sanitized
+archive. The original source snapshot is linked above; use the current
+[native integration checks](../../../validation.md#native-codec-and-measurement-migration)
+for present-day validation:
 
 ```sh
 PYTHONPATH=tools:tests OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 \
@@ -173,11 +191,12 @@ PYTHONPATH=tools:tests OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 MKL_NUM_THREADS=
   test_triad_segmented_fft test_triad_realtime_fft
 ```
 
-Use the maintained wrapper example for normal planning; full native arguments
-and independent seeds are in archived `protocol.json`/`prepare.py`. Run sampled
-qualification only when a changed model/receiver path warrants it. Reuse the
-compatible `build/dev-cli` binaries; no native code changed in this study.
-The existing ordinary receiver's integration/regression campaign was not run.
+The current sanitized `evidence.tar.gz` retains `protocol.json`, but removed
+`prepare.py`; the full native arguments and independent-seed implementation
+are in the historical source linked above. The original protocol recommended
+sampled qualification only when a changed model/receiver path warranted it.
+The study reused compatible `build/dev-cli` binaries; no native code changed in
+this study. Its ordinary receiver integration/regression campaign was not run.
 
 LocalCPU is Ryzen5 PRO5650U with two numerical threads. HF planned preparation
 cost8.20CPU s and prepared software reception80.64CPU s (including ingress,
@@ -194,3 +213,57 @@ missed-hop outage distributions, overlapping-ray covariance, multi-day sampled
 export/receiver operation, and independent many-seed reliability validation.
 The planner exposes these limits rather than converting them into an arbitrary
 fixed dB margin or claiming a configured probability has been achieved.
+
+## Recovered covariance calculation
+
+The standalone [reference program](theory/model-reference.py) and
+[historical mathematical functions](theory/historical_model.py) reproduce the
+six known-covariance reference conditions above. The
+[native-plan fixture](theory/hf-native-plan.json) and
+[original 100,000-trial results](theory/model-reference.json) are exact copies
+from the original archive at revision
+`357a50970a0c6214eeaade7c5704bbc39abd4b79`; the archive itself is unchanged.
+Its original SHA-256 is
+`97490190ec0bd8007e468d2a906bc1a6fb1661be189867cf977e527011328251`;
+the [retirement manifest](../archive-content-retirement.json) distinguishes
+that original package from the current repacked archive.
+
+The recorded results bind to `frozen-duration-model.py`, SHA-256
+`7ab98c534f0c83b9f57894cda457706ec3c0b41f3f00919be168424df07fed06`.
+The recovery retains its four numerical functions verbatim and extracts only
+the public-grid threshold arithmetic needed by this fixed one-bit fixture:
+two duration alternatives, a 30-second origin allowance, two bit labels and
+three coherence alternatives. It does not substitute the later
+`source-current/tools/triad_duration_model.py` or expose a general receiver
+planning API. The recovered program records original member hashes separately
+from its current source hashes and uses a distinct output schema.
+
+The model remains a 512-point covariance discretization per independently
+resolved ray, with two Gaussian-spectrum rays, known covariance and true-atom
+detection. Its equal-mode Gamma prediction is a surrogate; its bound does not
+qualify waveform acquisition, selective modulation, moving delay, audio or
+receiver success probability.
+
+From the repository root, with Python, NumPy and SciPy installed, run:
+
+```sh
+cd docs/validation-data/triad-v3/2026-11-06-duration-planner/theory
+PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 -m unittest -v test_model_reference.py
+PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 model-reference.py --output /tmp/duration-reference-check.json
+```
+
+The default performs no Monte Carlo draws. It computes all six deterministic
+reference rows and marks sampled misses and intervals unavailable. An explicit
+`--trials 257` gives a small seeded smoke check; `--trials 100000` is the
+historical budget, not a routine validation requirement. A smaller budget
+changes subsequent random-draw positions and cannot reproduce the original
+100,000-trial counts. Always choose a fresh output path; the historical input
+and result files are protected from overwrite by the command.
+
+Four focused recovery tests passed with NumPy 2.5.4 and SciPy 1.18.1. All 78
+deterministic numeric fields across six points agreed within `5.69e-14`
+absolute, and all 12 original confidence-interval endpoints agreed at relative
+tolerance `5e-12` and absolute tolerance `1e-13`. All six 257-draw rows matched
+the original program with only its trial budget reduced. The full historical
+Monte Carlo run was not repeated. These checks validate the mathematical
+recovery, not the operating receiver or its capacity.

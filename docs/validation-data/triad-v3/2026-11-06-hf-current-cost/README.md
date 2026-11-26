@@ -4,8 +4,8 @@ For shorter transmission at the physical link's approximately 20 dB-Hz DATA
 C/N₀, see the [11.6-second high-SNR follow-up](../2026-11-06-hf-high-snr-cost/README.md).
 This report retains the separate 46.4-second allocation planned for 8 dB-Hz.
 
-This is a fresh cost measurement on **AMD Ryzen 5 PRO 5650U**, using two
-numerical-library threads, source `7ac6bc22`, and the current encrypted
+This is the recorded 6 November 2026 cost measurement on **AMD Ryzen 5 PRO 5650U**, using two
+numerical-library threads, source `7ac6bc22`, and the then-current encrypted
 independent-pattern/4-APSK waveform. It answers the specified physical
 40 W Helper / 4 W DATA / 180 dB link question. It is not a throughput
 qualification for arbitrary messages, a physical cable test, or ordinary Robust
@@ -170,14 +170,20 @@ the locally retained PCM, because its temporary key is intentionally not saved.
 
 The [compact archive](evidence.tar.gz) accompanying this report retains raw measurement reports,
 native generation argv/times, public/received manifests, input hashes, source
-hashes, plans and the measurement wrapper. Large I/Q, raw templates and PCM stay
-in ignored `local-evidence/triad-hf-current-cost/`. Use the archived source
-revision and build via `./build.sh`; the measured native exporter SHA-256 is
+hashes and plans. The measurement wrapper was removed along with the other
+archived scripts; the [retirement manifest](../archive-content-retirement.json)
+records four removals and 49 unchanged retained data leaves. Large I/Q, raw
+templates and PCM were kept in ignored `local-evidence/triad-hf-current-cost/`,
+outside this compact package. The original recipe used the archived source
+revision and `./build.sh`; the measured native exporter SHA-256 is
 `76e059e8a17452a5e7955bd01544a8f030bf9b85b55b7437df622fd2142210f4`.
 
-For a fresh reproduction, extract only `generate.py`, `generate_scheduled.py`
-and `measure.py` from the archive into an empty directory beneath
-`local-evidence/`, then run from the repository root (replace `RUN`):
+The historical recipe extracted `generate.py`, `generate_scheduled.py` and
+`measure.py` into an empty directory beneath `local-evidence/`, then ran from
+the repository root (replace `RUN`). Those scripts remain in the
+[original archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-hf-current-cost/evidence.tar.gz),
+not the current repacked file. Their availability does not establish a matching
+native build or restore the omitted PCM required for exact AES-noise replay:
 
 ```bash
 python3 local-evidence/RUN/generate.py
@@ -189,9 +195,9 @@ OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 \
   --output local-evidence/RUN/new-physical0 --threads 2
 ```
 
-Use a Python environment with the versions in `report.json`; the `/tmp` path is
+The original environment versions are in `report.json`; the `/tmp` path was
 local, not a portable dependency installer. Archive receipts are immutable;
-generation scripts intentionally refuse to overwrite their existing receipts.
+the historical generation scripts intentionally refused to overwrite existing receipts.
 The original `signal0`/`signal1` exports changed UTC epoch and therefore changed
 fixture geometry; they were not scored. The scheduled replacements retain the
 declared full epoch search, independent seeds and arrivals, but are not a blind

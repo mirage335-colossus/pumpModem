@@ -276,11 +276,21 @@ Remove the temporary report after comparison.
 
 ## Reproduction, provenance and exclusions
 
-The compact archive retains frozen sources, input identities, native argv,
-protocols, raw result JSON, timing receipts, failed attempts, tests and theory.
-Large I/Q, PCM and template arrays remain excluded; regenerate them with the
-recorded native binary/source identity and arguments. The packager is an
-inventory/hash operation and never runs a receiver campaign.
+The original compact archive was 29,331,161 bytes, SHA-256
+`dcc95133744d56a3f743066aa680ffbd318cea557b69abb15996b353db9654f3`, with 456
+members recording frozen sources, input identities, native argv, protocols,
+raw result JSON, timing receipts, failed attempts, tests and theory. Retirement
+removed 43 source, test, package and analysis files, including
+`package_evidence.py`. The current repacked archive is 29,158,782 bytes, SHA-256
+`08cd7baac5e247bb8a63c0e3baa36400d2b0dda17d82716514e8287305e75a0e`, with 413
+retained leaves, as recorded in the
+[archive-retirement manifest](../archive-content-retirement.json). The linked
+[artifact manifest](artifact-manifest.json) describes the original container,
+not the repacked file. Large I/Q,
+PCM and template arrays remain excluded; the original input hashes and native
+commands are retained as provenance. Replaying the historical captures requires
+their matching inputs and historical source. The removed packager performed an
+inventory/hash operation; it did not run a receiver campaign.
 
 The original truth-conditioned alignment diagnostic mistakenly interpreted
 bit 0-vs-H0 evidence as a binary LLR. Its invalid interpretation and raw outputs
@@ -295,8 +305,12 @@ statistics. Existing ordinary-receiver tests were not run or altered. No GPU
 instance was rented: these experiments were tractable locally, and the relevant
 real-time/audio acceptance target was this CPU.
 
-Verify the [compact evidence archive](compact-evidence.tar.gz) against its
-[artifact manifest](artifact-manifest.json) without rerunning computation:
+The following is the original archive-verification command, retained as
+provenance. Its `package_evidence.py` script was removed from the current archive
+and checkout; the pinned pre-retirement package is available in
+[Git history](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-weak-stream/compact-evidence.tar.gz).
+The [artifact manifest](artifact-manifest.json) verifies the original package,
+not the current repacked archive.
 
 ```sh
 python docs/validation-data/triad-v3/2026-11-06-weak-stream/package_evidence.py --verify
@@ -306,11 +320,18 @@ The main39-trial protocol is
 `4565cdee4f328f91c6452192c0f5ff26ff3e521a24111667b89146b021f720b7`;
 the separate longer protocol is
 `e7b0dd51dd613be1547899fbe9a4b7ca25fa261a8db217769fa05f667728a82a`.
-Current Python source hashes match those frozen identities. The reused native
-exporter binary is identified by hash, without claiming a fresh source-to-binary
-release certification. No cloud resources or audio processes remain running.
+The source hashes recorded at campaign time match those frozen identities;
+they bind the historical receipts and do not assert identity with current source.
+The campaign's reused native exporter binary is identified by hash, without
+claiming a fresh source-to-binary release certification. No cloud resources or
+audio processes remain running.
 
-The native continuous fixture can be reproduced with:
+The command below is the historical continuous-fixture invocation, retained to
+preserve its original options and input identity. The current
+`tools/triad-helper-export.cpp` source and `triad_helper_export` target remain,
+but their stream/plan interface has changed; the old `--templates` and
+`--output` options are rejected. This command is not runnable as written against
+the current exporter, and a new capture would not replay the historical result.
 
 ```sh
 build/dev-cli/triad_helper_export --case hf --base-oscillator crystal --shift-oscillator ic-7100 --channel-evolution stochastic --random-doppler-width-hz 0.5 --delay-excursion-ms 0.0002 --delay-knot-seconds 20 --cn0 8 --sample-rate 6000 --key-seed 2417 --epoch 1793850000 --seed 2026111600 --bit 0 --arrival-seconds 0 --whole-bit-count 3 --whole-bit-wait-count 0 --templates --output NEW_TRAIN

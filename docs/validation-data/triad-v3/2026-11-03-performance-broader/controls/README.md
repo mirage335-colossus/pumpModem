@@ -114,8 +114,11 @@ substitute for the Monte Carlo evidence or full-workload validation.
 
 ## Reproduction
 
-Use compatible NumPy and SciPy versions recorded in each plan and matching
-source files. Output paths and their `.plan.json` files must be fresh:
+The original commands below used the NumPy/SciPy versions recorded in each
+plan, matching source files, and fresh output paths and `.plan.json` files.
+The driver and test are retired from the current checkout; this is a historical
+recipe requiring the original dependencies, not a current qualification entry
+point:
 
 ```sh
 python tools/triad_perf_decision_policy_controls.py \
@@ -131,7 +134,12 @@ python -m unittest discover -s tests -p test_triad_perf_decision_policy_controls
 five sources declared by both plans and the test snapshot. All declared hashes
 matched during both runs and at preservation. This compact archive is not a
 complete repository or dependency lock. The raw logs are empty because the
-program writes results to JSON. [SHA256SUMS](SHA256SUMS) covers all other files:
+program writes results to JSON. The [retirement manifest](../../archive-content-retirement.json)
+records removal of all six files and the source-only archive from the current
+tree. Plans, results and source identities remain. [SHA256SUMS](SHA256SUMS)
+records the preserved artifact hashes, including the original README hash;
+the verification command below belongs to that historical bundle and will not
+validate this subsequently edited README:
 
 ```sh
 cd docs/validation-data/triad-v3/2026-11-03-performance-broader/controls

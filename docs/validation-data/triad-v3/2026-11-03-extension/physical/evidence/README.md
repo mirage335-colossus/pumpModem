@@ -2,7 +2,13 @@
 
 This record covers the first nine plans, 222 sampled condition captures and 666 repaired-variant receiver scores (each scored at two gates). All saved NPZ arrays agree with score JSON; independently recomputed uniform group mixtures and outcome counts agree with receipts. Every original execution failure remains separate: three zero-shift VLF frequency-CLI failures and three microwave frequency mismatch-guard failures. The repaired microwave arm explicitly allows 0.02 dB original-block phase-arc loss (reported bound 0.01408884 dB); other cells retain 0.01 dB. This is an approximation allowance change, not a sensitivity improvement.
 
-Reproduce only this analysis, on one CPU, from the repository root:
+The following are the original one-CPU analysis commands, retained as historical
+provenance. `analyze_physical.py` and `describe_physical.py` have since been
+removed from this checkout; their sources remain in the
+[pinned historical record](https://github.com/mirage335-colossus/pumpModem/tree/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-extension/physical/evidence).
+The command text remains useful for understanding the analysis sequence, but
+it is not a runnable current recipe. The report directory must be restored from
+the original compact campaign archive:
 
 ```sh
 STUDY=docs/validation-data/triad-v3/2026-11-03-extension/physical/evidence
@@ -13,7 +19,7 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 "$PYTHON" "$STUDY/ana
 "$PYTHON" "$STUDY/describe_physical.py" --input "$OUT/physical-analysis.json" --reports "$REPORTS" --output-dir "$OUT"
 ```
 
-`physical-analysis.json` is a generated local artifact retaining per-condition outcomes and available input hashes; [summary.json](summary.json) is the maintained compact aggregation; [wrong-bit-diagnosis.json](wrong-bit-diagnosis.json) binds the failure comparison. The summary retains the full-analysis digest and reproducer hashes. The Python environment needs NumPy and SciPy; the report directory must be restored from the original compact campaign archive before reproduction. Later independent scheduling and maximum-spreading results are separate records and are not included here. Raw exported statistics are not in this compact package: their hashes are carried by original receipts and were not re-read here. This evidence promotion changes no receiver behavior, waveform or score; the ordinary receiver and its regression campaign remain outside scope.
+`physical-analysis.json` is a generated local artifact retaining per-condition outcomes and available input hashes; [summary.json](summary.json) is the maintained compact aggregation; [wrong-bit-diagnosis.json](wrong-bit-diagnosis.json) binds the failure comparison. The summary retains the full-analysis digest and reproducer hashes. The Python environment needs NumPy and SciPy. Later independent scheduling and maximum-spreading results are separate records and are not included here. Raw exported statistics are not in this compact package: their hashes are carried by original receipts and were not re-read here. This evidence promotion changes no receiver behavior, waveform or score; the ordinary receiver and its regression campaign remain outside scope.
 
 ## Independent validation cells
 

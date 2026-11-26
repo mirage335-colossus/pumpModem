@@ -149,11 +149,12 @@ Shannon at the same rate and the optimal T (`results/mfsk_summary.md`):
 | 10 Hz | 24.0 [25.6] (3 s) | 16.1 [17.6] (3 s) | 8.7 [10.3] (2 s) | 3.7 [5.3] (0.11 s) | 2.9 [4.5] (0.03 s) |
 | 30 Hz | 28.8 [30.4] (1.3 s) | 20.8 [22.4] (1.3 s) | 13.0 [14.6] (1.3 s) | 6.5 [8.1] (0.16 s) | 3.9 [5.5] (0.03 s) |
 
-Penalty of a *fixed* symbol duration relative to the best duration (dB):
+Penalty of a *fixed* symbol duration relative to the best duration (dB),
+using the modeled tone spacing `Δ = 1/T + 4σ`:
 
 | Fixed T | Model | −10 dB-Hz | −2 dB-Hz | +6 dB-Hz | +14 dB-Hz |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0.16 s (6.25 Hz) | AWGN | +19.9 | +11.9 | +4.8 | +0.2 |
+| 0.16 s (1/T = 6.25 Hz) | AWGN | +19.9 | +11.9 | +4.8 | +0.2 |
 | | 0.1 Hz | +13.9 | +9.8 | +3.6 | +0.1 |
 | | 1 Hz | +5.5 | +4.9 | +2.4 | 0.0 |
 | | 10 Hz | +0.5 | +0.5 | +0.4 | +0.1 |
@@ -165,11 +166,18 @@ Penalty of a *fixed* symbol duration relative to the best duration (dB):
 | | 0.1 Hz | +0.5 | +0.1 | +4.0 | +11.3 |
 | | 1 Hz | +0.1 | 0.0 | +3.6 | +12.2 |
 
+Here 6.25 Hz is `1/T`, not the modeled tone spacing. With `Δ = 1/T + 4σ`,
+modeled `2σ` spreads of 10 and 30 Hz imply 26.25 and 66.25 Hz spacing,
+respectively.
+
 Reading: the symbol duration should be chosen from the *design C/N0*, aiming
 at roughly 6–10 dB of Es/N0 per symbol in quiet conditions, while the tone
-spacing must absorb the Doppler category. A 160 ms symbol is appropriate only
-around +12 to +16 dB-Hz. The 160 ms default is not a robustness setting: in
-disturbed channels a long symbol with wide spacing is at least as good
+spacing must absorb the Doppler category. The recommendation of about +12 to
++16 dB-Hz for a 160 ms symbol applies to quiet-channel tuning; this is not a
+general rejection threshold for that duration. For example, the modeled 10 Hz
+spread row has only a 0.5 dB penalty at −10 dB-Hz (with its correspondingly
+wider modeled spacing). At low C/N0, the 160 ms default is not a robustness
+setting: in disturbed channels a suitably chosen longer symbol with wide spacing is at least as good
 (the receiver integrates energy over a low-rank Doppler subspace), and in
 quiet channels it is much better. This decoupling is the main departure from
 amateur practice, where spacing is tied to 1/T and the FST4 guidance requires

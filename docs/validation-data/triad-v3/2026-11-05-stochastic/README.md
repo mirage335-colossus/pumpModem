@@ -12,9 +12,18 @@ operation under renewing random fading. Ordinary Robust integration and live
 radio measurements are outside this change.
 
 Start with the [model, receiver and cheap-test guide](../../../triad-stochastic.md).
-The source base is `a6678218dc88827fe5b58e6016cd85a393928d43` plus the retained
-source overlay. Evidence distinguishes the original exporter, its byte-identical
-rebuild, the later diagnostic-component exporter, and subsequent receiver fixes.
+The original source base was `a6678218dc88827fe5b58e6016cd85a393928d43` plus
+the source overlay recorded in the original manifest as SHA-256
+`d722f88e9800404ddb466f875b1c50ebcd41158d335a751a8436202c21165da9`. Its
+current repacked form is 62,928 bytes, SHA-256
+`fb4541a46cb5b9cd71288a33e57f8d3f20c2dc9b9ccd165bac1a2197cc2fea06`, with six
+retained leaves after 23 implementation and test files were removed. The
+[archive-retirement manifest](../archive-content-retirement.json) records this
+current identity. The deleted source remains in the
+[pre-retirement Git snapshot](https://github.com/mirage335-colossus/pumpModem/tree/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-05-stochastic).
+These identities preserve provenance; they do not establish a current build or
+reproduce a historical binary. Evidence distinguishes the original exporter,
+its byte-identical rebuild, the later diagnostic-component exporter, and subsequent receiver fixes.
 Historical deterministic/sinusoidal results remain controls for their own laws;
 they do not qualify this stochastic channel.
 
@@ -257,19 +266,34 @@ Remove the temporary report after comparison.
 
 ## Reproduction and acceptance evidence
 
-[compact-evidence.tar.gz](compact-evidence.tar.gz) retains protocols, schedules,
-per-capture decisions/energy reports, hashes, gates, numerical measurements,
-failed attempts, audits, command logs and one-off reproduction scripts.
-[source-overlay.tar.gz](source-overlay.tar.gz) binds the changed source to the
-base revision; [historical frozen-v1-overlay.tar.gz](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-05-stochastic/frozen-v1-overlay.tar.gz) preserves the
-original campaign implementation. The original exporter was rebuilt byte for
-byte before component diagnostics changed it. [artifact-manifest.json](artifact-manifest.json)
-and [SHA256SUMS](SHA256SUMS) identify these packages.
+[compact-evidence.tar.gz](compact-evidence.tar.gz) is the repacked form of the
+original archive, whose inventory recorded protocols, schedules, per-capture
+decisions/energy reports, hashes, gates, numerical measurements, failed attempts,
+audits, command logs and one-off reproduction scripts. The original archive
+was 4,141,504 bytes, SHA-256
+`ee09408dc2c8d5ef106585b3e6b46b0eb697815d6a2f19ec7a6d3875104fadb3`. The
+current repacked archive is 4,160,066 bytes, SHA-256
+`bed5ff52a4bc61d7d2d85d549811d1bf92a731ec50d2460157ca7a8ef61f7d30`. Retirement
+removed 22 script files and left 6,886 retained leaves. The
+[archive-retirement manifest](../archive-content-retirement.json) records the
+current identity and retained-leaf verification. The
+[original source overlay](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-05-stochastic/source-overlay.tar.gz)
+is available at the pinned pre-retirement revision; the current repacked
+[source overlay](source-overlay.tar.gz) has six retained leaves after removal
+of 23 implementation and test files. The
+[frozen-v1 overlay](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-05-stochastic/frozen-v1-overlay.tar.gz)
+is retained only in that Git snapshot. The original exporter was rebuilt byte
+for byte before component diagnostics changed it; that historical outcome does
+not qualify a build from current files. The original
+[artifact manifest](artifact-manifest.json) preserves the pre-retirement package
+identities. [SHA256SUMS](SHA256SUMS) records the hashes of the current repacked
+archives and the current artifact manifest.
 
 Raw I/Q and template arrays are omitted from the maintained compact archive;
-their hashes and native commands are retained. Regenerating a selected capture
-is required for a waveform replay after temporary cloud cleanup. Recounting
-admissions, gates and timing needs only compact receipts. The local ignored
+their hashes and recorded original commands are retained. After temporary cloud
+cleanup, an exact waveform replay requires the matching historical source and
+inputs; the current source overlay does not contain the removed implementation
+files. Recounting admissions, gates and timing needs only compact receipts. The local ignored
 working directory retains additional selected I/Q. Do not confuse receipt audits
 with independent reprocessing of every raw sample.
 

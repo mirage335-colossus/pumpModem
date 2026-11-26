@@ -191,7 +191,8 @@ limitations rather than being dropped from acceptance evidence.
 
 The initial five-pair Student-t proposal was rejected after a symmetric bimodal
 mean-null control falsely blocked 3,442/5,000 workflows (68.84%), or 21.32% with
-latent cross-case correlation 0.8. Its source and raw controls are retained. The
+latent cross-case correlation 0.8. Its source identity and raw controls are
+retained; the source snapshot itself was later removed from the archive. The
 exact sign decision removes that normality assumption. A different rare-fast
 bimodal example has a null arithmetic mean but a true median alternative with
 90% probability above threshold; its median detections are not falsely counted
@@ -206,9 +207,13 @@ The controls do not synthesize a hardware-health certificate.
 ## Frozen evidence identities
 
 The [artifact index](artifacts.json) binds 14 compact files (6,456,463 bytes)
-and the six runtime modules. [Decision controls](decision-controls.tar.gz)
-retain the JSON files and frozen source snapshots listed below. SHA-256 binds
-content, not the truth of the experiment or statistical assumptions.
+and the six runtime-module identities. [Decision controls](decision-controls.tar.gz)
+retain JSON controls and source hashes listed below; frozen source snapshots
+were removed during later archive cleanup. SHA-256 binds content, not the truth
+of the experiment or statistical assumptions. The initial source-only archive,
+`initial-guard-sources.tar.gz`, is no longer in this checkout. The [retirement manifest](../archive-content-retirement.json)
+records removed entries; the exact frozen policy sources remain in the
+[original decision-controls archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-04-performance-guard/decision-controls.tar.gz).
 
 | File | SHA-256 |
 | --- | --- |
@@ -218,8 +223,10 @@ content, not the truth of the experiment or statistical assumptions.
 | Accepted `triad_perf_guard_policy.py` | `156a65af2b92c2b6a0f17da7b54f99a5378a13a5a6c26b413693ddb551ffa84b` |
 | Accepted `triad_perf_guard_controls.py` | `6b1c12a01452d98315593c05f4f88b9a82a431c1bd24ae687b85247204657079` |
 
-The physical archives retain commands, source/build/input identities, frozen
-plans, measurements, lifecycle costs and original reports:
+The physical archives retain commands, source/build/input identity records,
+frozen plans, measurements, lifecycle costs and original reports. Source
+identity records do not imply that matching source files remain in those
+archives; see the [retirement manifest](../archive-content-retirement.json).
 
 - [CPU initial integration](cpu-003.tar.gz) and [final CPU guard](cpu-004.tar.gz).
 - [GPU initial integration](gpu-002.tar.gz) and [final GPU guard](gpu-003.tar.gz).
@@ -227,11 +234,16 @@ plans, measurements, lifecycle costs and original reports:
 - Initial guard source archive (not present in this record), [unit output](all-harness-tests.log),
   historical external timer helper (not present in this record), and the coverage receipts above.
 
-The frozen source directories preserve the accepted median implementation and
-the rejected mean proposal. The control module retains per-scenario seeds,
-plans, nominal/null classifications, raw event counts, uncertainty, and actual
-aggregator parity. Policy tests passed 18 checks; controls tests passed five.
-These unit results are not substitute receiver or prediction evidence.
+The original frozen source directories held the accepted median implementation
+and rejected mean proposal, but those snapshots were removed during archive
+cleanup. Their source hashes and the control module's per-scenario seeds, plans,
+nominal/null classifications, raw event counts, uncertainty, and actual
+aggregator parity remain. The exact accepted and rejected policy/control source
+directories are available in the
+[original archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-04-performance-guard/decision-controls.tar.gz),
+with the source identities listed above.
+Policy tests passed 18 checks; controls tests passed five. These unit results
+are not substitute receiver or prediction evidence.
 
 The two historical median-policy simulations covered 38 and 16 scenarios with
 5,000 synthetic workflows each and matched 216 executions through the actual

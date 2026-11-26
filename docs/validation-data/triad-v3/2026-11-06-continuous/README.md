@@ -130,7 +130,7 @@ node count and between-tile variation rather than claiming exact full-bit energy
 
 ## Cheap regression and reproduction
 
-Routine checks are the five native stream-protocol tests, native long-plan guard,
+The study's routine checks were the five native stream-protocol tests, native long-plan guard,
 eight audio pipe guards, and focused incremental/adapter/planner Python tests.
 The final three native CTest entries passed in 3.92 seconds; the 38 focused
 Python tests passed in 0.301 seconds of test time, excluding interpreter imports.
@@ -140,6 +140,10 @@ prefix plus a day-30 template request without constructing a full recording.
 Python checks compare batch and incremental static/renewing likelihoods, gaps,
 terminal blocks, incomplete inputs and huge declared geometry. One review found
 and fixed an oversized requested DFT allocation for a short observation.
+The commands below record those checks in their historical build/environment.
+The Python receiver suites are retired; surviving native target names do not
+make today's build a replay of this study. Current test groups are in the
+[build guide](../../../building.md#testing-stages).
 
 ```sh
 ctest --test-dir build/dev-cli \
@@ -150,12 +154,13 @@ OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONPATH=tools:test
   test_triad_duration_model test_triad_weak_plan
 ```
 
-Use `./build.sh configure --cli` and the existing compatible build profile when
-native sources change. Do not rerun the two-hour or cable qualification for an
-unchanged arithmetic/protocol path. Run those focused targets when a change
-invalidates the recorded source/calibration/likelihood relationship. The archive
-retains commands, raw outcomes, short reproduction scripts and source identities;
-it omits reproducible binary waveform files and private temporary noise keys.
+The original workflow used `./build.sh configure --cli` and a compatible build
+profile for changed native sources. Its rule was to rerun the focused targets
+only when a change invalidated the recorded source/calibration/likelihood
+relationship, not to repeat the two-hour or cable qualification for an unchanged
+path. The current archive retains commands, raw outcomes and source identities;
+the reproduction scripts were retired. Reproducible binary waveform files and
+private temporary noise keys were omitted from the original package as well.
 
 Original setup failures are retained: an incomplete concurrent Python edit,
 invalid test-bank exclusion on the raw-row path, duplicate native-audio linkage,
@@ -167,15 +172,20 @@ needed: this qualification targeted local CPU execution and actual audio.
 ## Provenance limits
 
 [`summary.json`](summary.json) indexes the measured outcomes and file identities;
-[`evidence.tar.gz`](evidence.tar.gz) contains the compact raw evidence and source
-snapshot. [`SHA256SUMS`](SHA256SUMS) binds these artifacts. Inside the archive,
-`evidence/reproduce.py` can repeat one chosen CPU case into a new output path
-instead of launching a full campaign. The long export manifest retains the
-command needed to recreate the omitted waveform arrays before running
-`long/compare_incremental.py` from the repository root.
+[`evidence.tar.gz`](evidence.tar.gz) contains the retained compact raw evidence.
+[`SHA256SUMS`](SHA256SUMS) records artifact hashes; use the
+[retirement manifest](../archive-content-retirement.json) for the current
+container identity and removed-file inventory. The
+[original archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-continuous/evidence.tar.gz)
+contained `evidence/reproduce.py`, which could repeat one chosen CPU case into
+a new output path instead of launching a full campaign. That script and
+`evidence/long/compare_incremental.py` were among the 19 removed files; 65 data
+leaves remain. The long export manifest preserves the original waveform
+generation command, but the old receiver scripts and source-matched environment
+are also required for that historical replay.
 
-The compact evidence archive includes raw reports, commands, fixture hashes,
-reproduction scripts and the final source snapshot. It is rooted at Git commit
+The original compact evidence archive included raw reports, commands, fixture hashes,
+reproduction scripts and the final source snapshot. It was rooted at Git commit
 `2f37dad1` plus the accompanying changes, not a release certification. The first
 two-hour run preceded the final descriptor-only Gaussian-null capability flag
 and input guard changes; its source/binary hashes were not frozen at launch.

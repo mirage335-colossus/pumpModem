@@ -295,9 +295,16 @@ and [paired outcomes](paired-outcomes.json) are also directly inspectable.
 Rechecking all eight campaigns reproduced the frozen decisions and counts;
 33 interval endpoints differed by only 2.78e-17 with the local numerical library.
 
-Verify checksums without numerical dependencies, then optionally recheck the
-stored admission decisions with NumPy/SciPy available. These commands do not
-rerun DSP or acquire cloud resources:
+The original integrity and admission-decision checks below did not rerun DSP
+or acquire cloud resources. They used a numerical-dependency-free verifier,
+then NumPy/SciPy for the stored decisions. The
+[historical verifier](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-04-shaping/verify-evidence.py)
+is now retired, and `gpu/tools/triad_helper_evidence.py` was removed from the
+repacked archive. These commands therefore require the
+[original archive](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-04-shaping/evidence.tar.xz)
+and original verifier environment; extracting the current archive cannot run
+this historical recipe. Use the current archive SHA-256 above and the retirement
+manifest for its present container identity:
 
 ```sh
 python3 docs/validation-data/triad-v3/2026-11-04-shaping/verify-evidence.py
@@ -306,7 +313,7 @@ tar -xJf docs/validation-data/triad-v3/2026-11-04-shaping/evidence.tar.xz -C /tm
 python3 /tmp/triad-shaping-evidence/gpu/tools/triad_helper_evidence.py /tmp/triad-shaping-evidence/gpu/results/*/ --output /tmp/triad-shaping-evidence/rechecked.json
 ```
 
-The result verifier deliberately refuses to overwrite an existing output.
-Use a fresh output filename when rechecking. The source snapshot is an
+The historical result verifier deliberately refused to overwrite an existing
+output; its recipe requires a fresh output filename. The original source snapshot is an
 uncommitted study state bound to its recorded base commit and patch; it is not
 release certification. GPU cleanup was verified after downloading the evidence.

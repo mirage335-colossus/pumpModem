@@ -12,7 +12,9 @@ The [summary](summary.json) preserves high-level outcomes. The complete measured
 control outputs are [64-campaign matrix](decision-empirical-002.json.gz) and
 [512-campaign null checks](decision-null-512.json.gz). Their unchanged pre-run
 plans and progress logs are alongside them. [Preservation metadata](preservation.json)
-contains compressed and uncompressed hashes; `SHA256SUMS` covers the bundle.
+contains compressed and uncompressed hashes; `SHA256SUMS` records the retained
+artifact hashes and the original README hash. Later prose corrections do not
+change the evidence bytes, but this README no longer matches that original hash.
 
 ## Decision simulations and uncertainty
 
@@ -21,7 +23,7 @@ The matrix completed 36 controls, each with 64 independently seeded campaigns of
 used 512 campaigns and completed in **26.889 seconds**. These are computation
 costs of the decision simulation, not predicted full receiver times.
 
-Every scenario invokes the maintained adaptive/conditional decision helpers.
+Every scenario invoked the study's then-maintained adaptive/conditional decision helpers.
 Timing inputs are paired outer full-runtime forecasts or direct measurements
 from CPU003, separately centered in log space. The block generator resamples
 non-overlapping adjacent pairs, preserving short ordering while discarding the
@@ -101,9 +103,12 @@ reported sleep, not an alleged DSP slowdown.
 
 ## Reproduce without another receiver campaign
 
-Run from the repository root with the study's recorded NumPy/SciPy environment.
-Use fresh output names. These are optional decision-method qualification checks;
-they are not required in every routine receiver run.
+These are the original decision-method qualification commands, retained as
+historical provenance. They used the repository root, the study's recorded
+NumPy/SciPy environment and fresh output names, without rerunning a receiver
+campaign. The [historical driver](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/tools/triad_perf_decision_controls.py)
+and its matching helpers are retired; the commands do not run in the current
+checkout and are not current routine qualification instructions.
 
 ```sh
 python tools/triad_perf_decision_controls.py \
@@ -122,17 +127,20 @@ The compact timing input retains the **exact original floating-point sample
 values**, source identities and original CPU003 report hash, with irrelevant
 receiver arrays omitted. Replaying it changes input-file provenance, not the
 numerical timing vectors. The archived controls originally read the full CPU003
-backend report. `matching-source.tar.gz` preserves the nine exact measured
-helper/dependency files, including the historical family adapter source recovered
-by hash from an earlier source archive. It is not a freestanding repository or
-native binary; use the surrounding source/build evidence and recorded binary
-hash when reproducing the actual sampled check.
+backend report. The [original matching-source.tar.gz](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-complete/controls/matching-source.tar.gz)
+held the nine exact measured helper/dependency files, including the historical
+family adapter source recovered by hash from an earlier source archive. The
+[retirement manifest](../../archive-content-retirement.json) records removal of
+all nine files and of that source-only container; the numerical timing inputs
+and control results remain. The original package was not a freestanding
+repository or native binary. Its source/build evidence and recorded binary hash
+remain necessary to establish a historical replay's identity.
 
 A previous 512-campaign, 36-control attempt produced only its plan before the
 coordinator-reported **300-second external timeout (exit 124)**. Its plan and empty
 log are retained as `decision-empirical-001.*`; no completed report exists. The
-empty log does not independently prove that exit status. The updated helper now
-creates an exclusive initial report, atomically checkpoints every completed
-control, and reports pending/incomplete work. Wall-budget-stopped partial
+empty log does not independently prove that exit status. The study's updated helper
+created an exclusive initial report, atomically checkpointed every completed
+control, and reported pending/incomplete work. Wall-budget-stopped partial
 controls do not claim nominal fixed-sample binomial coverage. The failed attempt
 was not relabeled as a successful run or used to narrow the reported intervals.

@@ -15,6 +15,12 @@ recorded scope.
 
 ## Evidence retained here
 
+This inventory describes the evidence recorded by the campaigns. Later cleanup
+retired source snapshots from these packages. The
+[retirement manifest](../archive-content-retirement.json) identifies the removed
+files and the unchanged retained data. The source-snapshot entries below describe
+the original packages, not their current contents.
+
 - [Sampled families](families/README.md): complete native export through receiver
   result IPC for Gaussian, phase/frequency, grouped, RBPF, CFO, static and ray
   receivers; frozen stage forecasts, independent full jobs, source snapshots,
@@ -37,10 +43,16 @@ recorded scope.
   twenty-three workload decisions, actual serial costs, precision misses,
   hardware warnings and exact measured source snapshot.
 
-These archives retain exact compressed reports and matching source where
-available. Their verification commands check hashes and receipts without
-repeating expensive simulations. Private cloud resource and account records
-are deliberately outside the repository.
+These records retain exact compressed reports and source identities. A recorded
+source hash or verification receipt preserves identity, not the source file
+itself. Original verification commands checked hashes and receipts without
+repeating expensive simulations; recipes requiring retired programs are
+historical, as noted in the linked records. Private cloud resource and account
+records are deliberately outside the repository.
+The historical [package checksum list](SHA256SUMS) also hashes this README and
+the nested coverage READMEs at their original revisions. Those document entries
+will no longer match after these source-availability clarifications; the
+recorded result and artifact hashes are unchanged.
 
 ## What the experiments establish
 

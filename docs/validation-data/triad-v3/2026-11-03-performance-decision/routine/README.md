@@ -49,13 +49,14 @@ No pending three-observation shadow policy is included or adopted here.
 
 ## Reproduction and retained inputs
 
-[reproduction.json](reproduction.json) preserves the exact outer argument array,
-working directory, affinity, output paths and environment qualification. The
-parent environment was inherited; child numerical controls and observed
-library identities are in the reports. The invocation was limited by a shared
-1,800-second harness budget and an outer timeout. Reproduction needs a fresh
-output directory and the retained inputs at the declared paths. It must not
-overwrite this observation.
+[reproduction.json](reproduction.json) preserves the exact historical outer
+argument array, working directory, affinity, output paths and environment
+qualification. The parent environment was inherited; child numerical controls
+and observed library identities are in the reports. The invocation was limited
+by a shared 1,800-second harness budget and an outer timeout. Reproduction would
+need a fresh output directory and the original inputs at the declared paths;
+the current sanitized source archive is not that complete input set. It must
+not overwrite this observation.
 
 The archive retains the [outer stdout](outer-logs/stdout.log.gz) and
 [stderr](outer-logs/stderr.log.gz), child/functional logs, native/FFT report,
@@ -83,10 +84,18 @@ Both were accepted as source-and-dependency-matched **historical** counters.
 They were not rerun by this archive operation. Their finite scope and prior
 reconciliation remain in the original evidence.
 
-[matching-source-and-tests.tar.gz](matching-source-and-tests.tar.gz) contains
-124 frozen source, build-input, configuration and test files. Seventy-six
-members were checked against source/protocol hashes in the completed summary;
-the remaining current harness/test members have explicit archival hashes.
+[matching-source-and-tests.tar.gz](matching-source-and-tests.tar.gz) originally
+contained 124 frozen source, build-input, configuration and test files. The
+current sanitized archive retains six members and removes 118. The
+[retirement manifest](../../archive-content-retirement.json) records original
+SHA256 `b115b88849a4b6f1770eaa7148e5b72650da838181bfd89b00a15b4e66e69833`,
+current SHA256 `8d02f2cd34f6f7443077afaf046d38a2f8c4d9a9569bc0f16e54feb52031aadd`,
+and the removed members. Seventy-six members of the original inventory were
+checked against source/protocol hashes in the completed summary; hashes for the
+remaining original harness/test members are archival provenance, not evidence
+that those files remain in the current archive. The original archive is
+available at the
+[pinned historical revision](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-decision/routine/matching-source-and-tests.tar.gz).
 [Native build provenance](reference-build-provenance.json) records the compiler,
 reference commit and both native binary identities; the prior
 [trace proof](../../2026-11-03-performance-trace/README.md#reproduction-and-further-development)
@@ -109,8 +118,11 @@ later delta.
 
 [preservation.json](preservation.json) records every original byte hash, gzip
 hash, source member and coverage-reference check. Gzip and tar metadata use
-zero timestamps, with no original filename in the gzip header. Run
-`python3 verify.py` in this directory to check [SHA256SUMS](SHA256SUMS), exact
-decompression, source bindings and the retained coverage references. Verification
-runs no receivers, simulations, tests or benchmarks. Earlier archives and
-their historical source snapshots remain untouched.
+zero timestamps, with no original filename in the gzip header. The historical
+`python3 verify.py` verifier is not present in this checkout. It checked exact
+decompression, source bindings and retained coverage references without running
+receivers, simulations, tests or benchmarks. [SHA256SUMS](SHA256SUMS) includes
+the current repacked archive hash and the original README digest, before these
+clarifications; `preservation.json` records the original archive identity.
+This study left earlier archives and their source snapshots untouched;
+subsequent source cleanup is recorded in the retirement manifest.
