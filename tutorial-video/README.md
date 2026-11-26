@@ -11,12 +11,20 @@ the setup links mentioned in the video. `sources.txt` records the claim checks.
 Run `python3 scripts/write_script.py` after editing the storyboard to refresh
 the readable narration.
 
+Keep the tutorial transcript content unchanged during documentation maintenance.
+The narration and installation notes retain the tutorial's original content;
+current application-status clarifications belong in this README.
+
 The walkthrough covers purpose and installation; matching sound settings;
 encrypted Fast text and a 30,000-byte file; Legacy BPSK31; the terminal
-interface; QR scanning; and optional radio/optical use. Robust controls remain
-visible in the GUI, but Robust operation is unavailable pending reconnection to
-the canonical native triad stack. This tutorial contains no Robust demonstration.
-The phone is an explicitly labelled illustration, ending with an SMS draft.
+interface; QR scanning; and optional radio/optical use. The shared GUI supports
+Robust live operation on a configured public calendar and keyed ordinal.
+Unknown-start acquisition, physical-device qualification and native real-time
+capacity remain unqualified. See the
+[current Robust architecture and limits](../docs/robust-current.md).
+This tutorial contains no Robust demonstration, and its retired single-carrier
+Robust footage is not current. The phone is an explicitly labelled illustration,
+ending with an SMS draft.
 
 ## Production
 

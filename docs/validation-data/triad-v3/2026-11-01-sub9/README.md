@@ -385,7 +385,12 @@ workspace hashes are recorded where available; retained manifests alone do not
 reconstruct omitted sampled arrays. No transmitter provenance is inferred from
 a mathematical diagnostic's source hash.
 
-Recount the retained evidence without changing it:
+The command below is the original historical recount recipe, retained to show
+how the audit was run. It is not executable in the current checkout because
+the [historical analyzer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/analyze.py)
+was retired. The [original archive-replay receipt](checks/archive-replay.json)
+records the byte-identical recount and integrity results for its stated archive
+identity; it is not a fresh replay of the replacement container.
 
 ```sh
 study_dir=docs/validation-data/triad-v3/2026-11-01-sub9
@@ -396,9 +401,12 @@ python3 "$study_dir/analyze.py" \
   --output "$unpack_dir/analysis.json"
 ```
 
-The [theory reproduction record](theory/reproduction.json) supplies dependencies,
-commands and hashes. Both day diagnostics accept a workspace path, allowing the
-retained `evidence/day-static` workspace to replace their original local path.
+The [historical theory reproduction record](theory/reproduction.json) preserves
+the original dependencies, commands and hashes. Both day diagnostics accepted a
+workspace path, allowing the retained `evidence/day-static` workspace to replace
+their original local path in that reproduction. These are recorded historical
+checks; use the [current bounded reproduction](#retained-theoretical-calculations)
+below instead of the original temporary paths.
 The [source manifest](source-provenance.json) binds the final implementation and
 focused test sources. Each measured run retains its own source/binary hashes;
 the initial month pilot predates the captured binary hash and is not claimed
@@ -408,14 +416,14 @@ The separate [retained-array check](checks/retained-array-hashes.json) recompute
 1,297 manifest hashes and 46 retained array hashes without a mismatch. It
 explicitly identifies 7,099 omitted referenced files and ten retained oracle
 files lacking report hash references. Those files are not claimed verified.
-Run [historical its verifier](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/checks/verify_retained_arrays.py) with the same extracted
-`--input` directory and a separate `--output` JSON file. This does not reconstruct
+The [historical verifier](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/checks/verify_retained_arrays.py) used the same extracted
+`--input` directory and a separate `--output` JSON file. That check did not reconstruct
 omitted waveforms or turn the software study into a physical measurement.
 An [archive replay](checks/archive-replay.json) extracted the final compressed
 evidence into a fresh directory and reproduced both analysis JSON files byte
 for byte. [SHA256SUMS](SHA256SUMS) covers the retained study artifacts.
 
-The focused validation status is **14 triad tests and 78 Python checks passed**.
+The original focused validation recorded **14 triad tests and 78 Python checks passed**.
 Both optional paired stratified-GPU convergence jobs completed, with the
 diagnostic scope described above. Corrected wrong-key controls also completed.
 The ordinary Robust receiver regression campaign is outside this isolated study.
@@ -428,3 +436,60 @@ of the finite particle and frequency approximations. Fixed-ray success at
 −46 dB-Hz does not resolve the OU failures at the same C/N₀, nor the −56 dB-Hz
 38-day failures. These are quantitative obstacles for subsequent development,
 not reasons to extrapolate the completed success to untested links.
+
+### Retained theoretical calculations
+
+On 25 November 2026, the five standalone mathematical programs were restored
+byte-for-byte from `357a50970a0c6214eeaade7c5704bbc39abd4b79`:
+[shared formulas](theory/benchmark_math.py),
+[day oracle](theory/day_oracle_diagnostic.py),
+[day frequency quadrature](theory/day_frequency_diagnostic.py),
+[OU bound](theory/ou_bound_diagnostic.py), and
+[independent OU validation](theory/ou_bound_validation.py).
+All five source hashes and all four stored result hashes match the
+[original reproduction record](theory/reproduction.json). These are protected
+[theoretical calculations](../../../development.md#theoretical-calculations),
+not an operating receiver or restoration of the retired campaign.
+
+Dependencies are Python, NumPy and SciPy. The recovery check used Python 3.13.5,
+NumPy 2.5.4 and SciPy 1.18.1 with one numerical thread. The existing
+[archive](evidence.tar.gz) retains all six required `evidence/day-static`
+inputs, totaling 57,331 bytes, for 97 blocks of dimension four. Their hashes
+match both retained day reports. The oracle uses hidden simulated means and
+energies; the frequency calculation uses retained observations and declared
+simulation noise variance. Neither is a new receiver-performance measurement.
+
+From the repository root, with those dependencies available, extract only the
+required inputs and write replay outputs to temporary storage:
+
+```sh
+sub9_study=docs/validation-data/triad-v3/2026-11-01-sub9
+sub9_replay=$(mktemp -d /tmp/triad-sub9-theory.XXXXXX)
+tar -xzf "$sub9_study/evidence.tar.gz" -C "$sub9_replay" \
+  evidence/day-static/manifest.json evidence/day-static/gram.c128 \
+  evidence/day-static/intervals.u64 evidence/day-static/mean.c128 \
+  evidence/day-static/observation.c128 evidence/day-static/signal_energy.f64
+env PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  timeout 30s python3 "$sub9_study/theory/day_oracle_diagnostic.py" \
+  "$sub9_replay/evidence/day-static" --output "$sub9_replay/day-oracle.json"
+env PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  timeout 30s python3 "$sub9_study/theory/day_frequency_diagnostic.py" \
+  "$sub9_replay/evidence/day-static" --output "$sub9_replay/day-frequency.json"
+```
+
+The bounded recovery check replayed both programs in under two seconds each.
+All 141 oracle and 129 frequency numerical values, metadata and source/input
+hashes matched the retained reports exactly. It also passed 51 deterministic
+OU determinant, variance, grid and covariance-trace comparisons, and confirmed
+improving determinant/variance error with 32, 64 and 128 covariance modes.
+Both OU command-line entry points imported successfully and displayed help.
+These checks do not constitute a fresh Monte Carlo validation.
+
+The original OU target fit uses 50,000 draws at 768 modes, followed by a
+50,000-draw refinement at 3,072 modes. Its independent validation uses 100,000
+draws at 1,536 modes. Those defaults and original outputs are preserved, but
+were **not rerun** for this recovery. They are not routine documentation checks;
+follow the current bounded testing policy before any new statistical work.
+Keep the stored scientific results unchanged, and remove the temporary replay
+directory after its source/input identities and numerical comparisons have
+been checked.

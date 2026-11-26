@@ -419,17 +419,31 @@ explicit missing-array entries reflect intentional archive pruning. The five
 primary results and qualifications agree exactly between these audits;
 missing arrays are not relabeled as locally verified.
 
-The [scientific evidence archive](minus60-scientific-evidence.tar.gz)
-(84,866,723 bytes) retains scientific JSON, score NPZ files, logs and selected
-complete workspaces. Its [inventory](minus60-scientific-evidence.tar.inventory.json)
-records all **7,511 retained files**, each verified byte-for-byte by SHA-256,
-and the three oversized selected workspaces whose
-raw arrays were omitted. Other nonselected raw workspaces are also omitted.
-The archive SHA-256 is
-`d381b8e6688a849b1feef53b8bf35936794d67c2be69fa448df1226ae18a91da`.
+The current [scientific evidence archive](minus60-scientific-evidence.tar.gz)
+is **84,863,042 bytes**, SHA-256
+`4b632b7d178f600003eae98f8baa3a2f1d65430f545ec3db8e756105f3fa1db2`, as
+recorded in the [archive-retirement manifest](../archive-content-retirement.json).
+The original [inventory](minus60-scientific-evidence.tar.inventory.json)
+described scientific JSON, score NPZ files, logs and selected complete
+workspaces, and records **7,511 files** and their hashes before retirement.
+The current archive contains 7,508 retained leaves. The
+[archive-retirement manifest](../archive-content-retirement.json) records that
+retained-leaf count and unchanged byte verification. The original inventory's
+three oversized selected workspaces have raw arrays omitted; other nonselected
+raw workspaces are also omitted. The original pre-retirement
+container was 84,866,723 bytes with SHA-256
+`d381b8e6688a849b1feef53b8bf35936794d67c2be69fa448df1226ae18a91da` and
+contained 7,511 files. Retirement removed three historical reproduction scripts;
+the manifest records retained-leaf verification. These container identities
+describe archive maintenance, not a new scientific-data audit.
 The acquisition and RF arrays were hash-verified during the full audit before
 pruning; their absence from the retained archive must not be described as a new
-local byte verification. Recount the retained material with:
+local byte verification. The command below is the original historical recount
+recipe from the pinned source tree, not a command runnable in the current
+checkout: `analyze.py` was retired. The separate retained presence calculation
+is available as
+[source](theory/frontier.py), [recorded output](theory/frontier.json) and
+[focused test](theory/test_frontier.py).
 
 ```sh
 study_dir=docs/validation-data/triad-v3/2026-11-02-minus60

@@ -62,16 +62,20 @@ missing distributions. Better models and implementations may still be found.
 
 The adjacent [Astra-6 synthesis](../Astra-6/README.md) and
 [appraisal protocol](../../../_appraisal/highFidelity-triple_Robust_Modem/experiment-protocol.md)
-already provide a shorter overview and an experimental design. They are inputs
-to this handoff, not work to duplicate. The appraisal directory currently contains
-design documentation only. Its references to Astra-6 do not automatically make
-the larger Fable-5.2 draft superseded, or authorize editing either destination.
+provided a shorter overview and experimental design and were inputs to this
+handoff. At the original 13 November 2026 scope review, the appraisal directory
+contained design documentation only; that was the status then, not its current
+contents. The directory has since grown into a contained suite with native
+experiment code and source-bound results. See its
+[current appraisal overview](../../../_appraisal/highFidelity-triple_Robust_Modem/README.md)
+for executed work and limits. Those later results do not automatically make the
+larger Fable-5.2 draft superseded, or authorize editing either destination.
 
-The planning and subsequent research task change files only in this Fable-5.2 directory. Future
-experiment code and operating/test documentation belong under
-`_appraisal/highFidelity-triple_Robust_Modem`; changing that directory, canonical
-source or maintained guides is a later scope decision. No such implementation
-is implied by writing the plan.
+The original planning and subsequent research task covered files only in this
+Fable-5.2 directory. The plan placed future experiment code and operating/test
+documentation under `_appraisal/highFidelity-triple_Robust_Modem`; changing that
+directory, canonical source or maintained guides was a separate scope decision.
+No such implementation was implied by writing the plan.
 
 The governing native architecture and validation contracts remain in
 [the documentation index](../../../docs/README.md). In particular, keep one

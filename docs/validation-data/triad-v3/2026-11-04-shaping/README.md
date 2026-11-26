@@ -275,12 +275,19 @@ receiver admission reliability remain explicit limitations.
 
 ## Compact evidence
 
-The [3.32 MB evidence archive](evidence.tar.xz) contains 2,197 verified members:
+The original 3.32 MB archive was reported as containing 2,197 verified members:
 raw trial records, frozen protocols and gates, evaluator identities, metrology
 controls and measurements, source snapshots, build flags, failure notes and the
-final-binary byte bridge. Large I/Q arrays and executable binaries are excluded;
-their hashes and generation commands are retained. The archive SHA-256 is
+final-binary byte bridge. Large I/Q arrays and executable binaries were excluded;
+their hashes and generation commands were retained. The original container's
+SHA-256 was
 `8de2f4eaf250a5cb4f4671d64edb10d08aac6fd764b53a492331800297c3e834`.
+The current [evidence archive](evidence.tar.xz) is 3,261,904 bytes, SHA-256
+`f0b94fae1313bc00da399d1544ab3e7acde1c8fad6ec0bbe255ecfb9af232e61`. The
+[archive-retirement manifest](../archive-content-retirement.json) records the
+repacked identity, 2,015 retained leaves, and their unchanged byte verification
+after 182 files were removed. The [original archive verification receipt](archive-verification.json)
+and member count describe the earlier container, not the current file.
 
 The [source bindings](source-bindings.json), [archive verification](archive-verification.json),
 [planner census](planner-census.json), [raised-IF plans](raised-if-plans.json)

@@ -2,6 +2,8 @@
 
 Open this file with **Open list** in the [Robust test list editor](tools-endUser/robust-test-list-editor.html). Each title gives the observed result and bit-pattern duration. Expand **other lines preserved** under the editable fields for the physical channel, slot cadence, individual trials and evidence. These are historical measurements. Editing a field changes the configuration and leaves the recorded result attached as a note.
 
+<a id="simulation-conditions"></a>
+
 The first seven blocks pair the main stable and severe results. The remaining blocks give the power and duration sweeps, alternative rates and incomplete trials. Repeated seeds and controls at the same settings share a block. A quiet decision on a transmitted bit is an erasure. Quiet on a silent control is correct. An ambiguous decision means the receiver withheld the bit. A timeout, plan or ideal-observer calculation supplies no receiver decision.
 
 Reported bit decisions use the receiver’s Current admission policy unless a note names another policy. The transmitter used no Helper. The configured receiver knew the public calendar and keyed sequence, used a broad arrival search from −7 to +7.07 s, and scored both bit alternatives. The 30 MHz shift was an oscillator reference. Fake FCC imposed the dwell schedule in baseband. The simulator used a 6 kHz sample rate and −164 dBm/Hz white noise. With 180 dB loss, 2 mW gives nominal received C/N₀ of −12.99 dB-Hz and 100 mW gives +4 dB-Hz. Target SNR sets the planned waveform length in discrete steps. Historical overrides of received C/N₀ are identified in their own blocks.
@@ -12,6 +14,7 @@ The [operating guide](docs/indexes/robust.md) and [campaign results](docs/valida
 
 
 - 2 mW, stable | 3.6 Hz unspread | Target −10 | 962.4 s/bit | Both bits and two complete messages decoded
+<a id="stable-2mw-complete-messages"></a>
 Yes	Encryption
 0 W	Helper Carrier Transmit Power
 2 mW	Transmit Power
@@ -143,6 +146,7 @@ Evidence [1](local-evidence/gaussian-2mw-runpod-cpu/results/original-admission.j
 
 
 - 100 mW, severe GUI | 36 Hz × 10, hopping | Target −21 | 12,069.6 s/bit | One of three bits decoded
+<a id="severe-gui-100mw-result"></a>
 Yes	Encryption
 0 W	Helper Carrier Transmit Power
 100 mW	Transmit Power
@@ -169,6 +173,7 @@ Evidence [1](local-evidence/hf-100mw-extended-20261118/admission-active-940601-1
 
 
 - 100 mW, Gaussian | 36 Hz × 10, hopping | Target −21 | 12,069.6 s/bit | One of two bits decoded
+<a id="gaussian-100mw-result"></a>
 Yes	Encryption
 0 W	Helper Carrier Transmit Power
 100 mW	Transmit Power

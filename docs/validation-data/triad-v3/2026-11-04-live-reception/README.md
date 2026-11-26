@@ -209,13 +209,20 @@ passed in 2.30 seconds; no fresh native C++ regression campaign is claimed.
 No cloud instance was needed or launched. Mixer settings are byte-identical
 before and after the experiment; all audio processes have exited.
 
-The [compact evidence archive](compact-evidence.tar.gz) retains the frozen
-protocol, source snapshots, input/build hashes, raw per-record scores, gates,
-failure receipts and reproduction scripts. Its
-[artifact manifest](artifact-manifest.json) gives entry hashes and sizes.
-The 2,768,688-byte archive has 497 entries, independently checked for hashes,
-sizes and safe regular-file paths. The raw-input inventory covers 86 files
+The original archive was 2,768,688 bytes and had 497 entries, independently
+checked for hashes, sizes and safe regular-file paths. Its recorded contents
+included the frozen protocol, source snapshots, input/build hashes, raw
+per-record scores, gates, failure receipts and reproduction scripts. The raw-
+input inventory covers 86 files
 totaling 1,523,388,603 bytes without embedding them.
+The current [compact evidence archive](compact-evidence.tar.gz) is 2,511,604
+bytes, SHA-256
+`6f1a3e2f01db2157977f504fda2a759c02c91d6a3ba291759051843865a8a4b5`, as
+recorded in the [archive-retirement manifest](../archive-content-retirement.json).
+It has 453 retained leaves after retirement removed 44 files; the manifest
+records their unchanged byte verification. The linked [artifact manifest](artifact-manifest.json)
+and archived source/reproduction identities describe the historical campaign;
+the retirement manifest identifies the current repacked archive.
 Large PCM and native arrays remain in ignored
 `local-evidence/triad-live-reception-001/` and the pilot source directory; their
 hash inventory is inside the archive. Historical physical PCM cannot be

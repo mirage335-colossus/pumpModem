@@ -384,12 +384,20 @@ Large regenerable I/Q arrays and the duplicate full source tree are omitted;
 their hashes and production commands remain in the input inventory. Source
 versions must not be mixed when reproducing a historical score.
 
-The [compact archive](compact-evidence.tar.gz) is72,063,592 bytes and contains
-9,286 entries, including72 unmodified JSONL streams. Its
-[manifest](artifact-manifest.json), [input inventory](raw-input-inventory.json)
-and [checksums](SHA256SUMS) describe included records and omitted regenerable
-arrays. Archive SHA256:
+The original compact archive was 72,063,592 bytes and contained 9,286 entries,
+including source overlays, protocol/input/gate identities, raw JSONL results,
+failed receipts, analysis scripts and summaries, and 72 unmodified JSONL
+streams. Its historical SHA-256 was
 `b71959e934b71c80d05ae11940c8da0b1ef4016e4679e60a26ae3f491dcad45a`.
+The current [compact archive](compact-evidence.tar.gz) is 71,608,927 bytes,
+SHA-256 `4b1e849f3ffb2bc2298924adc4f29c81f295dc2bc2d17da47cf20d41e636dee7`.
+The [archive-retirement manifest](../archive-content-retirement.json) records
+that repacked identity, 9,172 retained leaves and their unchanged byte
+verification after 114 files were removed. The linked [original artifact
+manifest](artifact-manifest.json), [input inventory](raw-input-inventory.json)
+and [checksums](SHA256SUMS) describe the historical campaign evidence and
+omitted regenerable arrays; use the retirement manifest for current archive
+identity and retained-leaf status.
 
 This is a completed historical cohort, not an executable campaign recipe. Its
 manifest, checksums, retained failures and independent seed identities record

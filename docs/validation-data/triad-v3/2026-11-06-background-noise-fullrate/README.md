@@ -9,9 +9,14 @@ false-admission campaign.
 
 Compact evidence: [measurements](measurements.json), [check outcomes](checks.json),
 [source hashes](source-sha256.txt), [binary hashes](artifact-sha256.txt), and
-[source/check/receipt archive](evidence.tar.gz) (666,781 bytes; SHA-256
-`eb036ad130d54218c31ce6664a0576805bcb7d36607ebe960de0362e83872f4c`).
-The archive preserves failed checks as well as passing follow-ups. Large PCM
+[current repacked archive](evidence.tar.gz), 57,802 bytes, SHA-256
+`2dd689de5dabd34c05dc77be532a75863cdb845eea90bbdf89c8671e5c6ff2a2`, as
+recorded in the [archive-retirement manifest](../archive-content-retirement.json).
+It has 58 retained leaves after 41 files were removed; the manifest records
+unchanged byte verification. The original 666,781-byte container had SHA-256
+`eb036ad130d54218c31ce6664a0576805bcb7d36607ebe960de0362e83872f4c`;
+that identity applies to the pre-retirement archive. The study record preserves
+failed checks as well as passing follow-ups. Large PCM
 captures remain under the ignored local evidence directory; new transmissions
 reproduce the statistical experiment with fresh keys, not identical noise.
 

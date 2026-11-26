@@ -420,15 +420,23 @@ The maintained record includes:
   [screen summary](screen-summary.json), [theory](theory/README.md), and
   [historical compact evidence collector](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-spread/reproduction/collect_evidence.py).
 
-Plans contain exact argument arrays and per-job limits. The generation scripts
-accept their documented root/output arguments; preserve the selected seeds,
-physical settings and complete candidate family when relocating a run. Build
-with `./build.sh test triad --cli`; the optional Python studies require NumPy,
-SciPy and PyTorch. Run their focused tests with the same scientific environment.
+The commands and audit statements in this paragraph describe the original
+campaign and its source snapshot; the generation and analyzer scripts were
+retired, and their historical versions remain available at the pinned revision
+linked above. The plans preserve exact argument arrays and per-job limits,
+including seeds, physical settings and the complete candidate family. The
+original instructions used `./build.sh test triad --cli`; that command remains
+available for the current source, but it does not rebuild the historical study
+implementation. The original optional Python studies required NumPy, SciPy and
+PyTorch.
+
 The [independent primary audit](primary-audit.json) verifies all 3,996 planned
 case indices, six separate seed roots, source and receiver/dependency identities,
 exact generation commands and 23,976 primary input-hash receipts against the
-full remote audit. All 516 recorded generation source files match this checkout.
+full remote audit. At the time of that audit, all 516 recorded generation source
+files matched its inspected checkout; this does not mean those files match the
+current tree. The recovered standalone calculations and their current checks
+are documented in the [theory guide](theory/README.md).
 The first 288 stable scores are bit-identical before and after administrative
 resumption. This establishes recorded provenance; it is not a reproducible-build
 proof of source-to-binary equivalence. See the [historical audit reproducer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-spread/reproduction/audit_primary.py).

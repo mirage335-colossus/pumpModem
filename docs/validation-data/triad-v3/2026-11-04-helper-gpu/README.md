@@ -188,19 +188,27 @@ recomputed using `triad_helper_evidence.py` without rerunning DSP.
 
 ## Reproduction and cheap future checks
 
-The [compact evidence archive](compact-evidence.tar.gz) is 2,304,988 bytes;
-its [manifest](artifact-manifest.json), [raw-input inventory](raw-input-inventory.json)
-and [checksums](SHA256SUMS) retain source/input identities, measurements,
-frozen forecasts, gates, trial outcomes and failed diagnostics. Large sample
-arrays are hash-inventoried rather than embedded. Only named visualization
-arrays are removed from selected JSON reports, with every transformation
-recorded. All three archived campaign gates/decisions were reverified after
-fresh extraction; no DSP rerun is needed for that check.
+The original 2,304,988-byte archive and its
+[artifact manifest](artifact-manifest.json), [raw-input inventory](raw-input-inventory.json)
+and [checksums](SHA256SUMS) record source/input identities, measurements, frozen
+forecasts, gates, trial outcomes and failed diagnostics. Large sample arrays are
+hash-inventoried rather than embedded. The archived report describes named
+visualization arrays removed from selected JSON records and the transformations
+applied. The current [compact evidence archive](compact-evidence.tar.gz) is
+1,975,306 bytes, SHA-256
+`abe263d384f0a52928734a525606bcfb53b67f6eaf33292c63db1b1fa271bb56`, as
+recorded in the [archive-retirement manifest](../archive-content-retirement.json).
+Retirement removed 63 implementation/build files; the manifest records 561
+retained leaves and unchanged byte verification. The original manifest and
+size describe the pre-retirement container. All three archived campaign
+gates/decisions were reverified after fresh extraction; no DSP rerun is needed
+for that check.
 
 Use the [current abbreviated testing policy](../../../triad-performance.md).
-Current Python checks pass **82/82** in 10.47 s; native exporter checks pass five
-captures and five rejected invocations. Default observation, validity and truth
-bytes match the retained pre-change HF export. These are functional checks,
+At the study's recorded revision, Python checks passed **82/82** in 10.47 s;
+native exporter checks passed five captures and five rejected invocations.
+Default observation, validity and truth bytes matched the retained pre-change
+HF export. These were functional checks,
 separate from sampled receiver and timing evidence.
 
 Do not add the full HF banks, clock-grid probe or admission campaigns to routine
