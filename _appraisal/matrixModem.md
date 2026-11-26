@@ -1,23 +1,3 @@
-# Matrix Modem: original research brief
-
-This document preserves the user's research brief and follow-up directions.
-Its goals and constraints remain the inputs to the research; the text below
-does not establish that a proposed design or experiment has satisfied them.
-For the studies, subsequent qualifications and experimental evidence, start
-with the [research overview](../_ref/algorithms-matrixModem/Sol-6.2/README.md)
-and [evidence map](../_ref/algorithms-matrixModem/Sol-6.2/research-pass-index.md#evidence-map).
-In particular, the strict INT4 requirement remains an unresolved research
-constraint; experiments using wider arithmetic do not silently relax it.
-
-## Preserved brief
-
-
-Please thoroughly research. Please comprehensively consult the academic literature, including recent academic literature which may add more nuanced or contradictory information.
-
-
-
-
-
 
 
 Matrix Modem is a new standalone modem, attempting to learn from the lessons of Fast Modem, Robust Modem (single carrier), and triple Robust Modem.
@@ -225,17 +205,6 @@ All new such research documentation, etc, should be contained under the director
 
 
 
-
-
-
-
-Please generate thorough documentation regarding both what the academic literature supports and possible implementations. Please do not overstate the implementations - better implementations may still be found and that possibility should be acknowledged.
-
-All new such research documentation, etc, should be contained under the directory _ref/algorithms-matrixModem/Sol-6.2 .
-
-For now, please especially work on research - this is a complex problem which must begin with a very serious, very extensive, comprehensive understanding of the very chaotic, complex, natural phenomenon and corresponding situations from moderate through worst case.
-
-Please do not edit any repository files, etc, outside the directories _ref , _appraisal .
 
 
 
