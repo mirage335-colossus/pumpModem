@@ -1348,6 +1348,148 @@ static void section16() {
     printf("is about 1.5 dB of power for weak tones. That is the sense in which lost hops act as a higher noise floor.\n\n");
 }
 
+// ---------- Section 17 ----------
+// Coherent pulse attack on tones that all start their cell at the same phase, and what a keyed phase does to it.
+static void section17(int trials) {
+    printf("## 17. Tones without a keyed phase: the cell-rate pulse an observer can add coherently\n\n");
+    printf("Every position completes whole cycles in a cell. If every tone starts its cell at the same phase, the mean\n");
+    printf("of the signal over the P unknown positions is (1/P) sum_k exp(j 2 pi k n / N): a pulse at each cell start\n");
+    printf("holding 1/P of the tone energy. An observer correlates each cell with that pulse and adds the M results\n");
+    printf("coherently, with no knowledge of the positions. With l the energy per tone over the noise density, the sum\n");
+    printf("is one complex value of mean-square M l / P over unit noise; one carrier phase is unknown, so the test is on\n");
+    printf("its magnitude (exact, noncentral chi-square with one complex term). Steady phase at the observer over the\n");
+    printf("whole observation; cell timing known; P = 352. The energy observer is that of section 14 with one hop\n");
+    printf("channel. Detection 0.9 at 1e-2 false alarm, shared over the frequency bins searched. Theoretical.\n\n");
+    const double P = 352, zo = qinv(1e-2) + qinv(0.1), Tc = 0.16;
+    auto energy_obs = [&](double n) {   // tone energy the section-14 energy observer needs over n tones
+        double a = 1e-9, b = 0.9;
+        for (int i = 0; i < 100; ++i) { double l = std::sqrt(a * b), e = std::exp(l * l) - 1; if (n * e * e * (1 - l * l) / (P * l * l) < zo * zo) a = l; else b = l; }
+        return std::sqrt(a * b);
+    };
+    const double lam1 = energy_needed(1, 1e-2, 0.1), lam4 = energy_needed(1, 1e-2 / 1e4, 0.1);
+    printf("### 17a. Energy per tone the observer needs, against observation time\n\n");
+    printf("Needed M l / P: %.2f with the carrier frequency known, %.2f when 10,000 frequency bins are searched.\n\n", lam1, lam4);
+    printf("| observation | cells M | energy observer l (dB) | pulse, frequency known (dB) | pulse, 10^4 bins (dB) | advantage (dB) | with 10^4 bins (dB) |\n|---|---:|---:|---:|---:|---:|---:|\n");
+    struct Ob { const char* name; double sec; };
+    for (Ob o : {Ob{"10 min", 600}, Ob{"1 h", 3600}, Ob{"18 h", 64800}, Ob{"1 week", 604800}, Ob{"30 days", 2592000}}) {
+        double M = o.sec / Tc, le = energy_obs(M), l1 = lam1 * P / M, l4 = lam4 * P / M;
+        printf("| %s | %.3g | %.1f | %.1f | %.1f | %.1f | %.1f |\n", o.name, M, db(le), db(l1), db(l4), db(le / l1), db(le / l4));
+    }
+    printf("\nThe advantage grows 5 dB for every tenfold of observation time and has no limit.\n\n");
+    printf("### 17b. Observer margin over one block of the link\n\n");
+    printf("Link as in section 14: one-cell tones, 10-bit block sized by the presence test (A = 4000), no hopping.\n");
+    printf("Margin is the extra C/N0 the observer needs over the link; negative means the observer detects the block\n");
+    printf("at a lower level than the link works at.\n\n");
+    printf("| link C/N0 | tones per block | block | energy observer (dB) | pulse, frequency known (dB) | pulse, 10^4 bins (dB) |\n|---|---:|---|---:|---:|---:|\n");
+    const double tau = std::log(4000.0 * 1024.0 / 1e-6);
+    for (double c : {0.0, -10.0, -20.0}) {
+        double lam = undb(c) * Tc, lo = 32, hi = 1e12;
+        for (int i = 0; i < 80; ++i) { double mid = std::sqrt(lo * hi); if (energy_needed((long)mid, std::exp(-tau), 1e-3) / mid > lam) lo = mid; else hi = mid; }
+        double n = hi;
+        printf("| %+.0f dB-Hz | %.3g | %s | %.1f | %.1f | %.1f |\n", c, n, hstr(n * Tc).c_str(), db(energy_obs(n) / lam), db(lam1 * P / n / lam), db(lam4 * P / n / lam));
+    }
+    printf("\n### 17c. Monte Carlo in the time domain: no key, two-phase key, four-phase key\n\n");
+    const int N = CELL, Pn = 352, M = 1024, T = std::max(100, std::min(trials, 600));
+    printf("%d cells of %d samples, a tone on one of %d positions drawn afresh each cell, complex Gaussian noise, %d\n", M, N, Pn, T);
+    printf("trials per entry. `pulse` correlates the samples with the pulse above. `squared pulse` squares the samples\n");
+    printf("first and correlates with the pulse of the doubled positions, the attack on a two-phase key. Thresholds are\n");
+    printf("the 99th percentile of noise-only trials. The first row is at the l that 17a predicts for 0.9 detection.\n\n");
+    std::vector<cd> t1(N), t2(N);
+    for (int n = 0; n < N; ++n) { cd a = 0, b = 0; for (int k = 0; k < Pn; ++k) { a += std::polar(1.0, 2 * PI * k * n / N); b += std::polar(1.0, 4 * PI * k * n / N); } t1[n] = std::conj(a); t2[n] = std::conj(b); }
+    auto run = [&](double l, int key, std::vector<double>& s1, std::vector<double>& s2, uint64_t seed) {   // key: 0 none, 2 two phases, 4 four phases; l < 0 means noise only
+        s1.assign(T, 0); s2.assign(T, 0);
+        #pragma omp parallel for schedule(dynamic)
+        for (int t = 0; t < T; ++t) {
+            Rng r(seed + 7919ull * t); cd z1 = 0, z2 = 0; double amp = l > 0 ? std::sqrt(l / N) : 0;
+            for (int c = 0; c < M; ++c) {
+                int k = (int)(r.uni() * Pn); double th = key ? 2 * PI * (int)(r.uni() * key) / key : 0;
+                for (int n = 0; n < N; ++n) {
+                    cd x = r.cn(); if (amp > 0) x += amp * std::polar(1.0, 2 * PI * ((k * n) % N) / N + th);
+                    z1 += x * t1[n]; z2 += x * x * t2[n];
+                }
+            }
+            s1[t] = std::norm(z1); s2[t] = std::norm(z2);
+        }
+    };
+    std::vector<double> h1, h2, a1, a2; run(-1, 0, h1, h2, 1001);
+    std::sort(h1.begin(), h1.end()); std::sort(h2.begin(), h2.end());
+    double th1 = h1[(size_t)(0.99 * T)], th2 = h2[(size_t)(0.99 * T)];
+    printf("| l per tone (dB) | key | pulse detects | squared pulse detects |\n|---:|---|---:|---:|\n");
+    double lstar = lam1 * Pn / M;
+    for (double l : {lstar, undb(10.0), undb(15.0)}) for (int key : {0, 2, 4}) {
+        run(l, key, a1, a2, 2000 + (uint64_t)(db(l) * 10) + key);
+        int d1 = 0, d2 = 0; for (int t = 0; t < T; ++t) { d1 += a1[t] > th1; d2 += a2[t] > th2; }
+        printf("| %.1f | %s | %.2f | %.2f |\n", db(l), key == 0 ? "none" : key == 2 ? "two phases" : "four phases", (double)d1 / T, (double)d2 / T);
+    }
+    printf("\nA rate near 0.01 is the false-alarm rate: nothing detected.\n\n");
+}
+
+// ---------- Section 18 ----------
+// Search volume for coherent reception on a phase-stable path below 9 kHz.
+static void section18() {
+    printf("## 18. Below 9 kHz: how many hypotheses coherent reception has to try\n\n");
+    printf("Carrier 9 kHz, FHSS off, one coherent window of length T. Counted per window: frequency bins, drift-rate\n");
+    printf("bins and timing offsets, each combination one block decode. The sample clock is taken from the same\n");
+    printf("reference as the carrier, so its rate follows the frequency hypothesis; the last column of 18c is the\n");
+    printf("extra factor if it does not. Theoretical; the oscillator classes are assumptions, not measurements.\n\n");
+    printf("### 18a. Spacing rules\n\n");
+    auto sinc2 = [](double x) { return x == 0 ? 1.0 : std::pow(std::sin(PI * x) / (PI * x), 2); };
+    printf("Frequency: a tone off by x bins of 1/T keeps sinc^2(x).\n\n| bin spacing | worst loss (dB) | mean loss (dB) |\n|---|---:|---:|\n");
+    for (double sp : {1.0, 0.5, 0.25}) { double m = 0; int K = 2000; for (int i = 0; i < K; ++i) m += sinc2(sp * 0.5 * (i + 0.5) / K); printf("| %.2g / T | %.2f | %.2f |\n", sp, -db(sinc2(sp / 2)), -db(m / K)); }
+    auto chirp_keep = [](double d) {   // power kept with a residual drift of d bins of 1/T across the window, frequency refitted
+        cd a = 0; int K = 4000; for (int i = 0; i < K; ++i) { double u = (i + 0.5) / K - 0.5; a += std::polar(1.0, PI * d * u * u); } return std::norm(a / (double)K);
+    };
+    double dstep[2]; int q = 0;
+    printf("\nDrift: a frequency that moves by d bins of 1/T across the window, linearly, keeps the value below after the\nbest fixed frequency is fitted.\n\n| residual drift across the window (bins) | loss (dB) |\n|---:|---:|\n");
+    for (double d : {0.5, 1.0, 2.0, 4.0}) printf("| %.1f | %.2f |\n", d, -db(chirp_keep(d)));
+    for (double target : {0.56, 0.91}) { double a = 0, b = 8; for (int i = 0; i < 60; ++i) { double m = 0.5 * (a + b); if (-db(chirp_keep(m)) < target) a = m; else b = m; } dstep[q++] = 2 * a; }
+    printf("\nDrift hypotheses %.2f bins apart lose at most 0.56 dB (the timing rule's worst case); %.2f apart at most 0.91 dB\n(the worst case of half-bin frequency spacing). The tables use half-bin frequency spacing and the %.2f rule.\n\n", dstep[0], dstep[1], dstep[1]);
+    const double fc = 9000, ds = dstep[1];
+    struct Cl { const char* name; double off_ppm, drift_ppm_h, timing_s; };
+    const Cl cls[] = {
+        {"GPS-disciplined, corrections logged (±0.001 ppm, no drift, ±1 ms)", 1e-3, 0, 1e-3},
+        {"GPS-disciplined, corrections slewed unseen at up to 1 ppm (±1 ppm, 1 ppm/h, ±1 ms)", 1, 1, 1e-3},
+        {"TCXO (±1 ppm, 0.1 ppm/h, ±0.1 s)", 1, 0.1, 0.1},
+        {"Crystal (±20 ppm, 1 ppm/h, ±1 s)", 20, 1, 1},
+        {"Sound-card clock (±100 ppm, 5 ppm/h, ±1 s)", 100, 5, 1},
+        {"±5 Hz stated uncertainty (±556 ppm, 5 ppm/h, ±1 s)", 5 / fc * 1e6, 5, 1},
+    };
+    struct Wn { const char* name; double T; };
+    const Wn wns[] = {{"1 min", 60}, {"22 min", 1320}, {"1 h", 3600}, {"5.8 h", 20880}};
+    printf("### 18b. Frequency and drift-rate bins per window\n\n| reference at each end | ± frequency (Hz) |");
+    for (auto& w : wns) printf(" %s: frequency × drift |", w.name);
+    printf("\n|---|---:|"); for (size_t i = 0; i < 4; ++i) printf("---:|"); printf("\n");
+    for (auto& c : cls) {
+        printf("| %s | %.3g |", c.name, c.off_ppm * 1e-6 * fc);
+        for (auto& w : wns) {
+            double F = std::max(1.0, std::ceil(2 * c.off_ppm * 1e-6 * fc * w.T * 2)), D = std::max(1.0, std::ceil(2 * c.drift_ppm_h * 1e-6 * fc * (w.T / 3600) * w.T / ds));
+            printf(" %.0f × %.0f |", F, D);
+        }
+        printf("\n");
+    }
+    printf("\n### 18c. Decodes per window against the measured decode rates\n\n");
+    printf("Timing offsets are the timing uncertainty over an eighth of the phase interval. `need` is decodes per\n");
+    printf("second of signal (decodes per window over T). Measured on the RTX PRO 6000 Blackwell: 8,400 full 24-bit\n");
+    printf("decodes a second as a direct kernel; about 65 a second for the coherent ladder by extrapolation. `x` marks\n");
+    printf("a need above 8,400 a second, `o` above 65.\n\n");
+    for (double iv : {0.16, 10.0}) {
+        printf("**Phase interval %.3g s (timing spacing %.3g s).**\n\n| reference at each end | timing offsets |", iv, iv / 8);
+        for (auto& w : wns) printf(" %s: need (1/s) |", w.name);
+        printf(" clock-rate factor if separate, 1 h |\n|---|---:|"); for (size_t i = 0; i < 5; ++i) printf("---:|"); printf("\n");
+        for (auto& c : cls) {
+            double To = std::max(1.0, std::ceil(2 * c.timing_s / (iv / 8)));
+            printf("| %s | %.0f |", c.name, To);
+            for (auto& w : wns) {
+                double F = std::max(1.0, std::ceil(2 * c.off_ppm * 1e-6 * fc * w.T * 2)), D = std::max(1.0, std::ceil(2 * c.drift_ppm_h * 1e-6 * fc * (w.T / 3600) * w.T / ds));
+                double need = F * D * To / w.T;
+                printf(" %.3g%s |", need, need > 8400 ? " x" : need > 65 ? " o" : "");
+            }
+            printf(" %.0f |\n", std::max(1.0, std::ceil(2 * c.off_ppm * 1e-6 * 3600 / (iv / 8))));
+        }
+        printf("\n");
+    }
+}
+
 int main(int argc, char** argv) {
     int trials = argc > 1 ? std::atoi(argv[1]) : 20000;
     std::vector<NamedChan> chans = {
@@ -1385,5 +1527,7 @@ int main(int argc, char** argv) {
     if (on('E')) section14();
     if (on('F')) section15();
     if (on('G')) section16();
+    if (on('H')) section17(trials);
+    if (on('I')) section18();
     return 0;
 }

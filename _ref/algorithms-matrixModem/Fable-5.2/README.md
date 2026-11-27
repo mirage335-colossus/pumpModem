@@ -164,6 +164,29 @@ verification marks and not-accessed lists:
     FHSS a plain tone leaves a steady line 6–24 dB below the signal, which the phase key removes.
     Phase changes unknown to the receiver would cost 3–29 times the block time.
 
+22. **At least one keyed phase change per tone is mandatory in all cases** (user decision,
+    27 November 2026). Without it every tone starts its cell at the same phase, and an observer
+    on a phase-stable path can add the resulting cell-rate pulse coherently with no knowledge of
+    the positions: 11.5 dB over energy detection in 18 hours (calculation 17), 5 dB more per
+    tenfold of time. The observer may be on ground wave or line of sight while the intended receiver is
+    diffuse. One phase per one-cell tone costs the receiver nothing; 2 or 4 per cell cost 2 or
+    4 times the transforms where timing is uncertain. Computed and simulated in calculation 17. My
+    earlier suggestion of a narrow band with coherent attempts as a general remedy was wrong:
+    it only suits paths with very little spread. See
+    [the lattice design note](fsk-lattice-design.md#a-keyed-phase-on-every-tone-is-mandatory-27-november-2026).
+
+23. **Below 9 kHz the search volume is the computational load, and phase steps are no cheaper
+    than tone changes.** An hour of coherence means bins 0.14 mHz apart: 12,960 for ±0.9 Hz
+    and 72,000 for ±5 Hz, times 84 drift-rate bins at 5 ppm/h and the timing offsets. That
+    exceeds the measured decode rate for free-running references and long windows; a
+    disciplined reference with logged corrections needs one hypothesis. Clock corrections slewed or stepped without the receiver's knowledge add
+    to it (9 mHz per ppm of slew at 9 kHz; 32° per 10 µs step). A phase change costs the same
+    timing and drift search and the same bandwidth as an FSK change at the same rate; it is the
+    better choice only on a wide band over a diffuse path of low Doppler spread. Tone rates
+    above 6.25 Hz are not offered. Sized in calculation 18 for assumed reference classes, after the user's corrections of
+    27 November;
+    my first assessment ("the ceiling is unlikely to bind") was wrong.
+
 ## State of the specification
 
 The specification was rewritten as one consistent document on 27 November 2026, after the
@@ -174,6 +197,16 @@ Some supporting figures were left out of it for brevity and remain only in
 [the lattice design note](fsk-lattice-design.md): the cost of an unsearched ±1 Hz Doppler shift,
 the cost of 10 to 1,000 possible centres per held tone, the block time of a freely chosen held
 tone, and the rate carried by strong signals on very wide spreads.
+
+Later the same day the phase key changed from an optional setting to a mandatory keyed phase on
+every tone (finding 22), with more frequent steps left as options.
+
+It also gained the sub-9 kHz search volume, a proposed clock-correction rule, and the reason
+tone rates above 6.25 Hz are not offered (sections 4.2, 12, 14 and 15). The estimates behind
+them are by hand and are in the same subsection of the lattice design note.
+
+The stated tone-rate preference and its two exceptions are in section 4.2, and the equivalence
+of phase steps and tone changes in section 4.4.
 
 ## Corrections to earlier Matrix Modem documents
 

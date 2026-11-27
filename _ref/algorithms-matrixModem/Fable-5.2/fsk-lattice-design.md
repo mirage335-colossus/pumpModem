@@ -873,6 +873,9 @@ floor]:
   A one-cell tone on a wide band changes position every cell, so the observer has nothing to add
   coherently and a phase step per tone changes nothing for it. The exception is few positions
   without FHSS: one phase step per tone removes the steady line there, at no timing cost.
+  (Corrected later on 27 November: this holds only for observers that measure energy. An
+  observer on a phase-stable path can add an unkeyed signal coherently; see "A keyed phase on
+  every tone is mandatory" below.)
 - **Against a much longer tone** [calculated, section 13]. Extra transmit time against the bound
   at −10 dB-Hz, per-tone reception, steady / 0.1 / 1 / 3 / 10 / 30 Hz: one cell with a 4 s hop
   21.2 / 14.2 / 5.7 / 2.3 / 1.2 / 0.5 dB; a 4 s held tone 8.3 / 2.2 / 0.6 / 0.3 / 0.2 / 0.2 dB.
@@ -965,6 +968,9 @@ least that. `~` marks figures where a sum is far from Gaussian.
   scaled by the observer's looser detection criteria, and it holds at any weak level because both
   sides gather evidence in the same way. This agrees with the Monte Carlo of section 11d, which
   reached 7.9 dB at 8,192 tones per block. No phase change is involved.
+  (Corrected later on 27 November: this holds only for observers that measure energy. An
+  observer on a phase-stable path can add an unkeyed signal coherently; see "A keyed phase on
+  every tone is mandatory" below.)
 - **Keyed hopping adds the square root of the channel count, while the observer cannot tell which
   channel is occupied.** That is 8.5 dB for 50 channels and 15 dB for 1,000.
 - **A long hop gives part of that back.** A 400 s hop holds 2,500 tones on one channel. At
@@ -1015,6 +1021,170 @@ least that. `~` marks figures where a sum is far from Gaussian.
 - Limits: Gaussian approximations; steady path; hop edges ignored; an observer that knows its
   noise level; a strong-signal block with few hops (0 dB-Hz) is outside the estimate. Fading and
   the periodic hop envelope are not included.
+
+### A keyed phase on every tone is mandatory (27 November 2026)
+
+Decided by the user: at least one keyed phase change per FSK tone, in all cases. The reasoning
+below was worked by hand in conversation. It is theoretical and assumes a steady phase at the
+observer. The pulse attack and the search volume were computed afterwards as sections 17 and 18
+of `lattice_receiver.cpp`; the computed values are at the end of this subsection.
+
+- **Correction of an earlier answer.** I had proposed one-cell tones on a narrow band (32
+  positions, 200 Hz) with coherent attempts as a remedy for the slowness of one-cell tones, with
+  a block of 45 min to 1 h and an observer margin of about 10 dB at 0.1 Hz and −10 dB-Hz. The
+  user pointed out that this fails when the expected spread appears, which is the usual case. A
+  narrow band removes only the limit set by multipath delay (about 250 Hz at 0.5 ms of delay
+  spread, 60 Hz at 2 ms). Doppler spread still limits coherent adding to about the coherence
+  time, so the attempt gains at most what a held tone of about 4 ÷ spread gains. The narrow band
+  is the right choice only for paths with very little spread.
+- **Whether to keep the one-cell tone given coherent attempts.** Kept as the default. Coherent
+  attempts recover the one-cell tone's loss only on a specular path. On a diffuse path of 1 Hz
+  or less the matched tone length remains about 4 ÷ spread (4 s at 1 Hz, 40 s at 0.1 Hz), and
+  the tone length is best set from the path class's expected spread.
+- **What a longer tone costs in concealment** (0.1 Hz, −10 dB-Hz, no hopping, steady-path
+  observer; estimates from the stored section 11 to 14 results, not a new run): one-cell tones
+  over 2.2 kHz give an 18 h block and 8 dB of observer margin; 40 s held tones 45 min and about
+  3 dB; 40 s held tones with a phase step every cell about 10 to 12 dB. At 1 Hz with 4 s tones
+  the loss is under 1 dB, because the block still has thousands of tones.
+- **What phase steps inside a held tone recover and cost.** A step every cell recovers about
+  4 dB (4 s tone) and 9 dB (40 s) at 24 and 249 times the timing hypotheses per dimension of a
+  held tone with one phase; a step every 8 cells about 1 and 5 dB at 3 and 31 times. The
+  multiplier applies only where timing is uncertain.
+- **Per-tone reception of one-cell tones pays nothing for one phase per tone.** Energy per cell
+  is unchanged by a quarter turn of the whole cell, so the receiver need not undo it, and the
+  20 ms timing spacing is unchanged. An observer measuring energy per cell is equally
+  unaffected.
+- **The coherent pulse attack.** Every position completes whole cycles in a cell. Without a
+  keyed phase every tone starts its cell at the same phase, and the mean of the signal over the
+  unknown positions is (1/P)·Σ_k exp(j2πkn/N): a short pulse at each cell start carrying 1/P of
+  the tone energy. An observer adds this known pulse train coherently over M cells without any
+  position. With per-cell E/N₀ = s and detection index d (about 6):
+  - coherent pulse: s ≈ d²·P/M;
+  - energy detection over P positions and M cells: s ≈ d·√(P/M);
+  - advantage = √(M/P)/d. For P = 352: 1 h (22,500 cells) about 1 dB; 18 h (405,000 cells,
+    the −10 dB-Hz block) about 7.5 dB; one week (3.8 million) about 12 dB; 5 dB per tenfold of
+    time, without limit, including across blocks.
+  This removes the 8 dB of keyed placement within one long block. It needs the path and both
+  oscillators steady to a fraction of a cycle over the observation: plausible below 9 kHz, on
+  LF ground wave, cable and line of sight. With FHSS it is confined to one hop and gains
+  nothing even at 40 s.
+- **The user's two scenarios.** HF is not uniform: an observer on a side or back lobe may be
+  close enough for ground wave or line of sight and so phase-stable, while the intended
+  receiver, perhaps twice as far away with a directional antenna, sees a diffuse path and is
+  excluded from coherent reception. And concealment also serves to limit perceived
+  interference and complaint: a simple coherent receiver on a short point-to-point link nearby
+  could see strong interference from a coherent signal.
+- **Remedy.** A keyed quaternary phase per cell makes the mean pulse vanish. Two phases would be
+  undone by squaring. The fourth power of a quaternary key is again coherent, but the
+  fourth-power loss at these levels far exceeds the gain (not quantified).
+- **Cost of more than one phase per one-cell tone** (derived from the timing rule):
+
+  | Phases per tone | Segment | Coarse timing spacing | Transforms where timing is uncertain | Against a filter-bank observer |
+  | ---: | ---: | ---: | ---: | ---: |
+  | 1 | 160 ms | 20 ms | 1× | baseline |
+  | 2 | 80 ms | 10 ms | 2× | about 1.4 dB |
+  | 3 | 53 ms | 6.7 ms | 3× | about 2.2 dB |
+  | 4 | 40 ms | 5 ms | 4× | about 2.8 dB |
+
+  The key depends only on time, so it is undone on the samples before the transform (signs and
+  swaps), or on the transform output with one phase per tone. Per-tone reception pays the same
+  multiplier once there is more than one phase per cell. The wide-band coherent attempt's 350
+  fine timing steps per coarse step are applied as phase slopes after the transform and do not
+  change. Three per cell does not divide 512 samples. Each tone appears 2 to 4 positions wide
+  without the key.
+- **Tensor Core suitability.** The added work is more timing hypotheses through the same two
+  stages. The matrix-product transform is Tensor Core work (70% Tensor activity measured).
+  Undoing the key over a held tone's cells is a product with weights of exactly ±1 and ±i, so
+  it suits the 4-bit path (derived, not measured). The decode ran at 5,000 full decodes a second
+  as a matrix product against 8,400 for the direct kernel, so it is Tensor-compatible but not
+  Tensor-optimal as measured.
+- **The user's summary of the preference, and my assessment** (27 November; reasoning from
+  stored results, nothing computed). The user: a tone rate as fast as the spread and the total
+  bandwidth allow, with one keyed phase per tone, is preferred; the exceptions are paths where
+  specular reception can be expected, and hardware limited to an extremely narrow band (below
+  9 kHz), where either might exceed the computational ceiling.
+  - The preference is right for concealment and costs nothing at spreads of about 10 Hz or
+    more. At 1 Hz and below it still costs 5 to 13 dB of block time against a tone of about
+    4 ÷ spread (open decision 1 of the specification).
+  - Nothing is gained by going faster than one tone per cell. Rate cannot exceed spacing, so the
+    number of time-frequency cells per second equals the bandwidth at any rate; concealment
+    against energy detection and receiver work per second follow that number, not the rate.
+  - Specular paths: the load is the fine timing search of the wide-band coherent attempt (57 µs
+    at 2.2 kHz, about 350 steps per coarse step), not the tone rate. Slow change of multipath
+    delay, as the ionosphere's height changes, is far below the 20 ms coarse spacing but not
+    below 57 µs, so it adds a delay-rate dimension to that attempt. Not sized.
+  - Below 9 kHz: work per second scales with bandwidth and is tiny. A long phase interval makes
+    timing hypotheses coarse (an eighth of the interval), and frequency drift is searched after
+    the key is removed. The ceiling is unlikely to bind. The limits there are the phase wander
+    that bounds the coherent window, and how fast a phase step can pass a narrow antenna
+    (settling of about 1 ÷ bandwidth, with an amplitude dip), which is unexamined.
+- **Correction of that assessment, after the user's reply** (27 November; hand estimates, not
+  computed). Two of its statements were too narrow.
+  - *"The tone rate does not rise."* True only on the fixed lattice, whose fastest rate is
+    6.25 Hz. The user means a rate that could approach the total bandwidth where the path
+    allows. Rate times positions equals bandwidth, so near 2.2 kHz there is one position and the
+    signal is a keyed-phase single carrier (direct sequence), no longer FSK. Timing spacing is
+    1/(8 × rate): 20 ms at 6.25 Hz, 1.25 ms at 100 Hz, 57 µs at 2.2 kHz. Clock-rate hypotheses
+    for a one-hour block grow with it: 1, 6 and 126 at ±1 ppm; 7, 115 and 2,500 at ±20 ppm. On a
+    diffuse path the tone must stay much longer than the delay spread, which holds the rate to
+    roughly 50 to 200 Hz on HF. A faster rate improves concealment only for strong signals;
+    weak tones are already best observed by energy detection, which depends on bandwidth alone.
+  - *"The ceiling is unlikely to bind below 9 kHz."* That counted samples per second, not
+    hypotheses. The path's coherence is the main resource there, and using it means frequency
+    bins of 1 ÷ (coherent time): 0.28 mHz for one hour. An uncertainty of ±1 Hz is then 7,200
+    bins and ±5 Hz 36,000, each a block decode. Drift across the block adds about 4 to 7
+    drift-rate bins per millihertz of drift in an hour, growing with the square of the coherent
+    time, and the count repeats at every timing step (1.25 s for a 10 s phase interval). At the
+    measured 8,400 decodes a second that exceeds real time without narrowing. For scale, at
+    9 kHz ±20 ppm is ±0.18 Hz and ±100 ppm is ±0.9 Hz.
+  - *Clock corrections.* A disciplined clock is not automatically one hypothesis. A GPS
+    correction slewed at 1 ppm moves a 9 kHz carrier by 9 mHz, about 32 one-hour bins; a
+    correction stepped by 10 µs is a 32° phase jump at 9 kHz. Corrections applied without the
+    receiver's knowledge add drift-rate or phase-step dimensions. Candidate rule, not adopted:
+    no clock steps inside a block; corrections slewed smoothly and bounded, or measured, logged
+    and removed in the receiver's processing as a known trajectory.
+  - Unsized: the full hypothesis volume below 9 kHz (frequency × drift rate × timing offset ×
+    timing rate) for the coherence windows of the specification, and what the window ladder
+    gives back when the volume is cut by shorter windows.
+- **Phase-change rate against FSK rate** (user's expectation of 27 November, with which I
+  agree; reasoning, not computed). In a very narrow band a phase change at a given rate costs
+  the receiver the same as an FSK change at that rate: both set the stretch of one known phase,
+  hence the same timing spacing of an eighth of it, the same drift search, and the same work
+  after the transform with the same suitability for GPU hardware. Both also need the same
+  bandwidth, so a narrow antenna limits both alike. Where the computational ceiling, the antenna
+  or the delay spread limits the rate, phase changes are no alternative to FSK changes.
+  - The one case where they differ: a wide band on a diffuse path of low Doppler spread.
+    Positions further apart than the coherence bandwidth fade independently, so tones at
+    different positions cannot be added coherently, while phase segments inside one held tone
+    can. There a faster FSK rate costs sensitivity (5 to 13 dB of time at 1 Hz and below) and
+    phase steps inside a held tone do not, at the timing-search cost already recorded.
+  - Inside the coherence bandwidth, FSK changes with known phase add as coherently as phase
+    segments do, so in the narrow-band case there is no difference in sensitivity either.
+- **Computed afterwards** [calculated, sections 17 and 18 of `lattice_receiver.cpp`]. Both hand
+  estimates above are superseded where they differ.
+  - *Pulse attack.* The hand rule "√(M/P) ÷ 6" was too cautious: the exact test needs
+    M·l/P = 8.71 (20.81 with 10,000 frequency bins). Advantage over the section 14 energy
+    observer: 0.4 dB in 10 min, 5.2 dB in 1 h, 11.5 dB in 18 h, 16.3 dB in a week, 19.5 dB in
+    30 days (with 10,000 bins: −3.4, 1.5, 7.7, 12.5, 15.7). Observer margin over one block:
+    +0 dB-Hz 7.5 → 6.1 dB; −10 dB-Hz 8.1 → −3.4 dB; −20 dB-Hz 8.2 → −13.4 dB. The observer
+    then detects the block below the level the link works at.
+  - *Monte Carlo* (time domain, 1,024 cells, 600 trials): the pulse statistic detects the
+    unkeyed signal at 0.86 where 0.90 is predicted (the threshold is an empirical percentile of
+    600 trials), and stays at the false-alarm rate with a two-phase or four-phase key. The
+    squared pulse detects the unkeyed and the two-phase signal equally (0.47 and 0.49 at
+    l = 15 dB, nothing at 10 dB) and nothing with four phases. The fourth power was not run.
+  - *Search volume below 9 kHz.* Half-bin frequency spacing loses 0.91 dB at worst and 0.29 dB
+    on average. A residual linear drift of 1, 2 and 4 bins across the window loses 0.24, 0.97
+    and 4.04 dB, so drift-rate hypotheses go 3.88 bins apart for the same 0.91 dB (3.05 for
+    0.56 dB). The hand figure of "4 to 7 drift-rate bins per millihertz in an hour" becomes
+    about 2. The statement that the count "repeats at every timing step" assumed a sliding
+    search; with a configured calendar the timing factor is the timing uncertainty over an
+    eighth of the phase interval, and the result is milder: at 8,400 decodes a second a
+    ±20 ppm crystal passes at 1 h and fails at 5.8 h, a ±100 ppm clock fails from 1 h and ±5 Hz
+    from 22 min (phase per cell, ±1 s of timing). The reference classes are my assumptions.
+- **Open.** The fourth-power statistic and the observer's best statistic against the keyed
+  signal; whether 2 or 4 phases per cell are worth offering; measured reference quality below
+  9 kHz.
 
 ## 3. Alphabet and keyed placement
 
