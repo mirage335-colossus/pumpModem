@@ -245,6 +245,13 @@ a held tone, or 2 or 4 times inside a cell. A phase interval is never longer tha
   timing uncertainty (10 and 5 ms spacing), for per-tone reception and coherent attempts alike.
   The 350 fine timing steps of the wide-band coherent attempt are unchanged. Each tone then
   appears 2 to 4 positions wide without the key, at the band edges too. Derived, not computed.
+- **Delay spread smears every phase step, as it does every tone change.** Paths that arrive
+  late still carry the previous phase, so about (delay spread ÷ phase interval) of the energy is
+  lost. With one phase per one-cell tone this adds nothing, because the tone change already has
+  that loss: about 0.01, 0.05 and 0.2 dB at 0.5, 2 and 7 ms of delay spread. Two phases per cell
+  lose about 0.03, 0.1 and 0.4 dB and four about 0.05, 0.2 and 0.8 dB. A phase or tone rate
+  comparable to the delay spread would be smeared into noise, which is the same limit of 50 to
+  200 Hz on HF given in [4.2](#42-tone-length). Hand estimates.
 - **Clock drift adds a timing-rate dimension.** A sample clock off by `e` slips `e` times the
   block time, so the timing rate needs about 2·`e`·(block time)/spacing hypotheses, and offset
   and rate multiply. For a 3.6 h block with a phase per cell: 1 with a disciplined clock, 2 at
@@ -600,6 +607,23 @@ transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s 
   bank to 500 Hz.
 - **Strong signals on very wide spreads are limited in rate, not in sensitivity.** This modem
   does not chase that case.
+- **Meteor burst: the FSK design fits, the default settings do not.** Not researched; general
+  knowledge and rough link arithmetic.
+  - An underdense trail has very little delay spread and a Doppler shift of a few hertz to a few
+    tens of hertz, so the path itself would carry PSK. The argument for FSK there is the low
+    symbol energy and the unknown phase and frequency offset of each burst, not multipath. On
+    HF the argument is the delay spread ([4.4](#44-phase-key)).
+  - With 2–100 mW and 160 to 180 dB of loss the burst peak is estimated at +10 to +30 dB-Hz:
+    power-limited, so constant envelope and no amplitude levels.
+  - Each burst arrives with a new unknown phase and frequency offset, as a hop does. A burst is
+    received as a hop that the path chooses, with its frequency searched per burst.
+  - A burst lasts about one cell. At about +20 dB-Hz a 160 ms tone holds roughly 12 dB of
+    energy, about what one 256-value tone needs, so the default cell suits a weak burst.
+    Stronger or shorter bursts want shorter cells, for example 20 ms on 50 Hz spacing, which
+    this draft does not offer.
+  - The shortest block is 32 tones, so a block is collected over many bursts with everything
+    between them erased. The evidence clip of section 8 caps what a strong tone contributes and
+    would need another setting. Neither is sized.
 - **Phase-stable paths use the default lattice with FHSS off**, few positions, and the receiver's
   coherent windows. In the records gathered by the
   [earlier research](../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/10-sub9khz-propagation.md),
@@ -767,6 +791,9 @@ transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s 
 14. **Clock-correction rule.** Adopt the rule of section 12 and set the slew bound.
 15. **Tone rates above 6.25 Hz.** Not offered in this draft. Whether a faster rate is wanted for
     strong signals on paths that allow it, given the finer timing and larger drift search.
+16. **Meteor burst.** Whether it is a supported path class. It would need research on burst
+    length, level and rate at these powers, a shorter cell, a per-burst frequency search and a
+    different evidence clip.
 
 ## 15. Known weaknesses
 
@@ -822,6 +849,8 @@ transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s 
   positions one steady interferer covers a large share of the alphabet.
 - **Two to four positions** cost 2.6 and 0.8 dB against a coherent phase-keyed signal, which has
   no such loss. From 8 positions the difference is under 0.3 dB.
+- **Meteor burst is not researched.** The entry in section 12 rests on general knowledge; the
+  levels, burst statistics and block times are not established.
 - **Outage looks like quiet.** A fadeout longer than two block periods ends the message unless the
   schedule resumes.
 - **Long messages** pay the block penalty until a long-block code is qualified.

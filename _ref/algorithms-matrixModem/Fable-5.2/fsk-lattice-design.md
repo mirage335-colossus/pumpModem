@@ -1206,6 +1206,27 @@ of `lattice_receiver.cpp`; the computed values are at the end of this subsection
   peak-limited transmitter loses by varying amplitude, because it lowers the average power.
   Information in phase or amplitude also needs a coherent path. This regime belongs to a fast
   modem, not to this specification.
+- **Meteor burst** (user's questions of 27 November; general knowledge and rough link
+  arithmetic, not researched, no sources consulted). Not a case for APSK at 2–100 mW: with 160
+  to 180 dB of loss on an underdense trail I estimate +10 to +30 dB-Hz at the burst peak, still
+  power-limited. The overall FSK design is appropriate: each burst arrives with a new unknown
+  phase and frequency offset, as a hop does, and a tone as long as the burst allows collects
+  the energy without a carrier. The lattice as specified fits poorly: a burst is about one
+  cell, the shortest block is 32 tones, and the evidence clip caps a strong tone. At about
+  +20 dB-Hz a 160 ms tone holds roughly 12 dB, about what one 256-value tone needs; stronger or
+  shorter bursts want shorter cells (for example 20 ms on 50 Hz spacing), which the
+  specification does not offer. The burst's Doppler is mainly a shift of a few hertz to a few
+  tens of hertz, and does not itself rule out PSK at 2.2 kHz (about 5° per symbol at 2,000
+  baud); the symbol energy of −23 to −3 dB does. Kilowatt systems use PSK. To be researched
+  before meteor burst enters section 12.
+- **Delay spread and phase steps** (user, 27 November). Truly diffuse delay spread smears a
+  phase step over the spread's length, so steps at a rate comparable to it become noise. Agreed,
+  and the same holds for tone changes; it is the 50 to 200 Hz rate limit already recorded. It
+  is also the stronger argument against PSK on HF at these levels: 2 ms of delay spread covers
+  several symbols at 2,000 baud and needs an equalizer that weak signals cannot train. Loss
+  estimated as delay spread ÷ phase interval: 160 ms interval 0.01 / 0.05 / 0.2 dB at 0.5 / 2 /
+  7 ms; 80 ms 0.03 / 0.1 / 0.4 dB; 40 ms 0.05 / 0.2 / 0.8 dB. With one phase per one-cell tone
+  the step coincides with the tone change and adds no loss. Hand estimates.
 - **Open.** The fourth-power statistic and the observer's best statistic against the keyed
   signal; whether 2 or 4 phases per cell are worth offering; measured reference quality below
   9 kHz.

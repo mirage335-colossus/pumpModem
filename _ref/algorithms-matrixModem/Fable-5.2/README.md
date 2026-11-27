@@ -197,6 +197,15 @@ verification marks and not-accessed lists:
     gap to an energy observer grows with the coherent time: about 13 dB for 4 positions and a
     one-hour coherent block, 5 dB more per tenfold. Hand estimate.
 
+26. **Why FSK and not PSK differs by path.** On HF the reason is diffuse delay spread: it smears
+    every phase step or tone change over its own length, so rates comparable to it become noise,
+    and PSK at 2,000 baud would need an equalizer that weak signals cannot train. The mandatory
+    one phase per tone adds no loss; 2 and 4 phases per cell lose up to 0.4 and 0.8 dB at 7 ms.
+    On meteor burst there is little delay spread, and the reason is the low symbol energy and
+    the unknown phase and frequency of each burst, which is received like a hop. Meteor burst is
+    not researched; it is an open decision. Hand estimates and general knowledge, from the
+    user's questions of 27 November.
+
 ## State of the specification
 
 The specification was rewritten as one consistent document on 27 November 2026, after the
@@ -223,6 +232,9 @@ changed is listed at the end of the mandatory-phase subsection of the lattice de
 
 Section 1 now states constant envelope without amplitude shifts as a fixed decision, with the
 reasoning in section 4.2.
+
+Section 4.4 also carries the delay-spread loss of phase steps, and section 12 an unresearched
+entry for meteor burst with open decision 16.
 
 ## Corrections to earlier Matrix Modem documents
 
