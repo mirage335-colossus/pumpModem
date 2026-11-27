@@ -35,6 +35,17 @@ and the robustness preference (no drastic failure, even theoretical).
 
 ## 2. A DFT as GEMM: when it pays
 
+**26 November 2026 correction (Fable-5.2 pass).** This section's break-even table is the FP16 row
+only, and its conclusions were too strong. Measured on a full RTX PRO 6000 Blackwell, one unfused
+FP16 matrix-product DFT of a 1,024-sample dwell is 1.27× slower than cuFFT for all 704 in-band bins,
+1.2× faster for the 352 tone positions and 3.3× faster for 128 bins, at 70% Tensor Core activity and
+32,768 dwells per call. At 4,096 dwells per call cuFFT is 2.1× faster for the tone positions, so the
+route and the batch size have to be chosen together.
+The earlier 4.1–5.1× cuFFT advantage charged the matrix route with rows that were 75% zeros. See the
+[computation note](../Fable-5.2/computation-and-simulation-speed.md) and the
+[DFT/FFT review](../Fable-5.2/reviews/review-dft-fft-computation.md). The text below is kept as
+written.
+
 A direct DFT as a matrix product costs about 8N operations per output point versus about 5·log₂N
 for an FFT, so arithmetic alone favours the FFT beyond N ≈ 8–16. On Tensor Cores the relevant
 question is whether the arithmetic fits inside the memory time already spent; a stand-alone FFT is
@@ -147,6 +158,15 @@ operand peaks, so reaching them requires:
 - **Overlap.** CPU FFT of the next dwell or offset proceeds while the GPU scores the previous one.
 
 ## 5a. Very short messages: time per message, not bits
+
+**26 November 2026 correction (Fable-5.2 pass).** The union-bound figures below are loose. Exact
+values for noncoherent orthogonal signalling on AWGN at 10⁻³ are `E/N₀` = 12.43, 24.93 and 110.94
+for 1, 10 and 100 bits, a relative airtime of 1 : 2.0 : 8.9. The optimum branch SNR in Rayleigh
+fading is 3.7 at 10 bits and 6.5 at 100 bits, not "about 3". On the measured GPU the exhaustive
+search ran faster as a direct kernel than as a matrix product. See the
+[coding note](../Fable-5.2/coding-and-message-structure.md) and the
+[exact tables](../../../_appraisal/algorithms-matrixModem/short-message-energy/README.md). The text
+below is kept as written.
 
 At minutes to hours per bit, the figure of merit is airtime per received message. (Chat discussion,
 26 November 2026; design inference, not measured.)

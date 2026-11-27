@@ -1,0 +1,28 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+probe cublasGemmEx 8I,8I->32I: status 0
+probe cublasGemmEx 8I,8I->32I: status 0
+contend: 352 bins, 32768 dwells per call; decode of 16 hypotheses per call on a second stream; CPU route 13 threads
+search load                    route            dwells/s decodes/s meanwhile
+direct search (CUDA cores)     (none)                  -               8234
+matrix search (Tensor Cores)   (none)                  -               5024
+no search                      fft              77707939                  0
+no search                      dft16h           94048772                  0
+no search                      dft8             59772203                  0
+no search                      cpu               1818903                  0
+direct search (CUDA cores)     fft               7246608               7069
+direct search (CUDA cores)     dft16h            7424428               7250
+direct search (CUDA cores)     dft8              7096100               6930
+direct search (CUDA cores)     cpu               1820686               8391
+matrix search (Tensor Cores)   fft              13056354               4249
+matrix search (Tensor Cores)   dft16h           13714710               4463
+matrix search (Tensor Cores)   dft8             12555430               4082
+matrix search (Tensor Cores)   cpu               1829411               5020
+
+race: probe every route for 0.5 s, run the fastest for 4 s, two cycles per load
+search load                    probe dwells/s (fft dft16h dft8 cpu)         winner           dwells/s decodes/s meanwhile
+no search                      77.7M 93.9M 59.8M 1.9M                       dft16h           93825312                  0
+no search                      77.7M 93.8M 59.8M 1.8M                       dft16h           93653374                  0
+direct search (CUDA cores)     7.2M 7.5M 7.1M 1.8M                          dft16h            7426524               7245
+direct search (CUDA cores)     7.2M 7.4M 7.1M 1.8M                          dft16h            7427239               7246
+matrix search (Tensor Cores)   13.1M 13.7M 12.6M 1.8M                       dft16h           13711366               4463
+matrix search (Tensor Cores)   13.1M 13.7M 12.6M 1.8M                       dft16h           13710149               4464

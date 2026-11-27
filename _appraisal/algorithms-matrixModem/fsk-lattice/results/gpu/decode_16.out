@@ -1,0 +1,13 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+probe cublasGemmEx 8I,8I->32I: status 0
+decode: 16 hypotheses per call, 2^24 messages each; matrix product 4096 x 1536 x 65536 = 824.6 GFLOP per call
+verify direct: planted word found in 16 of 16 hypotheses, best score of the first 266
+verify gemm16: 16 of 16 hypotheses agree with direct (score and word)
+verify gemm8: 16 of 16 hypotheses agree with direct
+verify fwht: 16 of 16 hypotheses agree with direct (score x 64, word)
+direct (CUDA cores)                1.904 ms/call      8403.8 hypotheses/s     433.1 nominal TFLOP/s (dense product count)
+fwht (CUDA cores)                  7.962 ms/call      2009.4 hypotheses/s     103.6 nominal TFLOP/s (dense product count)
+gemm16 (product only)              2.441 ms/call      6555.5 hypotheses/s     337.9 nominal TFLOP/s (dense product count)
+gemm16 + maxima                    3.183 ms/call      5027.0 hypotheses/s     259.1 nominal TFLOP/s (dense product count)
+gemm8 (product only)               3.948 ms/call      4053.0 hypotheses/s     208.9 nominal TFLOP/s (dense product count)
+gemm8 + maxima                     4.688 ms/call      3412.8 hypotheses/s     175.9 nominal TFLOP/s (dense product count)

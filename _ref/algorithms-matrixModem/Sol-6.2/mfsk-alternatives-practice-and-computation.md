@@ -23,6 +23,14 @@ These findings agree with the calculations in [the fading-limit study](fading-li
 
 **AWGN thresholds and a priori decoding.** The guide's table gives 50% decoding thresholds from −22.2 dB in 2500 Hz for 15 s sequences to −33.8 dB for 300 s sequences, and down to −37.4 dB with full a priori decoding. The guide states that decoding works with Doppler spreads up to ten times the tone spacing. [full]
 
+**26 November 2026 correction (Fable-5.2 pass).** In the table below the columns "60D, maximum AP"
+and "Q65-120E, no AP" are swapped. Q65-120E without AP loses 6.3 dB from 0 to 100 Hz, not 3.6 dB,
+so the statements that 120E "lost less" than 60D, and that the data agree with the branch-count
+model "only partly", are withdrawn; both no-AP curves lose 6.1–6.3 dB. The corrected table is in
+the [FT8/Q65 review, §3.3 and §7](../Fable-5.2/reviews/review-ft8-q65-design.md). The same review
+notes that the STANAG 4415 figures quoted further down (−7 dB, 40 Hz, approaching 12 ms) come from
+an overview, while the documented test points are 10 ms and 0.5–50 Hz at −1 to 0 dB.
+
 **Threshold versus spread.** The guide's Figure 1, digitized from its vector paths (curve-to-legend assignment inferred from markers and the guide's AP table), gives the SNR in 2500 Hz for 50% decoding:
 
 | Doppler spread | Q65-60D, no AP | 60D, maximum AP | Q65-120E, no AP | 120E, maximum AP |

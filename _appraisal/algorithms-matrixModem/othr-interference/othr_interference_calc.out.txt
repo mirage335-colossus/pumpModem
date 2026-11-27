@@ -1,0 +1,325 @@
+OTHR / periodic-FM interference versus a 6.25 Hz, 160 ms noncoherent tone receiver
+THEORETICAL / DERIVED values.  python3 -I othr_interference_calc.py
+
+====================================================================================================
+A. ANALYTIC TABLE (derived).  One propagation mode, ideal sawtooth LFM of total
+   received power P, passband W = 2800 Hz wholly inside the sweep, bins DF = 6.25 Hz,
+   symbol T = 160 ms.
+   k        = B*fr                      sweep rate
+   t_cross  = W/k                       time each sweep spends in the passband
+   d_t      = min(1, W/B)               time duty of the chirp pulses in the passband
+   d_t+g    = min(1, (W/k + 2 ms)*fr)   same with 2 ms guard (filter tails, delay spread)
+   n_sw     = fr*T                      sweeps per symbol
+   L_bins   = fr/DF                     comb line spacing in bins
+   line     = 10log(fr/B)               power of one comb line re P (coherent sweeps)
+   avgbin   = 10log(DF/B)               mean in-bin power re P (any coherence)
+   pk1      = 10log(min(1, DF^2/k))     peak response of one bin to one sweep re P
+   d_f(w)   = min(1, w/fr)              spectrum fraction removed by a comb notch of width w
+   d_dc     = min(d_t, 2*fr/W)          T-F fraction removed by per-sweep dechirp-and-notch
+                                        (2 resolution cells of k/W Hz per crossing; idealised
+                                        lower bound: one mode, known sweep timing and rate)
+   Ntb      = W^2/k                     time-bandwidth product of one in-band crossing; the
+                                        crossing is a well-localised pulse only when Ntb >> 1
+   native   = min(1,(t_cross+T)*fr) * min(1,(k*T+2*DF)/W)
+                                        fraction of native (6.25 Hz x 160 ms) cells the chirp
+                                        passes through when nothing finer is done
+
+radar                                   k kHz/s   t_x ms    d_t  d_t+g   n_sw  Lbins    line  avgbin     pk1   d_f2   d_f4   d_dc     Ntb native
+task: 10 kHz @ 50 Hz (CHN 10K0 50 sps)    500.0     5.60  0.280  0.380   8.00   8.00   -23.0   -32.0   -41.1  0.040  0.080 0.0357    15.7  1.000
+Foghorn burst 10 kHz @ 66.67 Hz           666.7     4.20  0.280  0.413  10.67  10.67   -21.8   -32.0   -42.3  0.030  0.060 0.0476    11.8  1.000
+29B6 Container 12 kHz @ 40 Hz             480.0     5.83  0.233  0.313   6.40   6.40   -24.8   -32.8   -40.9  0.050  0.100 0.0286    16.3  1.000
+PLUTO 20 kHz @ 50 Hz                     1000.0     2.80  0.140  0.240   8.00   8.00   -26.0   -35.1   -44.1  0.040  0.080 0.0357     7.8  1.000
+PLUTO 20 kHz @ 25 Hz                      500.0     5.60  0.140  0.190   4.00   4.00   -29.0   -35.1   -41.1  0.080  0.160 0.0179    15.7  1.000
+PLUTO 40 kHz @ 12.5 Hz                    500.0     5.60  0.070  0.095   2.00   2.00   -35.1   -38.1   -41.1  0.160  0.320 0.0089    15.7  1.000
+task: 20 kHz @ 10 Hz                      200.0    14.00  0.140  0.160   1.60   1.60   -33.0   -35.1   -37.1  0.200  0.400 0.0071    39.2  1.000
+task: 40 kHz @ 25 Hz                     1000.0     2.80  0.070  0.120   4.00   4.00   -32.0   -38.1   -44.1  0.080  0.160 0.0179     7.8  1.000
+CHN 40 kHz @ 10 Hz                        400.0     7.00  0.070  0.090   1.60   1.60   -36.0   -38.1   -40.1  0.200  0.400 0.0071    19.6  1.000
+CHN wideband 160 kHz @ 10 Hz             1600.0     1.75  0.018  0.037   1.60   1.60   -42.0   -44.1   -46.1  0.200  0.400 0.0071     4.9  1.000
+JORN-as-logged 10 kHz @ 7 Hz               70.0    40.00  0.280  0.294   1.12   1.12   -31.5   -32.0   -32.5  0.286  0.571 0.0050   112.0  1.000
+ROTHR-as-logged 8 kHz @ 32 Hz             256.0    10.94  0.350  0.414   5.12   5.12   -24.0   -31.1   -38.2  0.062  0.125 0.0229    30.6  1.000
+unid 4 kHz @ 25 Hz                        100.0    28.00  0.700  0.750   4.00   4.00   -22.0   -28.1   -34.1  0.080  0.160 0.0179    78.4  1.000
+Iran 45 kHz @ 150 Hz                     6750.0     0.41  0.062  0.362  24.00  24.00   -24.8   -38.6   -52.4  0.013  0.027 0.0622     1.2  1.000
+Iran 45 kHz @ 313 Hz                    14085.0     0.20  0.062  0.688  50.08  50.08   -21.6   -38.6   -55.6  0.006  0.013 0.0622     0.6  1.000
+CODAR 25.6 kHz @ 1 Hz (M.1874)             25.6   109.38  0.109  0.111   0.16   0.16   -44.1   -36.1   -28.2  1.000  1.000 0.0007   306.2  0.269
+CODAR 49.4 kHz @ 2 Hz (M.1874)             98.8    28.34  0.057  0.061   0.32   0.32   -43.9   -39.0   -34.0  1.000  1.000 0.0014    79.4  0.377
+CODAR 101 kHz @ 2 Hz (M.1874)             202.0    13.86  0.028  0.032   0.32   0.32   -47.0   -42.1   -37.1  1.000  1.000 0.0014    38.8  0.348
+WERA-class 100 kHz @ 4 Hz (0.25 s)        400.0     7.00  0.028  0.036   0.64   0.64   -44.0   -42.0   -40.1  0.500  1.000 0.0029    19.6  0.668
+slow unid 4 kHz @ 0.25 Hz                   1.0  2800.00  0.700  0.700   0.04   0.04   -42.0   -28.1   -14.1  1.000  1.000 0.0002  7840.0  0.046
+
+   Loss in dB of collected signal energy if the stated fraction is removed with perfect
+   knowledge (loss = -10log10(1-d)).  'practical' = smaller of blank+guard and comb(4 Hz);
+   the dechirp column is an idealised bound and is not used for 'practical'.
+radar                                      blank   blank+g  comb 2Hz  comb 4Hz   dechirp  practical (which)
+task: 10 kHz @ 50 Hz (CHN 10K0 50 sps)      1.43      2.08      0.18      0.36      0.16  0.36 dB (comb4, d=0.080)
+Foghorn burst 10 kHz @ 66.67 Hz             1.43      2.32      0.13      0.27      0.21  0.27 dB (comb4, d=0.060)
+29B6 Container 12 kHz @ 40 Hz               1.15      1.63      0.22      0.46      0.13  0.46 dB (comb4, d=0.100)
+PLUTO 20 kHz @ 50 Hz                        0.66      1.19      0.18      0.36      0.16  0.36 dB (comb4, d=0.080)
+PLUTO 20 kHz @ 25 Hz                        0.66      0.92      0.36      0.76      0.08  0.76 dB (comb4, d=0.160)
+PLUTO 40 kHz @ 12.5 Hz                      0.32      0.43      0.76      1.67      0.04  0.43 dB (blank+g, d=0.095)
+task: 20 kHz @ 10 Hz                        0.66      0.76      0.97      2.22      0.03  0.76 dB (blank+g, d=0.160)
+task: 40 kHz @ 25 Hz                        0.32      0.56      0.36      0.76      0.08  0.56 dB (blank+g, d=0.120)
+CHN 40 kHz @ 10 Hz                          0.32      0.41      0.97      2.22      0.03  0.41 dB (blank+g, d=0.090)
+CHN wideband 160 kHz @ 10 Hz                0.08      0.17      0.97      2.22      0.03  0.17 dB (blank+g, d=0.037)
+JORN-as-logged 10 kHz @ 7 Hz                1.43      1.51      1.46      3.68      0.02  1.51 dB (blank+g, d=0.294)
+ROTHR-as-logged 8 kHz @ 32 Hz               1.87      2.32      0.28      0.58      0.10  0.58 dB (comb4, d=0.125)
+unid 4 kHz @ 25 Hz                          5.23      6.02      0.36      0.76      0.08  0.76 dB (comb4, d=0.160)
+Iran 45 kHz @ 150 Hz                        0.28      1.95      0.06      0.12      0.28  0.12 dB (comb4, d=0.027)
+Iran 45 kHz @ 313 Hz                        0.28      5.06      0.03      0.06      0.28  0.06 dB (comb4, d=0.013)
+CODAR 25.6 kHz @ 1 Hz (M.1874)              0.50      0.51       inf       inf      0.00  0.51 dB (blank+g, d=0.111)
+CODAR 49.4 kHz @ 2 Hz (M.1874)              0.25      0.27       inf       inf      0.01  0.27 dB (blank+g, d=0.061)
+CODAR 101 kHz @ 2 Hz (M.1874)               0.12      0.14       inf       inf      0.01  0.14 dB (blank+g, d=0.032)
+WERA-class 100 kHz @ 4 Hz (0.25 s)          0.12      0.16      3.01       inf      0.01  0.16 dB (blank+g, d=0.036)
+slow unid 4 kHz @ 0.25 Hz                   5.23      5.24       inf       inf      0.00  5.24 dB (blank+g, d=0.700)
+
+   Comb line width caused by ionospheric Doppler spread (Gaussian spectrum, 2-sigma = nu):
+   full width at -L dB = nu*sqrt(2*L*ln10/10).  Fraction of spectrum above -L dB = width/fr.
+     nu =   0.1 Hz : width at -20/-30/-40 dB = 0.30 / 0.37 / 0.43 Hz
+     nu =   0.5 Hz : width at -20/-30/-40 dB = 1.52 / 1.86 / 2.15 Hz
+     nu =   1.0 Hz : width at -20/-30/-40 dB = 3.03 / 3.72 / 4.29 Hz
+     nu =   3.0 Hz : width at -20/-30/-40 dB = 9.10 / 11.15 / 12.88 Hz
+     nu =  10.0 Hz : width at -20/-30/-40 dB = 30.35 / 37.17 / 42.92 Hz
+     nu =  30.0 Hz : width at -20/-30/-40 dB = 91.05 / 111.51 / 128.76 Hz
+
+====================================================================================================
+F. UNHANDLED INTERFERENCE (derived).  rho_W = radar power during its in-band pulse divided
+   by the noise power in W = 2.8 kHz (what a fast S-meter shows above the band noise).
+   Mean in-bin interference-to-noise ratio = rho_W * W/B (for B > W; = rho_W for B <= W).
+   Noise-floor rise = 10log10(1 + rho_W*W/B) dB, for any sweep coherence, if nothing is done.
+
+   rho_W dB | B=    4k B=   10k B=   20k B=   40k B=  160k
+        -10 |     0.29     0.12     0.06     0.03     0.01
+         -5 |     0.87     0.37     0.19     0.10     0.02
+          0 |     2.30     1.07     0.57     0.29     0.08
+          5 |     5.07     2.75     1.59     0.87     0.23
+         10 |     9.03     5.80     3.80     2.30     0.70
+         20 |    18.51    14.62    11.76     9.03     4.39
+         30 |    28.46    24.49    21.49    18.51    12.67
+         40 |    38.45    34.47    31.46    28.46    22.46
+         50 |    48.45    44.47    41.46    38.45    32.43
+         60 |    58.45    54.47    51.46    48.45    42.43
+
+   Largest rho_W (dB above the 2.8 kHz noise floor) whose unhandled rise fits inside a margin M:
+   rho_W,max = 10log10((10^(M/10)-1) * max(1, B/W))
+   margin dB | B=    4k B=   10k B=   20k B=   40k B=  160k
+           3 |      1.5      5.5      8.5     11.5     17.5
+           6 |      6.3     10.3     13.3     16.3     22.3
+          10 |     11.1     15.1     18.1     21.1     27.1
+          13 |     14.3     18.3     21.3     24.3     30.3
+          16 |     17.4     21.4     24.4     27.4     33.5
+          20 |     21.5     25.5     28.5     31.5     37.5
+   (S-units are nominally 6 dB; a radar logged at S9+20 dB on a band whose noise reads S3
+    has rho_W about 56 dB.)
+
+====================================================================================================
+C. EFFECT OF EXCISION ON THE WANTED 160 ms TONE (derived).
+   Comb notch of full width w centred on every multiple of fr.  A rectangular 160 ms tone has
+   energy spectrum T*sinc^2(fT).  Loss for a tone exactly on a comb line (worst), midway
+   between lines (best) and averaged over a uniform tone-to-line offset (= w/fr).
+    fr Hz   w Hz |   worst dB    best dB    mean dB |  mean frac
+    10.00    2.0 |       1.80      0.260      0.961 |     0.1985
+    10.00    4.0 |       4.25      0.809      2.197 |     0.3970
+    10.00    8.0 |      11.83      4.606      6.862 |     0.7940
+    25.00    2.0 |       1.62      0.007      0.360 |     0.0795
+    25.00    4.0 |       3.74      0.048      0.753 |     0.1591
+    25.00    8.0 |       8.92      0.232      1.663 |     0.3182
+    40.00    2.0 |       1.63      0.013      0.222 |     0.0498
+    40.00    4.0 |       3.73      0.027      0.455 |     0.0995
+    40.00    8.0 |       8.58      0.068      0.964 |     0.1991
+    50.00    2.0 |       1.62      0.002      0.177 |     0.0399
+    50.00    4.0 |       3.71      0.011      0.361 |     0.0797
+    50.00    8.0 |       8.56      0.051      0.754 |     0.1594
+    66.67    2.0 |       1.62      0.007      0.132 |     0.0299
+    66.67    4.0 |       3.71      0.013      0.268 |     0.0598
+    66.67    8.0 |       8.50      0.021      0.553 |     0.1195
+
+   Time blanking with duty d spread over each symbol (fr*T >= 1): tone amplitude in its own
+   bin scales by (1-d), noise power by (1-d): SNR loss = -10log10(1-d).  The gate also
+   creates images of the tone at +-n*fr with power (sin(pi n d)/(pi n))^2 re the unblanked tone.
+        d |  loss dB | image n=1,2,3 re blanked main tone (dB)
+     0.02 |     0.09 | -33.8 / -33.8 / -33.9
+     0.07 |     0.32 | -22.5 / -22.7 / -23.1
+     0.14 |     0.66 | -16.0 / -16.9 / -18.5
+     0.23 |     1.14 | -11.3 / -13.8 / -18.9
+     0.28 |     1.43 | -9.4 / -13.3 / -23.0
+     0.40 |     2.22 | -5.9 / -16.1 / -19.7
+     0.56 |     3.57 | -3.0 / -17.5 / -13.8
+     0.70 |     5.23 | -1.3 / -5.9 / -19.2
+
+====================================================================================================
+D. CLASSIC WORST-CASE PARTIAL-BAND NOISE, UNCODED NONCOHERENT FH/MFSK (derived here; it
+   reproduces the textbook result P_b = beta/(Eb/NJ) for Eb/NJ >= gamma, no thermal noise,
+   one hop per symbol, jammer fills a fraction rho = gamma/(Eb/NJ) of the hop band).
+     K    M |     beta  gamma dB |  Eb/NJ@1e-5 wc  Eb/N0@1e-5 bb   loss dB
+     1    2 |   0.3679      3.01 |          45.66          13.35     32.30
+     2    4 |   0.2330      0.76 |          43.67          10.61     33.07
+     3    8 |   0.1954     -0.33 |          42.91           9.09     33.82
+     4   16 |   0.1813     -0.98 |          42.58           8.08     34.51
+     5   32 |   0.1759     -1.41 |          42.45           7.33     35.12
+     6   64 |   0.1743     -1.71 |          42.41           6.75     35.67
+
+====================================================================================================
+E. ROBUST NONLINEARITIES (derived; standard locally-optimum efficacy algebra).
+
+E1. Time-domain envelope nonlinearity g(r) before the transform, complex Gaussian noise with
+    per-component sigma = 1 (E r^2 = 2), weak narrowband signal.  Efficiency relative to a
+    linear receiver: eta = (1/2) * (E[g'(r) + g(r)/r])^2 / E[g(r)^2].
+    signum (hard limiter): eta = pi/4 -> -1.05 dB
+     c/sigma |   clipper dB |   blanker dB
+         1.0 |        -0.50 |       -10.45
+         1.5 |        -0.22 |        -5.08
+         2.0 |        -0.08 |        -2.26
+         2.5 |        -0.02 |        -0.87
+         3.0 |        -0.00 |        -0.27
+         4.0 |        -0.00 |        -0.01
+
+E2. Strong in-band pulses of time duty d (ITU-R M.2030 forms, published model, applied here):
+    blanker with perfect pulse detection : N0eff/N0 = 1/(1-d)
+    saturating/limiting receiver         : N0eff/N0 = (1 + NLIM^2 * d/(1-d)) / (1-d),
+    NLIM = limit level / 1-sigma noise voltage (NLIM = 1 for a hard limiter).
+         d | blank dB |     NLIM=1     NLIM=2     NLIM=3     NLIM=5
+     0.018 |     0.08 |       0.15       0.38       0.72       1.68
+     0.070 |     0.32 |       0.63       1.46       2.56       4.91
+     0.140 |     0.66 |       1.31       2.83       4.57       7.70
+     0.230 |     1.14 |       2.27       4.55       6.80      10.41
+     0.280 |     1.43 |       2.85       5.50       7.96      11.73
+     0.400 |     2.22 |       4.44       7.86      10.67      14.69
+     0.560 |     3.57 |       7.13      11.41      14.52      18.73
+    (add the clean-noise loss of E1 for the limiter that is always in circuit.)
+
+E3. Per-cell energy metric clipped at L (units of the bin's mean noise energy), summed over n
+    symbols at low per-symbol SNR.  A fraction rho of cells is hit by strong interference at
+    random (hits independent between candidate tones, as a keyed hop schedule makes them);
+    hit cells saturate at L.  Deflection^2 relative to the clean unclipped energy detector:
+      R = (1-rho)^2 Cov^2 / [ (1-rho) V + rho(1-rho)(L-mu)^2 ],
+      mu = 1-e^-L, Cov = 1-(L+1)e^-L, V = 1-2Le^-L-e^-2L.
+    'time dB' = -10log10(R) = extra integration time; power equivalent is half of it in the
+    square-law (very low SNR per symbol) regime.  Perfect side information: R = 1-rho.
+       rho | side-info | L=1      L=2      L=3      L=5      L=8      | raw J=10dB raw J=20dB raw J=40dB
+      0.00 |     -0.00 |     2.66     0.96     0.37     0.06     0.00 |      -0.00      -0.00      -0.00
+      0.02 |      0.09 |     2.84     1.30     0.95     1.43     3.07 |       7.29      26.03      65.98
+      0.05 |      0.22 |     3.11     1.78     1.74     2.97     5.62 |      10.70      29.94      69.89
+      0.10 |      0.46 |     3.55     2.53     2.87     4.86     8.19 |      13.42      32.84      72.79
+      0.25 |      1.25 |     4.92     4.60     5.61     8.55    12.50 |      16.97      36.46      76.41
+      0.40 |      2.22 |     6.40     6.55     7.91    11.24    15.38 |      18.63      38.12      78.06
+      0.60 |      3.98 |     8.76     9.34    10.99    14.58    18.83 |      19.87      39.30      79.24
+    numeric check L=3: mu=0.95021 (closed 0.95021)  Cov=0.80085 (closed 0.80085)  V=0.69880 (closed 0.69880)
+
+E4. Per-bin noise-level estimate from n exponential (energy) samples: sample mean has relative
+    variance 1/n; median/ln2 has relative variance 1/(n ln^2 2) = 2.08/n (asymptotic) but
+    tolerates up to 50 % contaminated samples.
+      n =     25 : rms error mean 20.0 %, median 28.9 %
+      n =    100 : rms error mean 10.0 %, median 14.4 %
+      n =    400 : rms error mean 5.0 %, median 7.2 %
+      n =   2000 : rms error mean 2.2 %, median 3.2 %
+      n =  20000 : rms error mean 0.7 %, median 1.0 %
+
+====================================================================================================
+G. INTERLEAVER RESONANCE (derived, illustrative).  A codeword of n = 64 channel symbols is
+   sent with regular spacing D symbols (D*0.16 s apart).  An interferer with period P and a
+   given on-time erases every symbol it overlaps (p_hit = (on + 0.16 s)/P).  Only spacings
+   whose codeword span is at least 10 interferer periods are examined (so plain 'burst longer
+   than the codeword' is excluded); for each such D the worst interferer phase is taken.
+   'random' is the same codeword placed pseudo-randomly: hit count ~ Binomial(64, p_hit).
+   CODAR 1 Hz sweep, 109 ms in band             p_hit=0.269 | regular D=1..2000: median worst-phase frac 0.30, max 1.00 (D=25), D with >=0.9: 80, D with >=p_hit+0.3: 80 of 2000 | random: mean 0.269, 99.9% point 0.453
+   burst radar 3.8 s on / 20 s (illustrative)   p_hit=0.198 | regular D=20..2019: median worst-phase frac 0.22, max 1.00 (D=125), D with >=0.9: 16, D with >=p_hit+0.3: 16 of 2000 | random: mean 0.198, 99.9% point 0.359
+   CHN wideband 50 s on / 90 s (IARU wiki)      p_hit=0.557 | regular D=88..2087: median worst-phase frac 0.59, max 1.00 (D=281), D with >=0.9: 39, D with >=p_hit+0.3: 43 of 2000 | random: mean 0.557, 99.9% point 0.750
+   slow radar 120 s on / 240 s (IARU 2024-07)   p_hit=0.501 | regular D=235..2234: median worst-phase frac 0.53, max 1.00 (D=750), D with >=0.9: 28, D with >=p_hit+0.3: 30 of 2000 | random: mean 0.501, 99.9% point 0.688
+   chirpsounder 28 ms / 300 s                   p_hit=0.001 | regular D=293..2292: median worst-phase frac 0.02, max 1.00 (D=1875), D with >=0.9: 1, D with >=p_hit+0.3: 3 of 2000 | random: mean 0.001, 99.9% point 0.016
+
+====================================================================================================
+B. SIMULATION (derived).  Complex baseband at 51.2 kHz, 16 symbols (2.56 s), 8192-point
+   symbol transforms (6.25 Hz bins), passband 300..3100 Hz above the sweep centre, radar
+   total power P = 1, no noise.  A random sub-bin frequency offset is applied.  'cells' are
+   (bin, symbol) pairs in the passband; powers are relative to the all-coherence mean P*DF/B.
+   The 'time fraction holding x %' lines give the blanking duty needed to remove x % of the
+   in-band interference energy (99 % = 20 dB, 99.9 % = 30 dB, 99.99 % = 40 dB suppression)
+   when the gate is applied after the passband filter ('steep': 200 Hz raised-cosine edges;
+   'taper': raised cosine over the whole passband).  The comb-notch line assumes the line
+   frequencies are known exactly and uses one 2.56 s Hann-windowed record.
+   Faded cases use one finite fading realisation, so their mean power differs from the nominal.
+   For a noise-like interferer the expected fractions above +6/0/-10/-20/-30 dB are
+   0.019 / 0.368 / 0.905 / 0.990 / 0.999.
+
+  10 kHz @ 50 Hz, coherent sweeps
+    rect window: mean cell power re P*DF/B =  +0.00 dB, max   +6.1 dB; cells above +6/0/-10/-20/-30 dB: 0.009 / 0.250 / 1.000 / 1.000 / 1.000
+    hann window: mean cell power re P*DF/B =  +0.00 dB, max   +6.5 dB; cells above +6/0/-10/-20/-30 dB: 0.092 / 0.250 / 0.500 / 0.500 / 0.750
+    steep filter: in-band power fraction 0.2560 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.229 / 0.388 / 0.587 / 0.716
+    taper filter: in-band power fraction 0.1053 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.135 / 0.214 / 0.308 / 0.385
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -34.2 / -51.0 / -66.1 dB
+    [6 s]
+  10 kHz @ 50 Hz, random phase per sweep
+    rect window: mean cell power re P*DF/B =  +0.00 dB, max   +6.3 dB; cells above +6/0/-10/-20/-30 dB: 0.004 / 0.395 / 0.930 / 0.984 / 1.000
+    hann window: mean cell power re P*DF/B =  -0.00 dB, max   +5.3 dB; cells above +6/0/-10/-20/-30 dB: 0.000 / 0.474 / 0.928 / 0.993 / 1.000
+    steep filter: in-band power fraction 0.2557 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.228 / 0.382 / 0.584 / 0.709
+    taper filter: in-band power fraction 0.1052 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.134 / 0.211 / 0.299 / 0.382
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -0.1 / -0.2 / -0.5 dB
+    [6 s]
+  10 kHz @ 50 Hz, coherent, Doppler spread 1 Hz
+    rect window: mean cell power re P*DF/B =  +1.33 dB, max  +15.2 dB; cells above +6/0/-10/-20/-30 dB: 0.062 / 0.101 / 0.438 / 0.793 / 0.961
+    hann window: mean cell power re P*DF/B =  +1.33 dB, max  +13.6 dB; cells above +6/0/-10/-20/-30 dB: 0.098 / 0.202 / 0.346 / 0.437 / 0.568
+    steep filter: in-band power fraction 0.3480 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.137 / 0.326 / 0.499 / 0.661
+    taper filter: in-band power fraction 0.1431 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.081 / 0.182 / 0.269 / 0.353
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -14.5 / -47.8 / -72.5 dB
+    [3 s]
+  10 kHz @ 50 Hz, coherent, Doppler spread 10 Hz
+    rect window: mean cell power re P*DF/B =  -0.53 dB, max  +12.0 dB; cells above +6/0/-10/-20/-30 dB: 0.030 / 0.209 / 0.754 / 0.977 / 0.999
+    hann window: mean cell power re P*DF/B =  -0.51 dB, max  +11.9 dB; cells above +6/0/-10/-20/-30 dB: 0.054 / 0.212 / 0.524 / 0.703 / 0.880
+    steep filter: in-band power fraction 0.2264 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.179 / 0.346 / 0.535 / 0.686
+    taper filter: in-band power fraction 0.0931 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.104 / 0.194 / 0.285 / 0.366
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -0.6 / -1.0 / -2.6 dB
+    [3 s]
+  10 kHz @ 50 Hz, coherent, two modes 1.5 ms apart (equal, 0.5 Hz spread each)
+    rect window: mean cell power re P*DF/B =  -1.66 dB, max  +11.1 dB; cells above +6/0/-10/-20/-30 dB: 0.066 / 0.121 / 0.414 / 0.960 / 1.000
+    hann window: mean cell power re P*DF/B =  -1.67 dB, max   +9.9 dB; cells above +6/0/-10/-20/-30 dB: 0.050 / 0.186 / 0.357 / 0.436 / 0.608
+    steep filter: in-band power fraction 0.1758 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.227 / 0.392 / 0.588 / 0.741
+    taper filter: in-band power fraction 0.0723 (W/B = 0.2800); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.158 / 0.261 / 0.378 / 0.479
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -39.3 / -51.9 / -67.4 dB
+    [4 s]
+  12 kHz @ 40 Hz, coherent sweeps
+    rect window: mean cell power re P*DF/B =  -0.01 dB, max   +9.2 dB; cells above +6/0/-10/-20/-30 dB: 0.122 / 0.219 / 0.656 / 0.885 / 0.986
+    hann window: mean cell power re P*DF/B =  +0.00 dB, max   +6.7 dB; cells above +6/0/-10/-20/-30 dB: 0.069 / 0.312 / 0.500 / 0.562 / 0.805
+    steep filter: in-band power fraction 0.2119 (W/B = 0.2333); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.188 / 0.307 / 0.471 / 0.629
+    taper filter: in-band power fraction 0.0873 (W/B = 0.2333); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.111 / 0.174 / 0.249 / 0.313
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -38.8 / -53.5 / -68.8 dB
+    [4 s]
+  20 kHz @ 10 Hz, coherent sweeps
+    rect window: mean cell power re P*DF/B =  +0.00 dB, max   +4.7 dB; cells above +6/0/-10/-20/-30 dB: 0.000 / 0.316 / 0.926 / 0.999 / 1.000
+    hann window: mean cell power re P*DF/B =  +0.04 dB, max   +2.3 dB; cells above +6/0/-10/-20/-30 dB: 0.000 / 0.561 / 0.981 / 1.000 / 1.000
+    steep filter: in-band power fraction 0.1276 (W/B = 0.1400); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.111 / 0.148 / 0.191 / 0.230
+    taper filter: in-band power fraction 0.0528 (W/B = 0.1400); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.066 / 0.096 / 0.119 / 0.144
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -38.9 / -53.7 / -69.7 dB
+    [3 s]
+  20 kHz @ 10 Hz, coherent, Doppler spread 1 Hz
+    rect window: mean cell power re P*DF/B =  -0.22 dB, max   +7.4 dB; cells above +6/0/-10/-20/-30 dB: 0.032 / 0.342 / 0.886 / 0.998 / 1.000
+    hann window: mean cell power re P*DF/B =  -0.19 dB, max   +6.1 dB; cells above +6/0/-10/-20/-30 dB: 0.030 / 0.296 / 0.918 / 0.999 / 1.000
+    steep filter: in-band power fraction 0.1212 (W/B = 0.1400); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.089 / 0.143 / 0.184 / 0.224
+    taper filter: in-band power fraction 0.0499 (W/B = 0.1400); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.054 / 0.091 / 0.116 / 0.140
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -6.9 / -48.1 / -73.2 dB
+    [3 s]
+  40 kHz @ 25 Hz, coherent sweeps
+    rect window: mean cell power re P*DF/B =  +0.00 dB, max   +5.4 dB; cells above +6/0/-10/-20/-30 dB: 0.000 / 0.250 / 1.000 / 1.000 / 1.000
+    hann window: mean cell power re P*DF/B =  +0.00 dB, max   +4.0 dB; cells above +6/0/-10/-20/-30 dB: 0.000 / 0.500 / 0.750 / 1.000 / 1.000
+    steep filter: in-band power fraction 0.0638 (W/B = 0.0700); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.061 / 0.119 / 0.212 / 0.309
+    taper filter: in-band power fraction 0.0263 (W/B = 0.0700); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.036 / 0.060 / 0.083 / 0.114
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -36.3 / -52.3 / -67.4 dB
+    [3 s]
+  40 kHz @ 25 Hz, coherent, Doppler spread 1 Hz
+    rect window: mean cell power re P*DF/B =  -0.15 dB, max  +10.5 dB; cells above +6/0/-10/-20/-30 dB: 0.062 / 0.172 / 0.630 / 0.953 / 1.000
+    hann window: mean cell power re P*DF/B =  -0.15 dB, max   +9.2 dB; cells above +6/0/-10/-20/-30 dB: 0.062 / 0.250 / 0.667 / 0.828 / 0.984
+    steep filter: in-band power fraction 0.0616 (W/B = 0.0700); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.045 / 0.104 / 0.187 / 0.282
+    taper filter: in-band power fraction 0.0254 (W/B = 0.0700); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.026 / 0.054 / 0.077 / 0.106
+    comb notch on a 2.56 s Hann record: residual in-band interference after notch of 2/4/8 Hz = -14.6 / -48.3 / -67.9 dB
+    [3 s]
+  CODAR 25.6 kHz @ 1 Hz, FMICW gate 1946 us 50 %, coherent
+    rect window: mean cell power re P*DF/B =  -0.23 dB, max  +12.7 dB; cells above +6/0/-10/-20/-30 dB: 0.083 / 0.170 / 0.309 / 0.808 / 0.978
+    hann window: mean cell power re P*DF/B =  -0.13 dB, max  +14.7 dB; cells above +6/0/-10/-20/-30 dB: 0.076 / 0.111 / 0.275 / 0.770 / 0.979
+    steep filter: in-band power fraction 0.0946 (W/B = 0.1094); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.083 / 0.371 / 0.710 / 0.889
+    taper filter: in-band power fraction 0.0382 (W/B = 0.1094); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.072 / 0.426 / 0.817 / 0.948
+    [2 s]
+  CODAR 25.6 kHz @ 1 Hz, ungated FMCW, coherent
+    rect window: mean cell power re P*DF/B =  -0.20 dB, max   +9.4 dB; cells above +6/0/-10/-20/-30 dB: 0.149 / 0.154 / 0.166 / 0.192 / 0.302
+    hann window: mean cell power re P*DF/B =  -0.09 dB, max  +12.2 dB; cells above +6/0/-10/-20/-30 dB: 0.080 / 0.107 / 0.128 / 0.139 / 0.145
+    steep filter: in-band power fraction 0.0948 (W/B = 0.1094); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.085 / 0.096 / 0.102 / 0.108
+    taper filter: in-band power fraction 0.0376 (W/B = 0.1094); smallest time fraction holding 90/99/99.9/99.99 % of the in-band interference energy: 0.048 / 0.071 / 0.084 / 0.092
+    [3 s]
+

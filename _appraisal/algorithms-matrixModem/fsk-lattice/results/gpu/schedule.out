@@ -1,0 +1,62 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+probe cublasGemmEx 8I,8I->32I: status 0
+probe cublasGemmEx 8I,8I->32I: status 0
+probe cublasGemmEx 8I,8I->32I: status 0
+probe cublasGemmEx 8I,8I->32I: status 0
+verify cpu decode: planted word found in 16 of 16 hypotheses
+schedule: transform portion = 32768 dwells (352 bins), decode portion = 16 hypotheses; CPU executor 13 threads
+
+scenario: decode-heavy: 32 blocks of 1 transform portion and 50 decode portions
+rule                                                              seconds      GPU transf/decode      CPU transf/decode
+stage-race outcome: GPU FP16 DFT@32768 + direct, CPU idle           3.236           32 /    1600            0 /       0
+GPU cheapest routes (cuFFT@4096 + direct), CPU idle                 3.222           32 /    1600            0 /       0
+fixed: CPU FFT, GPU search                                          3.234            0 /    1600           32 /       0
+GPU cheapest + CPU pulls transforms                                 3.117           31 /    1600            1 /       0
+GPU cheapest + CPU pulls decodes                                    2.919           32 /    1517            0 /      83
+cost-based (adaptive, cold start)                                   3.068           31 /    1517            1 /      83
+cost-based / best fixed rule: 1.051
+cost-based learned costs, ms per portion (uses): cuFFT@4096 0.197 (26); cuFFT@32768 0.428 (2); FP16 DFT@4096 0.437 (1); FP16 DFT@32768 0.412 (1); INT8 DFT@32768 0.575 (1); direct 1.908 (1440); FP16 matrix 3.177 (39); INT8 matrix 4.709 (38); CPU FFT 17.189 (1); CPU direct 36.772 (83);
+
+scenario: dwell-heavy: 4 blocks of 500 transform portions and 25 decode portions
+rule                                                              seconds      GPU transf/decode      CPU transf/decode
+stage-race outcome: GPU FP16 DFT@32768 + direct, CPU idle           0.905         2000 /     100            0 /       0
+GPU cheapest routes (cuFFT@4096 + direct), CPU idle                 0.492         2000 /     100            0 /       0
+fixed: CPU FFT, GPU search                                         35.887            0 /     100         2000 /       0
+GPU cheapest + CPU pulls transforms                                 0.525         1980 /     100           20 /       0
+GPU cheapest + CPU pulls decodes                                    0.522         2000 /      88            0 /      12
+cost-based (adaptive, cold start)                                   0.549         1995 /      89            5 /      11
+cost-based / best fixed rule: 1.116
+cost-based learned costs, ms per portion (uses): cuFFT@4096 0.163 (1892); cuFFT@32768 0.424 (26); FP16 DFT@4096 0.358 (26); FP16 DFT@32768 0.374 (26); INT8 DFT@32768 0.584 (25); direct 2.010 (83); FP16 matrix 3.280 (3); INT8 matrix 4.903 (3); CPU FFT 18.502 (5); CPU direct 40.463 (11);
+
+scenario: mixed: 16 decode-heavy blocks, then 2 dwell-heavy blocks
+rule                                                              seconds      GPU transf/decode      CPU transf/decode
+stage-race outcome: GPU FP16 DFT@32768 + direct, CPU idle           2.057         1016 /     850            0 /       0
+GPU cheapest routes (cuFFT@4096 + direct), CPU idle                 1.789         1016 /     850            0 /       0
+fixed: CPU FFT, GPU search                                         19.353            0 /     850         1016 /       0
+GPU cheapest + CPU pulls transforms                                 1.872         1005 /     850           11 /       0
+GPU cheapest + CPU pulls decodes                                    1.731         1016 /     802            0 /      48
+cost-based (adaptive, cold start)                                   1.807         1015 /     801            1 /      49
+cost-based / best fixed rule: 1.044
+cost-based learned costs, ms per portion (uses): cuFFT@4096 0.179 (961); cuFFT@32768 0.425 (14); FP16 DFT@4096 0.357 (14); FP16 DFT@32768 0.361 (13); INT8 DFT@32768 0.557 (13); direct 1.922 (759); FP16 matrix 3.194 (21); INT8 matrix 4.717 (21); CPU FFT 18.814 (1); CPU direct 37.012 (49);
+
+scenario: mixed, with a second GPU load (FP16 matrix search on another stream)
+rule                                                              seconds      GPU transf/decode      CPU transf/decode
+stage-race outcome: GPU FP16 DFT@32768 + direct, CPU idle           5.488         1016 /     850            0 /       0
+GPU cheapest routes (cuFFT@4096 + direct), CPU idle                11.671         1016 /     850            0 /       0
+fixed: CPU FFT, GPU search                                         20.902            0 /     850         1016 /       0
+GPU cheapest + CPU pulls transforms                                 9.010          709 /     850          307 /       0
+GPU cheapest + CPU pulls decodes                                   11.183         1016 /     714            0 /     136
+cost-based (adaptive, cold start)                                   5.176          873 /     787          143 /      63
+cost-based / best fixed rule: 0.943
+cost-based learned costs, ms per portion (uses): cuFFT@4096 8.839 (12); cuFFT@32768 2.946 (66); FP16 DFT@4096 13.281 (11); FP16 DFT@32768 2.157 (754); INT8 DFT@32768 2.638 (30); direct 3.493 (746); FP16 matrix 6.262 (21); INT8 matrix 7.697 (20); CPU FFT 18.931 (143); CPU direct 38.526 (63);
+
+scenario: GPU slowed 50x by added waits: 6 blocks of 20 transform and 10 decode portions
+rule                                                              seconds      GPU transf/decode      CPU transf/decode
+stage-race outcome: GPU FP16 DFT@32768 + direct, CPU idle           8.462          120 /      60            0 /       0
+GPU cheapest routes (cuFFT@4096 + direct), CPU idle                 7.172          120 /      60            0 /       0
+fixed: CPU FFT, GPU search                                          6.497            0 /      60          120 /       0
+GPU cheapest + CPU pulls transforms                                 6.828           80 /      60           40 /       0
+GPU cheapest + CPU pulls decodes                                    1.950          120 /       9            0 /      51
+cost-based (adaptive, cold start)                                   2.154          100 /       9           20 /      51
+cost-based / best fixed rule: 1.104
+cost-based learned costs, ms per portion (uses): cuFFT@4096 8.425 (91); cuFFT@32768 21.394 (3); FP16 DFT@4096 21.608 (2); FP16 DFT@32768 19.983 (2); INT8 DFT@32768 30.846 (2); direct 102.722 (7); FP16 matrix 166.960 (1); INT8 matrix 247.066 (1); CPU FFT 18.155 (20); CPU direct 34.466 (51);

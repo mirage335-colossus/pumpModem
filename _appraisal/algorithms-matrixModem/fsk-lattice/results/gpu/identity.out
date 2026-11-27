@@ -1,0 +1,6 @@
+Build cuda_12.8.r12.8/compiler.35583870_0
+NVIDIA RTX PRO 6000 Blackwell Server Edition, 595.112.07, 97887 MiB, Disabled
+Model name:                              AMD EPYC 9355 32-Core Processor
+128
+1816eaba925730950fc58fb514a88cc834d49f9c38e767b894f09599a4872454  lattice_gpu.cu
+5cad546cda7930749cc0db663d4bc347fcbdb19ec88972b169757a64b3f5b475  lattice_gpu

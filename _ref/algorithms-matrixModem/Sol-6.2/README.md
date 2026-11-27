@@ -2,6 +2,12 @@
 
 25 November 2026 · Research and experimental design
 
+**26 November 2026.** The [Fable-5.2 pass](../Fable-5.2/README.md) adds the FSK lattice design behind the
+[FSK specification draft](../../../_appraisal/matrixModem-FSK.md), a GPU measurement of DFT against FFT, an
+OTHR tolerance simulation, exact short-message energy tables and four literature reviews. It also lists
+[corrections](../Fable-5.2/README.md#corrections-to-earlier-matrix-modem-documents) to statements in this
+directory, which are annotated where they occur.
+
 **Reading the research passes.** The [original brief](../../../_appraisal/matrixModem.md)
 records the requested goals and constraints. The [24 November Opus pass](../Opus-5.5/README.md)
 reviewed the initial Sol material. This directory now also contains the subsequent

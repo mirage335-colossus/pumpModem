@@ -1,0 +1,11 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+chunks: 352 bins, dwells per call against route; CPU route uses 13 host threads (plain radix-2 FFT)
+         B            fft         dft16h           dft8            cpu   (dwells/s)
+probe cublasGemmEx 8I,8I->32I: status 0
+        64       12840428        7249894        1035170         105142
+probe cublasGemmEx 8I,8I->32I: status 0
+       512       73983617       30108232        7320865         456172
+probe cublasGemmEx 8I,8I->32I: status 0
+      4096      200570426       96602618       31581498         905112
+probe cublasGemmEx 8I,8I->32I: status 0
+     32768       77735122       94169786       59827479        1824332

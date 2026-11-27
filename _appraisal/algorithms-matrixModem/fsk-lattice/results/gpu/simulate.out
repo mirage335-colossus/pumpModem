@@ -1,0 +1,13 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+probe cublasGemmEx 8I,8I->32I: status 0
+simulate: B=32768 dwells per call (3.6 h of signal), 1024 complex samples each
+noise (cuRAND Philox normal)                     0.179 ms/call     183240996 dwells/s    73296399 x real time
+tone with Rayleigh gain                          0.369 ms/call      88849333 dwells/s    35539733 x real time
+samples to FP16                                  0.272 ms/call     120261058 dwells/s    48104423 x real time
+samples to 4-bit code                            0.227 ms/call     144548412 dwells/s    57819365 x real time
+dft16h + evidence                                0.629 ms/call      52077603 dwells/s    20831041 x real time
+fft + evidence                                   0.496 ms/call      66023663 dwells/s    26409465 x real time
+total: noise, tone, FP16, dft16h, evidence       1.417 ms/call      23125456 dwells/s     9250183 x real time
+total: noise, tone, fft, evidence                1.049 ms/call      31243644 dwells/s    12497458 x real time
+total: noise, tone, 4-bit code, dft8, evid.      1.764 ms/call      18576409 dwells/s     7430563 x real time
+mean 4-bit evidence level 1.541 (noise only would be about 1.54)

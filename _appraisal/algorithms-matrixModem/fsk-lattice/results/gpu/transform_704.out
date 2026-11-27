@@ -1,0 +1,15 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+probe cublasGemmEx 8I,8I->32I: status 0
+transform: B=32768 dwells per call (3.6 h of signal), 704 bins, matrix product 1408 x 2048 x 32768 = 189.0 GFLOP per call
+accuracy (error power / signal power): cuFFT -134.7 dB, dft16 -71.7 dB, 4-bit sample code alone -16.3 dB
+accuracy dft8 with 8-bit coefficients against the exact transform of the same 4-bit samples: -50.0 dB
+accuracy dft8 with 15-level (4-bit) coefficients against the exact transform of the same 4-bit samples: -25.2 dB
+fft (transform only)             0.369 ms/call      88749930 dwells/s    35499972 x real time     511.8 nominal TFLOP/s
+fft + evidence                   0.496 ms/call      66034833 dwells/s    26413933 x real time     380.8 nominal TFLOP/s
+dft16 (product only)             0.569 ms/call      57542061 dwells/s    23016824 x real time     331.9 nominal TFLOP/s
+dft16 + evidence                 0.698 ms/call      46935025 dwells/s    18774010 x real time     270.7 nominal TFLOP/s
+dft16h (product only)            0.578 ms/call      56697260 dwells/s    22678904 x real time     327.0 nominal TFLOP/s
+dft16h + evidence                0.635 ms/call      51641625 dwells/s    20656650 x real time     297.8 nominal TFLOP/s
+dft8 8-bit coef (product)        0.843 ms/call      38893169 dwells/s    15557268 x real time     224.3 nominal TFLOP/s
+dft8 8-bit coef + evidence       0.991 ms/call      33063526 dwells/s    13225411 x real time     190.7 nominal TFLOP/s
+dft8 4-bit coef + evidence       0.991 ms/call      33066638 dwells/s    13226655 x real time     190.7 nominal TFLOP/s
