@@ -16,6 +16,9 @@ indexed in
 - Target: 2–100 mW through more than 150 dB of path loss, C/N₀ from about +10 down to −20 dB-Hz,
   short messages that may take hours, days or weeks. On phase-stable paths without FHSS the range
   extends to about −37 dB-Hz, where coherent links below 9 kHz already work.
+- **Constant envelope always; no amplitude shifts.** Power, not bandwidth, limits every link in
+  this range, and a peak-limited transmitter that varies its amplitude lowers its average power
+  ([4.2](#42-tone-length)).
 - **Messages shorter than 10 bits are not supported.** A message of about 10 bits is expected to
   take less than twice as long to send reliably as a single bit at similar confidence. Under this
   specification's sizing it takes 1.1 to 1.3 times as long
@@ -134,6 +137,12 @@ steady path and for spreads of 0.1 / 1 / 3 / 10 / 30 Hz:
   clock-rate search grows in step (1, 6 and 126 hypotheses for a one-hour block at ±1 ppm). On a
   diffuse path the delay spread holds the rate to roughly 50 to 200 Hz on HF. A faster rate
   would improve concealment only for strong signals ([section 14](#14-decisions), open).
+- **Where phase or amplitude would carry information instead.** Near the full bandwidth the
+  signal is phase keying, and amplitude levels pay only when bandwidth limits the link: above
+  roughly 2 bit/s/Hz, at a symbol energy of 12 to 15 dB over the noise density. In 2.2 kHz that
+  is a C/N₀ of about 46 to 48 dB-Hz, against +10 to −20 dB-Hz here; the default lattice carries
+  0.023 bit/s/Hz before coding. Both also need a coherent path. That regime belongs to a fast
+  modem and is outside this specification. Textbook reasoning, not computed.
 - Named held-tone lengths, and where each reaches diminishing returns with per-tone reception:
 
   | Held tone | Diminishing returns for |
@@ -717,6 +726,7 @@ transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s 
 | At least one keyed phase change per tone is mandatory in all cases, with four phases | 1, 4.4 |
 | Preferred tone rate: as fast as the spread and total bandwidth allow, up to one tone per cell | 4.2 |
 | Tones shorter than one cell and three phases per cell are not offered | 4.2, 4.4 |
+| No amplitude shifts and no information in phase; those belong to a fast modem on a strong, coherent link | 1, 4.2 |
 
 **Open**
 

@@ -187,6 +187,16 @@ verification marks and not-accessed lists:
     27 November;
     my first assessment ("the ceiling is unlikely to bind") was wrong.
 
+24. **Amplitude shifts would pay only far above this modem's range.** They need a bandwidth-
+    limited link: roughly 2 bit/s/Hz and a C/N₀ of 46 to 48 dB-Hz in 2.2 kHz, against +10 to
+    −20 dB-Hz here. A tone rate near the bandwidth turns the signal into phase keying but is not
+    by itself the condition. Below that point a peak-limited transmitter loses average power by
+    varying amplitude. Textbook reasoning after the user's question of 27 November; not
+    computed.
+25. **The keyed phase keeps coherent reception to the keyed receiver.** On a steady path the
+    gap to an energy observer grows with the coherent time: about 13 dB for 4 positions and a
+    one-hour coherent block, 5 dB more per tenfold. Hand estimate.
+
 ## State of the specification
 
 The specification was rewritten as one consistent document on 27 November 2026, after the
@@ -210,6 +220,9 @@ of phase steps and tone changes in section 4.4.
 
 The specification was reconciled a second time on 27 November after these additions. What
 changed is listed at the end of the mandatory-phase subsection of the lattice design note.
+
+Section 1 now states constant envelope without amplitude shifts as a fixed decision, with the
+reasoning in section 4.2.
 
 ## Corrections to earlier Matrix Modem documents
 

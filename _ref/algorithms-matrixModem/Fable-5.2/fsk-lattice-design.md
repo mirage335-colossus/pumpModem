@@ -1195,6 +1195,17 @@ of `lattice_receiver.cpp`; the computed values are at the end of this subsection
   removed from section 3; "oscillator drift adds nothing" narrowed to the timing search; the
   diffuse-path line of receiver item 8 aligned with section 4.2; terms for phase key and phase
   interval added; 1 ppm at 9 kHz made 9 mHz throughout.
+- **When amplitude shifts would become useful** (user's intuition of 27 November, with which I
+  agree in direction; textbook reasoning, nothing computed). Amplitude levels pay when the
+  bandwidth, not the power, limits the link: each complex sample offers two dimensions, and
+  levels are needed only once a dimension must carry more than about one bit. That is roughly
+  above 2 bit/s/Hz, at a symbol energy of about 12 to 15 dB over the noise density. A tone rate
+  near the bandwidth is necessary for that but not sufficient; the signal level must be there
+  too. In 2.2 kHz it means a C/N₀ of about 46 to 48 dB-Hz, against this specification's +10 to
+  −20 dB-Hz, and the default lattice carries 0.023 bit/s/Hz before coding. Below that point a
+  peak-limited transmitter loses by varying amplitude, because it lowers the average power.
+  Information in phase or amplitude also needs a coherent path. This regime belongs to a fast
+  modem, not to this specification.
 - **Open.** The fourth-power statistic and the observer's best statistic against the keyed
   signal; whether 2 or 4 phases per cell are worth offering; measured reference quality below
   9 kHz.
