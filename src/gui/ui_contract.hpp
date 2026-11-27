@@ -154,6 +154,12 @@ struct Option {
     bool enabled = true;
     TextTone text_tone = TextTone::normal; // Presentation never changes selectability.
 };
+// A simulation controller may need asynchronous preparation before its host
+// can attach. A pending controller has neither readiness nor an error.
+struct SimulationStartup {
+    bool ready=false;
+    std::string error;
+};
 struct FieldState {
     std::string text;
     std::string display_text; // Optional effective-value label; does not replace the saved selection.

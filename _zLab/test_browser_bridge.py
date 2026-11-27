@@ -41,7 +41,7 @@ while True:
 
 READY_PEER = PEER.replace(
     '{"generation":"1","ack":"0"}',
-    '{"version":1,"generation":"1","ack":"0","controls":'
+    '{"version":1,"generation":"1","ack":"0","simulationStartup":{"state":"ready"},"controls":'
     '[{"kind":"label","text":"Robust simulation ready"}]}',
 )
 
@@ -361,9 +361,7 @@ class BrowserBridgeTests(unittest.TestCase):
 
     def test_loopback_ui_and_simulation_peer(self):
         self.assertTrue(self.base.startswith('http://127.0.0.1:'))
-        self.assertIn(b'zLab Robust simulation', self.request('/'))
-        script = self.request('/tools/preview.mjs')
-        self.assertIn(b'audio.disabled=true;audio.title=', script)
+        self.assertEqual(json.loads(self.request('/host-config')), {'profile': 'lab-simulation', 'managed': False})
         worker = self.start_peer()
         snapshot = self.request('/output')
         self.assertEqual(snapshot[:4], b'DPW1')
@@ -373,18 +371,28 @@ class BrowserBridgeTests(unittest.TestCase):
         self.bridge.close()
         self.assertIsNotNone(worker.process.poll())
 
-    def test_lab_shell_and_shared_renderer_are_forced_dark(self):
-        # The browser host supplies this stylesheet to its sandboxed renderer.
-        # Only the lab response is changed; the maintained asset remains intact.
-        original = (Path(__file__).resolve().parent.parent / 'web/style.css').read_bytes()
-        shell = self.request('/')
-        stylesheet = self.request('/web/style.css')
-        self.assertIn(b':root { color-scheme: dark; }', shell)
-        self.assertEqual(stylesheet, original + b'\n:root { color-scheme: dark; }\n')
-        self.assertIn(b'color-scheme:light dark', original)
+    def test_lab_serves_the_canonical_shell_and_hosted_assets(self):
+        root = Path(__file__).resolve().parent.parent
+        self.assertEqual(self.request('/'), (root / 'tools/preview.html').read_bytes())
+        self.assertEqual(self.request('/tools/preview.mjs'), (root / 'tools/preview.mjs').read_bytes())
+        for name in browser_bridge._preview.WEB_ASSETS:
+            self.assertEqual(self.request('/web/' + name), (root / 'web' / name).read_bytes())
         with self.assertRaises(urllib.error.HTTPError) as forbidden:
             self.request('/web/style.css', Origin='https://evil.example')
         self.assertEqual(forbidden.exception.code, 403)
+        with self.assertRaises(urllib.error.HTTPError) as forbidden:
+            self.request('/host-config', token='wrong')
+        self.assertEqual(forbidden.exception.code, 403)
+
+    def test_supplied_assets_are_pinned_until_bridge_close(self):
+        self.bridge.close()
+        assets = browser_bridge.capture_web_assets(browser_bridge.ROOT / 'web')
+        assets['style.css'] = b':root { color: navy; }'
+        self.bridge = browser_bridge.start([sys.executable, '-u', '-c', PEER], web_assets=assets)
+        parts = urlsplit(self.bridge.url)
+        self.base, self.token = f'{parts.scheme}://{parts.netloc}', parts.fragment
+        assets['style.css'] = b':root { color: orange; }'
+        self.assertEqual(self.request('/web/style.css'), b':root { color: navy; }')
 
     def test_close_retries_failed_worker_cleanup(self):
         worker = self.start_peer()
@@ -665,10 +673,7 @@ os._exit(0)
         self.bridge = browser_bridge.start([sys.executable, '-u', '-c', LIVE_PEER], live=True)
         parts = urlsplit(self.bridge.url)
         self.base, self.token = f'{parts.scheme}://{parts.netloc}', parts.fragment
-        self.assertIn(b'local companion', self.request('/'))
-        script = self.request('/tools/preview.mjs')
-        self.assertIn(b'/lab-resources', script)
-        self.assertIn(b'if(!stopped)report(error)', script)
+        self.assertEqual(json.loads(self.request('/host-config')), {'profile': 'lab-live', 'managed': False})
         self.start_peer()
         self.request('/output')
         result = json.loads(self.request('/lab-resources'))
@@ -724,9 +729,10 @@ os._exit(0)
             browser_bridge.start([])
 
 
-class GpuStartupReadinessTests(unittest.TestCase):
-    def start_worker(self, controls):
-        snapshot = json.dumps({'version': 1, 'generation': '1', 'ack': '0', 'controls': controls}).encode()
+class SimulationStartupReadinessTests(unittest.TestCase):
+    def start_worker(self, controls, startup):
+        snapshot = json.dumps({'version': 1, 'generation': '1', 'ack': '0', 'controls': controls,
+                               'simulationStartup': startup}).encode()
         script = PEER.replace('b\'{"generation":"1","ack":"0"}\'', repr(snapshot))
         worker = browser_bridge.SimulationWorker([sys.executable, '-u', '-c', script], managed=True)
         self.addCleanup(worker.close)
@@ -736,8 +742,8 @@ class GpuStartupReadinessTests(unittest.TestCase):
         worker = self.start_worker([
             {'kind': 'label', 'text': 'GPU control disabled · GPU reception unavailable: no compatible device · using CPU'},
             {'kind': 'toggle', 'label': 'GPU', 'enabled': False, 'checked': False},
-            {'kind': 'label', 'text': 'Robust simulation ready'},
-        ])
+            {'kind': 'label', 'text': 'Modem prepared'},
+        ], {'state': 'ready'})
         worker.wait_ready(timeout=5)
         self.assertTrue(worker.ready)
         self.assertIsNone(worker.startup_error)
@@ -749,12 +755,22 @@ class GpuStartupReadinessTests(unittest.TestCase):
         diagnostic = 'GPU reception unavailable: no compatible device'
         worker = self.start_worker([
             {'kind': 'toggle', 'label': 'GPU', 'enabled': False, 'checked': True},
-            {'kind': 'label', 'text': diagnostic},
-        ])
+            {'kind': 'label', 'text': 'Modem prepared'},
+        ], {'state': 'failed', 'reason': diagnostic})
         with self.assertRaises(browser_bridge._preview.PreviewError) as failure:
             worker.wait_ready(timeout=5)
         self.assertEqual(str(failure.exception), diagnostic)
         self.assertFalse(worker.ready)
+
+    def test_ui_ready_label_does_not_override_pending_startup(self):
+        worker = self.start_worker([{'kind': 'label', 'text': 'Robust simulation ready'}], {'state': 'pending'})
+        with self.assertRaisesRegex(browser_bridge._preview.PreviewError, 'Timed out waiting'):
+            worker.wait_ready(timeout=.1)
+
+    def test_incompatible_startup_protocol_is_reported(self):
+        worker = self.start_worker([], None)
+        with self.assertRaisesRegex(browser_bridge._preview.PreviewError, 'startup protocol'):
+            worker.wait_ready(timeout=5)
 
 
 class ManagedBrowserTests(unittest.TestCase):
@@ -798,6 +814,7 @@ class ManagedBrowserTests(unittest.TestCase):
             "\"ack\":\"1\",\"controls\":[{\"kind\":\"text\",\"text\":\"changed value\"}]}'))",
         )
         self.start_bridge(script)
+        self.assertEqual(json.loads(self.request('/host-config', None)), {'profile': 'lab-simulation', 'managed': True})
         worker = self.bridge.server.worker
         self.assertEqual(self.bridge.status(), ('waiting', ''))
         original = self.attach()

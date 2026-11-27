@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Expose the shared Robust UI over a private loopback bridge.
+"""Expose the shared Data Pump UI over a private loopback bridge.
 
 The command must speak DPW1 on stdin/stdout; for SSH it must invoke a pod-side
 relay which starts the native worker with anonymous pipes. This module never
@@ -30,6 +30,9 @@ ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location('datapump_lab_preview', ROOT / 'tools' / 'preview.py')
 _preview = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_preview)
+WEB_ASSETS = _preview.WEB_ASSETS
+MAX_WEB_ASSET = _preview.MAX_WEB_ASSET
+capture_web_assets = _preview.capture_web_assets
 
 _BROWSER_START_TIMEOUT = 60
 _RECONNECT_GRACE = 8
@@ -229,16 +232,15 @@ class SimulationWorker(_preview.Worker):
             # this is not a physical audio qualification.
             if self.live:
                 return self.resources is not None
-            for control in snapshot['controls']:
-                if not isinstance(control, dict) or control.get('kind') != 'label':
-                    continue
-                value = control.get('text')
-                if isinstance(value, str) and value.startswith(('GPU reception unavailable', 'GPU reception is unavailable')):
-                    self.startup_error = value[:1000]
-                    return True
-                if value == 'Robust simulation ready':
-                    return True
-            return False
+            startup = snapshot.get('simulationStartup')
+            if not isinstance(startup, dict) or startup.get('state') not in ('pending', 'ready', 'failed'):
+                self.startup_error = 'Worker lacks the simulation startup protocol. Rebuild the native worker.'
+                return True
+            if startup['state'] == 'failed':
+                reason = startup.get('reason')
+                self.startup_error = reason[:1000] if isinstance(reason, str) and reason else 'Simulation startup failed.'
+                return True
+            return startup['state'] == 'ready'
 
         with self.state:
             if not self.state.wait_for(is_ready, timeout=timeout):
@@ -412,8 +414,9 @@ class SimulationWorker(_preview.Worker):
 
 class Handler(_preview.Handler):
     def dispatch(self, method):
-        if not self.server.managed or (method == 'GET' and self.path.startswith('/web/')
-                                        and self.path[5:] in _preview.WEB_ASSETS):
+        if not self.server.managed or (method == 'GET' and (
+                self.path in ('/', '/tools/preview.mjs', '/host-config') or
+                self.path.startswith('/web/') and self.path[5:] in _preview.WEB_ASSETS)):
             return super().dispatch(method)
         try:
             if not self.authenticated():
@@ -449,8 +452,6 @@ class Handler(_preview.Handler):
                 pass
 
     def do_GET(self):
-        # Use the existing, maintained UI, with the unavailable microphone
-        # control visibly disabled rather than requesting device permission.
         if self.path == '/lab-resources':
             try:
                 if not self.authenticated():
@@ -465,58 +466,11 @@ class Handler(_preview.Handler):
                 return self.reply(str(error), status=error.status)
         if self.path == '/favicon.ico' and self.local():
             return self.reply(status=204)
-        if self.path in ('/', '/tools/preview.mjs', '/web/style.css'):
-            try:
-                if not self.local():
-                    raise _preview.PreviewError('Invalid origin or host', 403)
-                if self.path == '/':
-                    data = (ROOT / 'tools' / 'preview.html').read_text()
-                    if self.server.managed:
-                        data = data.replace('<html lang="en">', '<html lang="en" data-lab-managed>')
-                        data = data.replace('<button id="audio" disabled>', '<button id="audio" hidden disabled>')
-                        label = 'End Live/Duplex' if self.server.live else 'End simulation'
-                        data = data.replace('Stop worker</button>', label + '</button>')
-                    # Keep the lab shell's native controls and dialogs dark,
-                    # independently of the user's browser/OS preference.
-                    data = data.replace('</style>', ':root { color-scheme: dark; }\n</style>', 1)
-                    data = data.replace('Native Data Pump worker', 'zLab Robust live/duplex' if self.server.live else 'zLab Robust simulation')
-                    data = data.replace('Enable microphone and audio', 'Audio handled by local companion' if self.server.live else 'Live audio unavailable')
-                    if self.server.live:
-                        data = data.replace('<p id="status"', '<p id="lab-resources">Local audio resources: awaiting receipt</p><p id="status"')
-                    return self.reply(data, 'text/html; charset=utf-8')
-                if self.path == '/web/style.css':
-                    # The shared renderer runs in a sandboxed iframe and is
-                    # passed this text. Override its light/dark preference for
-                    # the lab only; the shared Data Pump asset stays unchanged.
-                    data = (ROOT / 'web' / 'style.css').read_text()
-                    return self.reply(data + '\n:root { color-scheme: dark; }\n', 'text/css')
-                data = (ROOT / 'tools' / 'preview.mjs').read_text()
-                old = 'audio.disabled=false;audio.onclick=()=>view.enableAudio().catch(report);'
-                if old not in data:
-                    raise _preview.PreviewError('Unsupported preview UI version', 500)
-                data = data.replace(old, "audio.disabled=true;audio.title='Audio is handled outside the browser.';")
-                if self.server.live:
-                    anchor = 'session=result.session;files=result.files;startResolve();'
-                    if anchor not in data:
-                        raise _preview.PreviewError('Unsupported preview UI version', 500)
-                    update = """session=result.session;files=result.files;startResolve();
-                    const showResources=async()=>{try {const r=await (await request('/lab-resources')).json();
-                        if(r)document.querySelector('#lab-resources').textContent='Local audio resources (bytes unless stated; workspace includes its buffer cap; process baseline excluded; this is not a total): '+JSON.stringify(r);
-                    }catch(error){if(!stopped)report(error);}};
-                    showResources();resourcesTimer=setInterval(showResources,2000);"""
-                    data = data.replace(anchor, update)
-                    data = data.replace("let session='',view,stopped=false,heartbeat,files=null,snapshot=null;",
-                                        "let session='',view,stopped=false,heartbeat,resourcesTimer,files=null,snapshot=null;")
-                    data = data.replace('clearInterval(heartbeat);inputs.close();',
-                                        'clearInterval(heartbeat);clearInterval(resourcesTimer);inputs.close();')
-                return self.reply(data, 'text/javascript')
-            except (OSError, _preview.PreviewError) as error:
-                return self.reply(str(error), status=getattr(error, 'status', 500))
         return super().do_GET()
 
 
 class Server(_preview.PreviewServer):
-    def __init__(self, command, port, files=None, live=False, managed=False):
+    def __init__(self, command, port, files=None, live=False, managed=False, web_assets=None):
         self.command = command
         self.files = files
         self.live = live
@@ -530,7 +484,8 @@ class Server(_preview.PreviewServer):
         options = SimpleNamespace(mode='worker', simulation=not live, files=files)
         # PreviewServer fixes the bind address to IPv4 loopback and implements
         # request limits, origin/token checks and session lease enforcement.
-        super().__init__(options, port)
+        super().__init__(options, port, web_assets=web_assets)
+        self.host_config = {'profile': 'lab-live' if live else 'lab-simulation', 'managed': managed}
         self.RequestHandlerClass = Handler
         self.request_idle = threading.Condition(self.owner_lock)
 
@@ -727,12 +682,12 @@ class Server(_preview.PreviewServer):
 
 
 class Bridge:
-    def __init__(self, command, port=0, files=None, live=False, *, managed=False, ready_timeout=30):
+    def __init__(self, command, port=0, files=None, live=False, *, managed=False, ready_timeout=30, web_assets=None):
         if not isinstance(command, (list, tuple)) or not command or any(not isinstance(x, str) or not x for x in command):
             raise ValueError('command must be a nonempty argument list')
         if not isinstance(port, int) or not 0 <= port <= 65535:
             raise ValueError('invalid port')
-        self.server = Server(list(command), port, files, live, managed)
+        self.server = Server(list(command), port, files, live, managed, web_assets)
         self.url = self.server.origin + '/#' + self.server.token
         self._closed = False
         self._close_lock = threading.Lock()
@@ -790,8 +745,8 @@ class Bridge:
         self.close()
 
 
-def start(command, port=0, files=None, live=False, *, managed=False, ready_timeout=30):
-    return Bridge(command, port, files, live, managed=managed, ready_timeout=ready_timeout)
+def start(command, port=0, files=None, live=False, *, managed=False, ready_timeout=30, web_assets=None):
+    return Bridge(command, port, files, live, managed=managed, ready_timeout=ready_timeout, web_assets=web_assets)
 
 
 def main():

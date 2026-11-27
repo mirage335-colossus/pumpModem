@@ -68,9 +68,9 @@ export function feedFrames(bytes,deliver) {
 export async function boot(document,environment=window,frontend=createHostedFrontend) {
     const token=environment.location.hash.slice(1),status=document.querySelector('#status');
     const audio=document.querySelector('#audio'),stop=document.querySelector('#stop');
-    const managed=document.documentElement?.hasAttribute('data-lab-managed');
+    let managed=false;
     let client='';
-    let session='',view,stopped=false,heartbeat,files=null,snapshot=null;
+    let session='',view,stopped=false,heartbeat,resourcesTimer,files=null,snapshot=null;
     let startResolve;const started=new Promise(resolve=>startResolve=resolve);
     let serviceBarrier=Promise.resolve(),gatedBytes=0,gatedCount=0;
     const report=error=>{status.textContent=error?.message||String(error);};
@@ -143,7 +143,7 @@ export async function boot(document,environment=window,frontend=createHostedFron
         } finally {signal.removeEventListener('abort',cancel);release();}
     };
     const close=()=>{
-        if(stopped)return;stopped=true;clearInterval(heartbeat);inputs.close();
+        if(stopped)return;stopped=true;clearInterval(heartbeat);clearInterval(resourcesTimer);inputs.close();
         if(session&&!managed)environment.navigator.sendBeacon('/close',JSON.stringify({token,session}));
         view?.dispose();audio.disabled=true;stop.disabled=true;
     };
@@ -151,12 +151,27 @@ export async function boot(document,environment=window,frontend=createHostedFron
         if(managed&&!stopped&&session)request('/detach',empty,undefined,true).catch(()=>{});
         close();
     },{once:true});
-    if(managed)environment.addEventListener('pageshow',event=>{
-        if(event.persisted)environment.location.reload();
-    });
     try {
         if(!token)throw new Error('Open the complete URL printed by preview.py, including its # token.');
+        const config=await (await request('/host-config')).json();
+        if(stopped)return;
+        if(!['preview','lab-simulation','lab-live'].includes(config?.profile)||typeof config.managed!=='boolean'||
+                (config.profile==='preview'&&config.managed))throw new Error('Invalid worker host configuration');
+        const lab=config.profile!=='preview',live=config.profile==='lab-live';
+        managed=config.managed;
+        if(lab){
+            document.documentElement.style.colorScheme='dark';
+            const title=live?'zLab Live/Duplex':'zLab simulation';
+            document.title=title;
+            document.querySelector('#host-title').textContent=title;
+            audio.hidden=managed;
+            audio.textContent=live?'Audio handled by local companion':'Live audio unavailable';
+            audio.title='Audio is handled outside the browser.';
+            if(managed)stop.textContent=live?'End Live/Duplex':'End simulation';
+            if(live)document.querySelector('#lab-resources').hidden=false;
+        }
         if(managed){
+            environment.addEventListener('pageshow',event=>{if(event.persisted)environment.location.reload();});
             const key='datapump-lab-tab',storage=environment.sessionStorage;
             client=storage.getItem(key)||Array.from(environment.crypto.getRandomValues(new Uint8Array(32)),
                 byte=>byte.toString(16).padStart(2,'0')).join('');
@@ -167,7 +182,7 @@ export async function boot(document,environment=window,frontend=createHostedFron
         }));
         if(stopped)return;
         view=frontend({container:document.querySelector('#root'),rendererSource:sources[0],protocolSource:sources[1],
-            styleText:sources[2],workletSource:sources[3],send,handleService,
+            styleText:sources[2],workletSource:sources[3],dark:lab,send,handleService,
             status:value=>{if(!stopped)report(value.reason||('Audio: '+value.state));}});
         await view.ready;
         if(stopped)return;
@@ -191,7 +206,17 @@ export async function boot(document,environment=window,frontend=createHostedFron
         heartbeat=setInterval(()=>request('/heartbeat',empty).catch(error=>{
             if(!managed||error.status===410){report(error);close();}
         }),4000);
-        audio.disabled=false;audio.onclick=()=>view.enableAudio().catch(report);
+        if(!lab){audio.disabled=false;audio.onclick=()=>view.enableAudio().catch(report);}
+        if(live){
+            const showResources=async()=>{
+                try{
+                    const receipt=await (await request('/lab-resources')).json();
+                    if(receipt&&!stopped)document.querySelector('#lab-resources').textContent=
+                        'Local audio resources (bytes unless stated; workspace includes its buffer cap; process baseline excluded; this is not a total): '+JSON.stringify(receipt);
+                }catch(error){if(!stopped)report(error);}
+            };
+            showResources();resourcesTimer=setInterval(showResources,2000);
+        }
         stop.disabled=false;stop.onclick=async()=>{
             try{
                 await request('/stop',empty);

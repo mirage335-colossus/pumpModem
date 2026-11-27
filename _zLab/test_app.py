@@ -480,7 +480,11 @@ class Tests(unittest.TestCase):
             calls = []
             def fake(*args, **kwargs):
                 calls.append((args, kwargs))
+                live = kwargs['profile'] == 'live'
+                root = '/workspace/pump-lab-live' if live else '/workspace/pump-lab'
+                name = 'datapump-lab-worker' if live else 'datapump-worker'
                 kwargs['on_output']('sensitive build log\nPUMP_LAB_MODE=cuda\nPUMP_LAB_DEVICE=secretTOKEN\nPUMP_LAB_WORKER_SHA256=abcd')
+                return root + '/revisions/' + 'a' * 64 + '/build/lab/' + name
             record = {'compute_kind':'gpu','compute_id':'g1','deadline':time.time()+60, 'cloud':'SECURE'}
             for tier in (None, 'COMMUNITY'):
                 if tier:
@@ -489,7 +493,17 @@ class Tests(unittest.TestCase):
                     deploy_selected(pod, record, str(known), None, deploy_func=fake)
             self.assertEqual(calls, [])
             pod['cloud'] = 'SECURE'
-            receipt = deploy_selected(pod, record, str(known), None, 'secretTOKEN', fake)
+            deployment = deploy_selected(pod, record, str(known), None, 'secretTOKEN', fake)
+            receipt = deployment.receipt
+            self.assertIn('Deployment revision: ' + 'a' * 64, receipt)
+            self.assertRegex(receipt, r'Hosted assets SHA-256: [0-9a-f]{64}')
+            self.assertIn('renderer.mjs', deployment.web_assets)
+            relay = ssh_command(pod, str(known), worker_path=deployment.worker_path)[-1]
+            self.assertTrue(relay.endswith(deployment.worker_path))
+            self.assertIn('/revisions/' + 'a' * 64 + '/_zLab/worker_relay.py', relay)
+            for invalid in (deployment.worker_path + ' ; bad', deployment.worker_path.replace('/revisions/', '/../')):
+                with self.assertRaisesRegex(ValueError, 'invalid worker path'):
+                    ssh_command(pod, str(known), worker_path=invalid)
             self.assertEqual(calls[0][1]['mode'], 'gpu')
             self.assertTrue(0 < calls[0][1]['timeout'] <= 60)
             self.assertIn('PUMP_LAB_MODE=cuda', receipt)

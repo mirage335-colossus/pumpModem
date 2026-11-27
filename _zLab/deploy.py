@@ -4,9 +4,9 @@
 The SSH server host key must already be verified in ``known_hosts``. This helper
 never performs trust-on-first-use or starts a pod. It creates a private
 profile-specific directory (``/workspace/pump-lab`` for simulation or
-``/workspace/pump-lab-live`` for live), reuses a verified matching worker, and
-resumes interrupted builds from the same source. Unknown directories and
-different deployment requests are rejected.
+``/workspace/pump-lab-live`` for live). Each source and build profile gets a
+private revision. A verified build is reused and an interrupted build can
+resume without affecting the last usable worker.
 Only an allowlisted native source bundle is uploaded. A timeout ends the local
 SSH client but does not prove that the remote build has stopped. Pod lifecycle
 and cleanup remain the caller's responsibility. CUDA builds require compatible
@@ -58,12 +58,10 @@ mode=$2
 profile=$3
 unset requested_mode PUMP_LAB_OPTIONAL_NVIDIA_ICD
 case "$mode" in cuda|vulkan|gpu|native-cpu) ;; *) exit 2 ;; esac
-case "$profile" in
-  simulation) directory=/workspace/pump-lab ;;
-  live) directory=/workspace/pump-lab-live ;;
-  *) exit 2 ;;
-esac
-cd "$directory"
+case "$profile" in simulation|live) ;; *) exit 2 ;; esac
+# REMOTE_DEPLOY selected and opened this private revision under its deployment lock.
+directory=$(pwd -P)
+export CCACHE_BASEDIR="$directory"
 printf '%s  %s\n' "$1" source.tar.gz | sha256sum -c -
 tar --extract --gzip --file source.tar.gz --no-same-owner --no-same-permissions
 set -- -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF \
@@ -451,7 +449,10 @@ info = os.fstat(directory_fd)
 if info.st_uid != os.getuid() or info.st_mode & 0o077:
     raise SystemExit('Deployment directory must be private and owned by this user')
 os.fchdir(directory_fd)
-lock = os.open('.deploy.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+lock = os.open('.deploy.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+info = os.fstat(lock)
+if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+    raise SystemExit('Invalid deployment lock')
 try:
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except BlockingIOError:
@@ -461,7 +462,8 @@ def read_json(name):
     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > 16384:
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o022 or info.st_size > 16384):
             raise SystemExit('Invalid managed deployment record')
         return json.loads(os.read(fd, 16385))
     finally:
@@ -481,29 +483,101 @@ def write_json(name, value):
 
 request = {'source':digest, 'mode':mode, 'profile':profile,
            'builder':hashlib.sha256(BUILD.encode()).hexdigest()}
-legacy_request = False
+layout = {'layout':2, 'profile':profile}
 if created:
-    write_json('.deployment.json', request)
+    write_json('.deployment.json', layout)
 else:
     try:
         previous = read_json('.deployment.json')
     except FileNotFoundError:
         raise SystemExit('Existing deployment directory is unmanaged. Use a fresh pod for automatic deployment.')
-    # These prior builders can resume a matching source, mode and profile.
-    # The immediately prior builder also supports explicit Vulkan receipts.
-    legacy_builders = (
-        'e1e3dd5cf08bf30ebb9375f8453b3cd5a5902f61e1b753241b4b91c49e64ad4c',
-        '7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5',
-        '200bce2484affd29702fe15275135bdbe5b196e7458830204c05604505eacdfc',
-    )
-    legacy_request = (mode in ('gpu', 'cuda', 'vulkan') and
-                      previous.get('source') == digest and previous.get('mode') == mode and
-                      previous.get('profile') == profile and previous.get('builder') in legacy_builders and
-                      (mode != 'vulkan' or previous.get('builder') == legacy_builders[0]))
-    if previous != request and not legacy_request:
-        raise SystemExit('Existing deployment uses different source or build settings. Use a fresh pod.')
-    if legacy_request:
-        write_json('.deployment.json', request)
+    # Keep a legacy flat tree usable by existing workers and research sessions.
+    # Only the new revision and the new current pointer belong to this deploy.
+    if previous != layout and not (
+            isinstance(previous, dict) and set(previous) == set(request)
+            and previous['profile'] == profile and previous['mode'] in ('gpu','cuda','vulkan','native-cpu')
+            and all(isinstance(previous[key], str) and re.fullmatch('[0-9a-f]{64}', previous[key])
+                    for key in ('source','builder'))):
+        raise SystemExit('Existing deployment directory has an invalid managed layout.')
+    layout = previous
+
+def open_private_directory(parent, name):
+    fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    info = os.fstat(fd)
+    if info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise SystemExit('Deployment subdirectory must be private and owned by this user')
+    return fd
+
+def private_directory(parent, name):
+    try:
+        os.mkdir(name, 0o700, dir_fd=parent)
+    except FileExistsError:
+        pass
+    return open_private_directory(parent, name)
+
+revision = hashlib.sha256(('\n'.join((digest, mode, profile, request['builder']))).encode('ascii')).hexdigest()
+root_fd = directory_fd
+revisions_fd = private_directory(root_fd, 'revisions')
+try:
+    directory_fd = open_private_directory(revisions_fd, revision)
+except FileNotFoundError:
+    # Publish the request and its private directory together. An interrupted
+    # initialization cannot leave an unmarked directory at the revision path.
+    with tempfile.TemporaryDirectory(prefix='.init-', dir='revisions') as staging:
+        pending = Path(staging) / 'revision'
+        pending.mkdir(mode=0o700)
+        with (pending / '.deployment.json').open('x') as out:
+            json.dump(request, out)
+            out.flush()
+            os.fsync(out.fileno())
+        pending.rename(Path('revisions') / revision)
+        os.fsync(revisions_fd)
+    directory_fd = open_private_directory(revisions_fd, revision)
+os.fchdir(directory_fd)
+revision_record = read_json('.deployment.json')
+sealed_record = dict(request, published=True)
+if revision_record != request and revision_record != sealed_record:
+    raise SystemExit('Existing revision does not match its deployment request')
+run_lock = os.open('.run.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+info = os.fstat(run_lock)
+if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+    raise SystemExit('Invalid worker lease')
+cache_fd = private_directory(root_fd, 'ccache')
+os.close(cache_fd)
+os.environ.setdefault('CCACHE_DIR', directory + '/ccache')
+
+def publish():
+    # Atomically select only a complete revision. Interactive workers use the
+    # returned concrete path even if another deployment advances this pointer.
+    if revision_record != sealed_record:
+        write_json('.deployment.json', sealed_record)
+    target = 'revisions/' + revision
+    try:
+        prior = os.readlink('current', dir_fd=root_fd)
+        if not re.fullmatch('revisions/[0-9a-f]{64}', prior):
+            raise SystemExit('Refusing to replace an unmanaged current pointer')
+    except FileNotFoundError:
+        pass
+    if layout.get('layout') == 2:
+        for name in ('build', 'tools', '_zLab', '.worker-receipt.json'):
+            alias = 'current/' + name
+            try:
+                os.symlink(alias, name, dir_fd=root_fd)
+            except FileExistsError:
+                if os.readlink(name, dir_fd=root_fd) != alias:
+                    raise SystemExit('Refusing to replace an unmanaged compatibility path')
+    temporary = '.current-' + os.urandom(16).hex()
+    os.symlink(target, temporary, dir_fd=root_fd)
+    try:
+        os.replace(temporary, 'current', src_dir_fd=root_fd, dst_dir_fd=root_fd)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=root_fd)
+        except FileNotFoundError:
+            pass
+    os.fsync(root_fd)
+    print('PUMP_LAB_SOURCE_SHA256=' + digest, flush=True)
+    print('PUMP_LAB_REVISION=' + revision, flush=True)
 
 print('PUMP_LAB_STAGE=upload', flush=True)
 fd, temporary = tempfile.mkstemp(prefix='.upload-', dir='.')
@@ -531,21 +605,50 @@ try:
     receipt = read_json('.worker-receipt.json')
 except FileNotFoundError:
     receipt = None
-compatible_receipt = (receipt and (receipt.get('request') == request
-                                   or (legacy_request and receipt.get('request') == previous)))
-if (compatible_receipt and receipt.get('backend') in allowed_backends and worker.is_file()
-        and not worker.is_symlink()
-        and hashlib.sha256(worker.read_bytes()).hexdigest() == receipt.get('worker_sha256')
-        and (probe is None or (probe.is_file() and not probe.is_symlink()
-                              and hashlib.sha256(probe.read_bytes()).hexdigest() == receipt.get('probe_sha256')))):
+relay = Path('_zLab/worker_relay.py')
+def file_hash(path):
+    # Hash only regular repository outputs below the selected revision.
+    parent = os.dup(directory_fd)
+    try:
+        for part in path.parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(fd, 'rb') as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+                return None
+            result = hashlib.sha256()
+            for block in iter(lambda: source.read(1024 * 1024), b''):
+                result.update(block)
+            return result.hexdigest()
+    except OSError:
+        return None
+    finally:
+        os.close(parent)
+
+if receipt is not None:
+    if (receipt.get('request') != request or receipt.get('backend') not in allowed_backends
+            or not receipt.get('worker_sha256') or file_hash(worker) != receipt['worker_sha256']
+            or not receipt.get('relay_sha256') or file_hash(relay) != receipt['relay_sha256']
+            or (probe and (not receipt.get('probe_sha256') or file_hash(probe) != receipt['probe_sha256']))):
+        raise SystemExit('Published deployment failed its integrity check. Refusing to overwrite its files.')
     print('PUMP_LAB_STAGE=reuse', flush=True)
     subprocess.run([str(worker), '--self-check'], check=True)
-    receipt['request'] = request
-    write_json('.worker-receipt.json', receipt)
     print(receipt['text'], flush=True)
     environment = dict(os.environ, PUMP_LAB_RECEIPT_MODE=receipt['backend'])
     subprocess.run([sys.executable, '-c', RESOURCES], env=environment, check=True)
+    publish()
     raise SystemExit(0)
+
+if revision_record == sealed_record:
+    raise SystemExit('Published deployment receipt is missing. Refusing to overwrite its files.')
+
+try:
+    fcntl.flock(run_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    raise SystemExit('This worker revision is active. Its build cannot be repaired while in use.')
 
 # Keep the builder identity bound to its commands. These fixed writes only
 # report progress and need not invalidate a matching checked binary.
@@ -580,7 +683,7 @@ with tempfile.TemporaryFile() as script:
     script.write(reported_build.encode())
     script.seek(0)
     child = subprocess.Popen(['sh', '-s', '--', digest, mode, profile], stdin=script,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=(lock,))
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=(lock, run_lock))
 while True:
     # read() fills its buffer before returning and can hold the first stage
     # of a quiet compiler or package manager for minutes.
@@ -607,15 +710,17 @@ text = '\n'.join(lines)
 for receipt_line in lines:
     print(receipt_line, flush=True)
 backend = next((line.partition('=')[2] for line in lines if line.startswith('PUMP_LAB_MODE=')), None)
-if (backend not in allowed_backends or not worker.is_file()
-        or (probe is not None and (not probe.is_file() or probe.is_symlink()
-                                   or summary_lines.get(b'PUMP_LAB_PROBE_SHA256=') is None))):
+worker_hash, relay_hash = file_hash(worker), file_hash(relay)
+probe_hash = file_hash(probe) if probe else None
+if (backend not in allowed_backends or not worker_hash or not relay_hash
+        or (probe and (not probe_hash or summary_lines.get(b'PUMP_LAB_PROBE_SHA256=') is None))):
     raise SystemExit('Build did not return a complete deployment receipt')
 receipt = {'request':request, 'text':text, 'backend':backend,
-           'worker_sha256':hashlib.sha256(worker.read_bytes()).hexdigest()}
-if probe is not None:
-    receipt['probe_sha256'] = hashlib.sha256(probe.read_bytes()).hexdigest()
+           'worker_sha256':worker_hash, 'relay_sha256':relay_hash}
+if probe:
+    receipt['probe_sha256'] = probe_hash
 write_json('.worker-receipt.json', receipt)
+publish()
 '''
 
 
@@ -805,6 +910,10 @@ def _run(argv, *, stage, timeout, runner, input_data=None, on_progress=None, can
         raise DeployError(f'{stage} could not start: {exc.strerror or type(exc).__name__}') from exc
 
 
+def deployment_revision(digest, mode, profile, builder):
+    return hashlib.sha256(('\n'.join((digest, mode, profile, builder))).encode('ascii')).hexdigest()
+
+
 def deploy(host, user, port, known_hosts, *, mode=DEFAULT_MODE, profile='simulation', identity=None,
            timeout=DEFAULT_TIMEOUT, runner=None, on_output=None, on_progress=None, cancelled=None):
     """Bundle, upload and build; return the expected remote worker path.
@@ -860,7 +969,8 @@ def deploy(host, user, port, known_hosts, *, mode=DEFAULT_MODE, profile='simulat
         if on_output is not None:
             on_output(output)
     worker = 'datapump-lab-worker' if profile == 'live' else 'datapump-worker'
-    return directory + '/build/lab/' + worker
+    revision = deployment_revision(digest, mode, profile, hashlib.sha256(REMOTE_BUILD.encode()).hexdigest())
+    return directory + '/revisions/' + revision + '/build/lab/' + worker
 
 
 def main(argv=None):

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Bounded relay and real native-worker smoke tests (no network or pod)."""
+import fcntl
 import os
 from pathlib import Path
 import select
@@ -49,6 +50,7 @@ class RelayTests(unittest.TestCase):
             root = Path(tmp)
             binary = root / "build/lab/datapump-worker"
             binary.parent.mkdir(parents=True)
+            binary.touch(mode=0o700)
             manifest = binary.parent / "nvidia-headless-icd.json"
             good = '{"file_format_version":"1.0.1","ICD":{"library_path":"libEGL_nvidia.so.0","api_version":"1.4.329"}}'
             with mock.patch.dict(worker_relay.DEPLOYMENTS, {False: binary}):
@@ -93,6 +95,49 @@ class RelayTests(unittest.TestCase):
                 manifest.chmod(0o666)
                 with self.assertRaisesRegex(worker_relay.RelayError, "Unsafe deployment Vulkan manifest"):
                     worker_relay.gpu_environment(binary, False)
+
+    def test_alias_pins_drivers_and_holds_worker_revision_during_launch(self):
+        root = Path(self.tmp.name)
+        alias = root / "build/lab/datapump-worker"
+        revision = root / "revisions" / ("a" * 64)
+        revision.parent.mkdir(mode=0o700)
+        revision.mkdir(mode=0o700)
+        binary = revision / alias.relative_to(root)
+        binary.parent.mkdir(parents=True)
+        binary.touch(mode=0o700)
+        lock = revision / ".run.lock"
+        lock.touch(mode=0o600)
+        (root / "build").symlink_to("current/build")
+        (root / "current").symlink_to(revision.relative_to(root))
+        manifest = binary.parent / "nvidia-headless-icd.json"
+        manifest.write_text('{"file_format_version":"1.0.1","ICD":{"library_path":"libEGL_nvidia.so.0","api_version":"1.4.329"}}')
+        manifest.chmod(0o600)
+
+        with mock.patch.dict(worker_relay.DEPLOYMENTS, {False: alias}):
+            self.assertEqual(worker_relay.gpu_environment(binary, False)["VK_DRIVER_FILES"], str(manifest))
+            def inspect_launch(command, *, env, pass_fds, **kwargs):
+                self.assertEqual(command, [str(binary), "--simulation-only"])
+                self.assertEqual(env["VK_DRIVER_FILES"], str(manifest))
+                self.assertEqual(pass_fds, ())
+                with lock.open("rb") as check:
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(check, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                raise OSError("checked worker launch")
+            with mock.patch.object(worker_relay.subprocess, "Popen", side_effect=inspect_launch):
+                with self.assertRaisesRegex(OSError, "checked worker launch"):
+                    worker_relay.relay(str(alias))
+            with lock.open("rb") as building:
+                fcntl.flock(building, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaisesRegex(worker_relay.RelayError, "being prepared"):
+                    worker_relay.relay(str(binary))
+            (root / "current").unlink()
+            (root / "current").symlink_to("../unexpected")
+            with self.assertRaisesRegex(worker_relay.RelayError, "Unexpected deployment revision link"):
+                worker_relay.relay(str(alias))
+            (root / "revisions" / ("b" * 64)).symlink_to(revision)
+            redirected = root / "revisions" / ("b" * 64) / alias.relative_to(root)
+            with self.assertRaisesRegex(worker_relay.RelayError, "Unsafe deployment directory"):
+                worker_relay.relay(str(redirected))
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

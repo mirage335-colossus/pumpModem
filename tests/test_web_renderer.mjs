@@ -292,7 +292,8 @@ const hostWindow={navigator:{},setTimeout,clearTimeout,crypto:{getRandomValues:b
     MessageChannel:class{constructor(){this.port1={postMessage:m=>this.output.push(m),start:()=>{},close:()=>{}};this.port2={};this.output=[];channels.push(this);}}};
 const hostedDoc={defaultView:hostWindow,createElement(tag){const n=new Node(this,tag);if(tag==='iframe')n.contentWindow={postMessage:(...args)=>{n.posted=args;}};return n;}};
 hostedDoc.root=new Node(hostedDoc,'root');
-const hosted=createHostedFrontend({container:hostedDoc.root,rendererSource:'fixture',protocolSource:'fixture',styleText:'',workletSource:'fixture',send:async bytes=>hostSent.push(bytes),handleService:async request=>{hostServices.push(request);return {cancelled:true};},status:state=>hostStatus.push(state)});
+const hosted=createHostedFrontend({container:hostedDoc.root,rendererSource:'fixture',protocolSource:'fixture',styleText:':root { color-scheme: light dark }',workletSource:'fixture',dark:true,send:async bytes=>hostSent.push(bytes),handleService:async request=>{hostServices.push(request);return {cancelled:true};},status:state=>hostStatus.push(state)});
+assert(hosted.frame.srcdoc.includes('<html style="color-scheme: dark">'),'lab scheme must take precedence over the shared renderer stylesheet');
 assert.equal(hosted.frame.attributes.sandbox,'allow-scripts');assert(hosted.frame.srcdoc.includes("connect-src 'none'"));assert(!hosted.frame.attributes.sandbox.includes('allow-same-origin'));
 assert.equal(hosted.frame.style.height,'var(--datapump-viewport-height,100dvh)','hosted viewport must follow its containing browser/panel height');
 assert.equal(hosted.frame.style.minHeight,'0','a fixed iframe minimum must not override the allocated viewport');

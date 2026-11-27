@@ -8,6 +8,7 @@ import os
 import re
 import webbrowser
 from pathlib import Path
+from collections.abc import Mapping
 import secrets
 import select
 import shlex
@@ -1075,21 +1076,49 @@ def ssh_endpoint(pod, known_hosts, identity=None):
     return ['ssh', '-F', '/dev/null', '-p', str(port), '-l', user, *options, host]
 
 
+def deployment_root(worker_path, live, *, portable=False):
+    directory = '/workspace/pump-lab-live' if live else '/workspace/pump-lab'
+    executable = 'datapump-lab-worker' if live else 'datapump-worker'
+    if portable:
+        if live:
+            raise ValueError('Portable packages support the Simulation profile.')
+        pattern = r'(/workspace/pump-lab-portable/[a-f0-9]{64})/bin/datapump-worker'
+    else:
+        pattern = rf'({directory}/revisions/[a-f0-9]{{64}})/build/lab/{executable}'
+    match = re.fullmatch(pattern, worker_path) if isinstance(worker_path, str) else None
+    if not match:
+        raise ValueError('The deployment returned an invalid worker path for this profile.')
+    return match.group(1)
+
+
 def ssh_command(pod, known_hosts, identity=None, require_gpu=False, file_channel=False, live=False,
-                prefer_gpu=False):
+                prefer_gpu=False, *, worker_path=None, portable=False):
     flag = ((' --require-gpu' if require_gpu else '') +
             (' --prefer-gpu' if prefer_gpu and not require_gpu else '') +
             (' --file-channel' if file_channel or live else '') +
             (' --live' if live else ''))
-    worker = 'datapump-lab-worker' if live else 'datapump-worker'
-    remote_dir = '/workspace/pump-lab-live' if live else '/workspace/pump-lab'
+    if worker_path is None:
+        if portable:
+            raise ValueError('A portable simulation needs its verified deployment path.')
+        # Keep the direct launcher compatible with older, flat source deployments.
+        remote_dir = '/workspace/pump-lab-live' if live else '/workspace/pump-lab'
+        worker_path = remote_dir + '/build/lab/' + ('datapump-lab-worker' if live else 'datapump-worker')
+    else:
+        remote_dir = deployment_root(worker_path, live, portable=portable)
     endpoint = ssh_endpoint(pod, known_hosts, identity)
     return [endpoint[0], '-T', *endpoint[1:],
-            'python3 ' + remote_dir + '/_zLab/worker_relay.py' + flag + ' ' + remote_dir + '/build/lab/' + worker]
+            'python3 ' + remote_dir + '/_zLab/worker_relay.py' + flag + ' ' + worker_path]
+
+
+@dataclass(frozen=True)
+class Deployment:
+    worker_path: str
+    web_assets: Mapping[str, bytes]
+    receipt: str
 
 
 def deploy_selected(pod, record, known_hosts, identity, secret='', deploy_func=None, profile='simulation',
-                    *, on_progress=None, cancelled=None):
+                    *, package=None, on_progress=None, cancelled=None):
     """Deploy an admitted selection and retain only bounded, redacted receipts."""
     from deploy import deploy, _connection
     simulation_gpu(record, pod)
@@ -1104,15 +1133,34 @@ def deploy_selected(pod, record, known_hosts, identity, secret='', deploy_func=N
         raise ValueError('Pod deadline expired before deployment began')
     if profile not in ('simulation', 'live'):
         raise ValueError('Invalid deployment profile')
+    if package is not None and profile != 'simulation':
+        raise ValueError('Portable packages support the Simulation profile.')
     output = []
     progress = {} if on_progress is None else {'on_progress': on_progress}
     if cancelled is not None:
         progress['cancelled'] = cancelled
-    mode = 'native-cpu' if record.get('provider') == 'linode' else 'gpu'
-    (deploy_func or deploy)(host, user, port, known_hosts, identity=identity,
-                            mode=mode, timeout=min(remaining, 900), profile=profile,
-                            on_output=output.append, **progress)
-    lines = []
+    args = (host, user, port, known_hosts)
+    kwargs = dict(identity=identity, timeout=min(remaining, 900), on_output=output.append, **progress)
+    if package is None:
+        from browser_bridge import capture_web_assets
+        web_assets = capture_web_assets(Path(__file__).resolve().parent.parent / 'web')
+        mode = 'native-cpu' if record.get('provider') == 'linode' else 'gpu'
+        path = (deploy_func or deploy)(*args, mode=mode, profile=profile, **kwargs)
+        directory = deployment_root(path, profile == 'live')
+        lines = ['Worker source: current checkout', 'Deployment revision: ' + directory.rsplit('/', 1)[1]]
+    else:
+        from portable import deploy_package
+        path = (deploy_func or deploy_package)(package, *args, **kwargs)
+        if path != package.remote_worker:
+            raise ValueError('The deployed worker did not match the selected portable package.')
+        deployment_root(path, False, portable=True)
+        web_assets = package.web_assets
+        lines = ['Worker source: Linux portable package', 'Portable manifest SHA-256: ' + package.package_sha256,
+                 'Worker SHA-256: ' + package.worker_sha256]
+    asset_digest = hashlib.sha256()
+    for name, content in sorted(web_assets.items()):
+        asset_digest.update(name.encode('ascii') + b'\0' + hashlib.sha256(content).digest())
+    lines.append('Hosted assets SHA-256: ' + asset_digest.hexdigest())
     for line in '\n'.join(output).splitlines():
         if line.startswith(('PUMP_LAB_PROFILE=', 'PUMP_LAB_MODE=', 'PUMP_LAB_DEVICE=', 'PUMP_LAB_TORCH=',
                             'PUMP_LAB_CUDA=', 'PUMP_LAB_WORKER_SHA256=', 'PUMP_LAB_PROBE_SHA256=', 'PUMP_LAB_CPU_MODEL=',
@@ -1130,7 +1178,7 @@ def deploy_selected(pod, record, known_hosts, identity, secret='', deploy_func=N
                 clean = clean.replace(secret, '[redacted]')
             if clean not in lines:
                 lines.append(clean)
-    return '\n'.join(lines[:28]) or 'Build succeeded; structured device and binary receipt was unavailable.'
+    return Deployment(path, web_assets, '\n'.join(lines[:32]))
 
 
 def device_query(argv, _input, timeout):
@@ -1296,7 +1344,7 @@ class App:
         self.setup_after = None
         self.devices = {}
         root.protocol('WM_DELETE_WINDOW', self.close)
-        root.title('Robust zLab · Linode and RunPod')
+        root.title('Data Pump zLab · RunPod and Linode')
         root.geometry('920x420')
         root.minsize(640, 320)
         box = ttk.Frame(root, padding=12)
@@ -1313,6 +1361,7 @@ class App:
         self.max_clock_offset = tk.StringVar()
         self.remote_clock_drift_ppm = tk.StringVar()
         self.profile = tk.StringVar(value='simulation')
+        self.portable_package = tk.StringVar()
         self.audio_binary = tk.StringVar()
         self.audio_device = tk.StringVar(value='default')
         self.capture_bytes = tk.StringVar()
@@ -1367,8 +1416,20 @@ class App:
         )):
             ttk.Label(panel, text=label).grid(row=row, column=0, sticky='w', padx=(0, 12))
             ttk.Entry(panel, textvariable=field).grid(row=row, column=1, sticky='ew')
+        ttk.Label(panel, text='Simulation package (blank uses checkout)').grid(row=5, column=0, sticky='w', padx=(0, 12))
+        package_box = ttk.Frame(panel)
+        package_box.grid(row=5, column=1, sticky='ew')
+        package_entry = ttk.Entry(package_box, textvariable=self.portable_package)
+        package_entry.pack(side='left', fill='x', expand=True)
+        browse_package = ttk.Button(package_box, text='Choose directory…', command=self.choose_portable_package)
+        browse_package.pack(side='right', padx=(4, 0))
+        def package_profile_changed(*_args):
+            state = ['!disabled'] if self.profile.get() == 'simulation' else ['disabled']
+            package_entry.state(state)
+            browse_package.state(state)
+        self.profile.trace_add('write', package_profile_changed)
         options_row = ttk.Frame(panel)
-        options_row.grid(row=5, column=0, columnspan=2, sticky='w', pady=6)
+        options_row.grid(row=6, column=0, columnspan=2, sticky='w', pady=6)
         ttk.Label(options_row, text='RunPod cloud tier').pack(side='left')
         ttk.Combobox(options_row, textvariable=self.cloud, values=('SECURE', 'COMMUNITY'),
                      width=12, state='readonly').pack(side='left', padx=(4, 12))
@@ -1377,13 +1438,13 @@ class App:
                      width=12, state='readonly').pack(side='left', padx=(4, 0))
         self.cloud.trace_add('write', self.tier_changed)
         advanced_actions = ttk.Frame(panel)
-        advanced_actions.grid(row=6, column=0, columnspan=2, sticky='w', pady=(6, 0))
+        advanced_actions.grid(row=7, column=0, columnspan=2, sticky='w', pady=(6, 0))
         ttk.Button(advanced_actions, text='Deployment receipt', command=self.show_receipt).pack(side='left')
         self.copy_ssh_button = ttk.Button(advanced_actions, text='Copy SSH command', command=self.copy_ssh)
         self.copy_ssh_button.pack(side='left', padx=4)
         ttk.Button(advanced_actions, text='Configure live audio limits', command=self.audio_settings).pack(side='left')
         account_actions = ttk.Frame(panel)
-        account_actions.grid(row=7, column=0, columnspan=2, sticky='w', pady=(6, 0))
+        account_actions.grid(row=8, column=0, columnspan=2, sticky='w', pady=(6, 0))
         for provider, label in (('linode', 'Clear Linode token'), ('runpod', 'Clear RunPod key')):
             ttk.Button(account_actions, text=label,
                        command=lambda p=provider: self.clear_key(p)).pack(side='left', padx=4)
@@ -1429,8 +1490,8 @@ class App:
             self.root.geometry(f'{self.root.winfo_width()}x420')
         else:
             self.advanced.grid()
-            if self.root.winfo_height() < 590:
-                self.root.geometry(f'{self.root.winfo_width()}x590')
+            if self.root.winfo_height() < 630:
+                self.root.geometry(f'{self.root.winfo_width()}x630')
 
     def window_destroyed(self, event):
         if event.widget is self.root:
@@ -1919,6 +1980,8 @@ class App:
             self.status.set('Choose catalog compute and enter an image.')
             return
         deadline_text = self.deadline_minutes.get()
+        profile_name = self.profile.get()
+        package_directory = self.portable_package.get().strip()
         try:
             minutes = self.configured_deadline_minutes()
         except ValueError as error:
@@ -1933,7 +1996,8 @@ class App:
         def settings_changed():
             return (self.selected_compute() != selected or account.key.get().strip() != key
                     or (not linode and self.image.get().strip() != image)
-                    or self.deadline_minutes.get() != deadline_text)
+                    or self.deadline_minutes.get() != deadline_text or self.profile.get() != profile_name
+                    or (profile_name == 'simulation' and self.portable_package.get().strip() != package_directory))
         def confirm(quote):
             if interrupted():
                 self.quoting_create = False
@@ -2064,7 +2128,50 @@ class App:
                  self.max_clock_offset.get(), self.remote_clock_drift_ppm.get())
         if profile == 'live':
             live_command(['ssh'], *audio)
-        return profile, files, audio
+        package = self.portable_package.get().strip() if profile == 'simulation' else ''
+        return profile, files, audio, package
+
+    def prepare_session_settings(self, ready):
+        try:
+            settings = self.session_settings()
+        except (OSError, ValueError) as error:
+            self.status.set(str(error))
+            return
+        profile, files, audio, package_directory = settings
+        if not package_directory:
+            ready((profile, files, audio, None))
+            return
+        # Pin the selected package before asking to create billable compute.
+        # Hashing and compressing the portable libraries can take several seconds.
+        selected = self.selected_compute()
+        record = self.selected_record()
+        end_generation, close_generation = self.end_generation, self.close_generation
+        def load(_clients):
+            from portable import load_package
+            return load_package(Path(package_directory).expanduser())
+        def loaded(package):
+            if (self.end_generation != end_generation or self.close_generation != close_generation
+                    or self.exit_after is not None):
+                return
+            try:
+                same_settings = self.session_settings() == settings
+            except (OSError, ValueError):
+                same_settings = False
+            current = self.selected_record()
+            if (not same_settings or self.selected_compute() != selected or
+                    (job_identity(current) if current else None) != (job_identity(record) if record else None)):
+                self.status.set('The simulation selection changed. Review the settings and start again.')
+                return
+            ready((profile, files, audio, package))
+        self.status.set('Verifying the selected Linux portable package…')
+        self.background(load, loaded, show_progress=False)
+
+    def choose_portable_package(self):
+        from tkinter import filedialog
+        directory = filedialog.askdirectory(parent=self.root, mustexist=True,
+                                            title='Choose an extracted Linux portable package')
+        if directory:
+            self.portable_package.set(directory)
 
     def selected_record(self):
         selected = self.list.curselection()
@@ -2107,11 +2214,9 @@ class App:
         if record is None:
             self.status.set('Select a running Linode to restart its simulation.')
             return
-        try:
-            settings = self.session_settings()
-        except (OSError, ValueError) as error:
-            self.status.set(str(error))
-            return
+        self.prepare_session_settings(lambda settings: self.restart_with_settings(record, settings))
+
+    def restart_with_settings(self, record, settings):
         if not self.bridge:
             self.resume_owned_worker(record, settings)
             return
@@ -2204,17 +2309,14 @@ class App:
                 or any(p == provider for p, _ in self.ending_names)):
             self.status.set('Wait for the current setup or termination to finish.')
             return
-        try:
-            settings = self.session_settings()
-        except (OSError, ValueError) as error:
-            self.status.set(str(error))
-            return
-        if record and record.get('status') not in (Ownership.TERMINATED, Ownership.NOT_VISIBLE):
-            self.resume_owned_worker(record, settings)
-        elif self.credentials() != self.catalog_key:
-            self.catalog()
-        else:
-            self.create(settings)
+        def start(settings):
+            if record and record.get('status') not in (Ownership.TERMINATED, Ownership.NOT_VISIBLE):
+                self.resume_owned_worker(record, settings)
+            elif self.credentials() != self.catalog_key:
+                self.catalog()
+            else:
+                self.create(settings)
+        self.prepare_session_settings(start)
 
     def prepare_worker(self, record, settings, *, new=False):
         deadline = record.get('deadline')
@@ -2237,7 +2339,7 @@ class App:
         known_hosts = self.known_hosts.get()
         identity = self.identity.get().strip() or record.get('ssh_identity') or None
         ready_until = min(deadline, time.time() + 600)
-        profile, files, audio = settings
+        profile, files, audio, package = settings
         name = record['name']
 
         def connect(client):
@@ -2314,14 +2416,16 @@ class App:
                 error = ''
                 shell_command = ''
                 try:
-                    receipt = deploy_selected(pod, current, pin, identity, key, profile=profile,
-                                              on_progress=set_progress, cancelled=cancelled)
+                    deployment = deploy_selected(pod, current, pin, identity, key, profile=profile,
+                                                 package=package, on_progress=set_progress, cancelled=cancelled)
+                    receipt = deployment.receipt
                     if not cancelled.is_set():
                         set_progress('Starting the simulation worker…')
                         command = ssh_command(pod, pin, identity,
                                               file_channel=files is not None,
                                               live=profile == 'live',
-                                              prefer_gpu=simulation_gpu(current, pod))
+                                              prefer_gpu=simulation_gpu(current, pod),
+                                              worker_path=deployment.worker_path, portable=package is not None)
                         shell_command = shlex.join(ssh_endpoint(pod, pin, identity))
                         if profile == 'live':
                             command = live_command(command, *audio)
@@ -2330,7 +2434,7 @@ class App:
                         if remaining <= 0:
                             raise ValueError('The instance deadline expired during setup.')
                         bridge = start(command, files=files, live=profile == 'live', managed=True,
-                                       ready_timeout=min(30, remaining))
+                                       ready_timeout=min(30, remaining), web_assets=deployment.web_assets)
                 except Exception as exc:
                     error = str(exc).replace(key, '[redacted]')[:1000]
                 posted = self.post_to_window(lambda: deployed(current, receipt, bridge, error, shell_command))

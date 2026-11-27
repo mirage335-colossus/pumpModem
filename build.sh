@@ -15,6 +15,7 @@ Usage: ./build.sh [configure|build|test GROUP|sanitize [GROUP]|package] [OPTIONS
                        triad, or all tests.
   sanitize [GROUP]     Run instrumented headless tests (default: contract).
   package              Build and verify portable TGZ and ZIP bundles.
+                       Linux GUI packages include the inherited-pipe worker.
 
   --tui                Also build datapump-tui (ncurses; combine with --cli for no GUI).
   --fb                 Also build datapump-fb (software renderer with SDL2 host).
@@ -379,11 +380,17 @@ for arg do
     esac
 done
 
+worker_option="-DDATAPUMP_BUILD_WEB_WORKER=$web_worker"
+if [ "$preset" = release ] && [ "$gui" = ON ] && [ "$web_worker" = OFF ]; then
+    # Keep the ordinary package path and let the target toolchain decide which
+    # worker it supports, including when refreshing a previously configured tree.
+    worker_option=-UDATAPUMP_BUILD_WEB_WORKER
+fi
 printf 'Configuring %s in %s\n' "$preset" "$build_dir"
 if cmake --preset "$preset" -S "$source_dir" -B "$build_dir" \
     "-DDATAPUMP_BUILD_GUI=$gui" "-DDATAPUMP_GUI_BACKEND=$backend" \
     "-DDATAPUMP_BUILD_TUI=$tui" "-DDATAPUMP_BUILD_FB=$framebuffer" \
-    "-DDATAPUMP_BUILD_WEB_WORKER=$web_worker" \
+    "$worker_option" \
     "-DDATAPUMP_PORTABLE=$portable" "-DOPENSSL_USE_STATIC_LIBS=$portable" \
     "-DDATAPUMP_TEST_NATIVE_GUI=$native" ${1+"$@"}; then
     :

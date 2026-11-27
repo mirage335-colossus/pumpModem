@@ -51,6 +51,58 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Shared zLab simulation and Linux portable worker — 26 November 2026
+
+The working tree based on `d547b69b` built the Linux x86-64 FLTK portable
+GUI, CLI, TUI, framebuffer and pipe worker together. The simulation-only
+worker offered Fast and Robust. A compiled-worker check sent and recovered
+`Lab` in Fast with a verified checksum, rejected attempts to select live
+audio, loopback and Legacy, and returned to a ready Robust session. The
+three-byte test observed zero physical-audio frames. The standalone Wasm
+page rebuilt against the same application catalog and passed its runtime test.
+
+The selected portable worker had SHA-256
+`4e841e1c56e22660cc91e3d8ecc2c30545b9abeda06c85d92e464f3b424883d8`.
+Its Linux package inventory had SHA-256
+`057d0c75634681b8e9514a724562855123143cefe8ecd3cd5d483f53b01d2225`.
+The packaged worker required glibc 2.38 and the largest requirement across
+the complete native package was glibc 2.39. The first archive check could
+not initialize the X11 framebuffer on the inherited display. With a private
+X11 display, the relocated desktop and framebuffer checks passed. The loader
+also rejected a previous package missing the simulation startup version
+before provisioning compute. [Selecting the build](../_zLab/README.md#choose-the-application-to-simulate)
+
+In a real Firefox zLab session, the running executable matched that worker
+hash. All six hosted browser files matched the selected package byte for
+byte. The UI switched to Fast, recovered `Lab` and switched back to the
+Robust Link planner. With a light desktop theme the zLab renderer kept its
+dark presentation and displayed the five colored curve samples. A separate
+120 Hz Robust trial through the production relay decoded `e` after three
+DATA slots and two scored quiet slots in 11.32 seconds. Its initial test run
+stopped at a stale Console target label. The corrected lookup retained the
+target, sample, replay and physical-completion assertions.
+
+On a RunPod Secure Cloud `cpu3g` instance with 32 vCPUs, Ubuntu 24.04
+x86-64 and glibc 2.39, zLab transferred and verified the same portable
+worker and runtime libraries (31,867,953 bytes) in 3.50 seconds. The hosted
+assets matched the selected package. The remote Fast simulator sent and
+decoded `e` with a verified checksum. Reopening the same package took
+0.99 seconds and uploaded zero payload bytes. zLab's default RunPod checkout
+path selected its GPU-capable build profile on this CPU instance, and built
+and started revision `082cddd40594` in 60.59 seconds including dependency
+setup. Local deployment tests exercised changing source,
+failed builds and retries while an older session retained its worker.
+RunPod confirmed deletion after 112.43 seconds from creation. At the quoted
+$1.28/hour for compute plus ephemeral storage, the estimated pre-tax cost was
+about $0.04. These checks exercised deployment and native CPU message handling.
+
+The integrated local zLab suite passed 254 tests with three opt-in skips.
+Its first run exposed a Linode test double that supplied no worker path.
+The corrected fixture checks that the launcher uses the returned revision.
+The 120 Hz Robust trial and isolated-display clipboard test also passed when
+enabled separately. The integrated run logged a nonfatal Tk variable cleanup
+warning during test teardown.
+
 ## Native Link Planner — 24 November 2026
 
 The GUI/receiver working tree based on `27950e9f` exercised the native planner

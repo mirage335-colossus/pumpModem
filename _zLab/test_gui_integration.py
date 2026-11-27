@@ -27,6 +27,13 @@ except ImportError:
     tk = ttk = messagebox = None
 
 
+def deployed_fixture(mode, live=False):
+    name = 'datapump-lab-worker' if live else 'datapump-worker'
+    root = '/workspace/pump-lab-live' if live else '/workspace/pump-lab'
+    return lab.Deployment(root + '/revisions/' + 'a' * 64 + '/build/lab/' + name,
+                          {'renderer.mjs': b'matching assets'}, 'PUMP_LAB_MODE=' + mode)
+
+
 class FakeProvider:
     def __init__(self):
         self.gpus = [{'id': 'NVIDIA GeForce RTX 4090', 'availability': 'HIGH',
@@ -554,7 +561,7 @@ class TkControllerIntegration(unittest.TestCase):
         with (patch.object(messagebox, 'askyesno', return_value=True),
               patch('host_identity._checked_entry',
                     return_value=b'8.8.8.8 ssh-ed25519 AAAA'),
-              patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=cpu'),
+              patch.object(lab, 'deploy_selected', return_value=deployed_fixture('cpu')),
               patch.dict('sys.modules', {'browser_bridge': bridge_module}),
               patch.object(lab.webbrowser, 'open', return_value=True)):
             self.execute(self.button('Start simulation').invoke,
@@ -622,7 +629,7 @@ class TkControllerIntegration(unittest.TestCase):
         with (patch.object(messagebox, 'askyesno', return_value=True),
               patch('host_identity._checked_entry',
                     return_value=b'8.8.8.8 ssh-ed25519 AAAA'),
-              patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=cpu'),
+              patch.object(lab, 'deploy_selected', return_value=deployed_fixture('cpu')),
               patch.dict('sys.modules', {'browser_bridge': bridge_module}),
               patch.object(lab.webbrowser, 'open', return_value=True)):
             self.execute(self.button('Start simulation').invoke,
@@ -690,7 +697,7 @@ class TkControllerIntegration(unittest.TestCase):
                        types.SimpleNamespace(url='http://127.0.0.1/second', status=lambda: ('active', ''),
                                              close=lambda: None)]
             with (patch('browser_bridge.start', side_effect=bridges),
-                  patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=cpu') as deploy,
+                  patch.object(lab, 'deploy_selected', return_value=deployed_fixture('cpu')) as deploy,
                   patch.object(lab.webbrowser, 'open', return_value=True) as opened):
                 for expected in bridges:
                     restart = self.button('Restart simulation')
@@ -884,6 +891,7 @@ class TkControllerIntegration(unittest.TestCase):
                 self.assertLessEqual(font_used.measure(label), combo.winfo_width() - 26)
         self.provider.gpus = self.provider.cpus = RunPodError('dummy failure', status=403)
         self.load_catalog()
+        self.root.update_idletasks()  # Tk places wrapped labels after the catalog callback returns.
         status = self.controller.status_label
         self.assertIn('GPU catalog', self.controller.status.get())
         self.assertIn('CPU catalog', self.controller.status.get())
@@ -1282,7 +1290,7 @@ class TkControllerIntegration(unittest.TestCase):
              patch('host_identity.verify_host_key', return_value=pin) as verify, \
              patch.object(self.provider, 'get_pod_ssh_fingerprint', create=True,
                           side_effect=RunPodError('logs denied', status=403)) as logs, \
-             patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=vulkan') as deploy, \
+             patch.object(lab, 'deploy_selected', return_value=deployed_fixture('vulkan')) as deploy, \
              patch('browser_bridge.start', return_value=bridge) as start, \
              patch.object(lab.webbrowser, 'open', return_value=True) as browser:
             self.execute(self.button('Start simulation').invoke,
@@ -1298,6 +1306,9 @@ class TkControllerIntegration(unittest.TestCase):
                                        record['ssh_fingerprint'], self.controller.accounts['runpod'].state.path.parent)
         self.assertEqual(deploy.call_args.args[3], record['ssh_identity'])
         self.assertIn(record['ssh_identity'], start.call_args.args[0])
+        self.assertIsNone(deploy.call_args.kwargs['package'])
+        self.assertTrue(start.call_args.args[0][-1].endswith(deploy.return_value.worker_path))
+        self.assertIs(start.call_args.kwargs['web_assets'], deploy.return_value.web_assets)
         logs.assert_not_called()
         self.assertEqual(browser.call_count, 1)
         browser.assert_called_with(bridge.url)
@@ -1322,6 +1333,42 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertEqual(self.controller.list.curselection(), (0,))
         self.assertEqual(self.controller.selected_record()['id'], 'other-pod')
 
+    def test_selected_package_validated_before_billing_and_attached_to_browser(self):
+        self.load_linode_catalog()
+        package_root = Path(self.tmp.name) / 'extracted-package'
+        package_root.mkdir()
+        self.controller.portable_package.set(str(package_root))
+        with patch('portable.load_package', side_effect=ValueError('Invalid portable manifest')), \
+             patch.object(messagebox, 'askyesno') as confirm:
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: not self.controller.busy and 'Invalid portable manifest' in self.controller.status.get())
+        confirm.assert_not_called()
+        self.assertFalse(self.linode.created)
+
+        directory = '/workspace/pump-lab-portable/' + 'b' * 64
+        package = types.SimpleNamespace(remote_worker=directory + '/bin/datapump-worker',
+                                        worker_sha256='c' * 64, package_sha256='d' * 64,
+                                        web_assets={'renderer.mjs': b'packaged renderer'})
+        bridge = types.SimpleNamespace(url='http://127.0.0.1/fixture', close=lambda: None,
+                                       status=lambda: ('active', ''))
+        with (patch('portable.load_package', return_value=package) as load,
+              patch('portable.deploy_package', return_value=package.remote_worker) as deploy,
+              patch('deploy.deploy') as source_build,
+              patch.object(messagebox, 'askyesno', return_value=True),
+              patch('host_identity._checked_entry', return_value=b'8.8.8.8 ssh-ed25519 AAAA'),
+              patch('browser_bridge.start', return_value=bridge) as start,
+              patch.object(lab.webbrowser, 'open', return_value=True)):
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: self.controller.bridge is bridge and not self.controller.setting_up)
+        load.assert_called_once_with(package_root)
+        self.assertIs(deploy.call_args.args[0], package)
+        source_build.assert_not_called()
+        command = start.call_args.args[0][-1]
+        self.assertIn(directory + '/_zLab/worker_relay.py', command)
+        self.assertTrue(command.endswith(package.remote_worker))
+        self.assertIs(start.call_args.kwargs['web_assets'], package.web_assets)
+        self.assertIn(package.package_sha256, self.controller.deployment_receipt.get())
+
     def test_new_pod_is_terminated_when_native_worker_cannot_open(self):
         self.load_catalog()
         def create(payload):
@@ -1335,7 +1382,7 @@ class TkControllerIntegration(unittest.TestCase):
         with patch.object(self.provider, 'create_pod', side_effect=create), \
              patch.object(messagebox, 'askyesno', return_value=True), \
              patch('host_identity.existing_host_key', return_value=pin), \
-             patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=vulkan'), \
+             patch.object(lab, 'deploy_selected', return_value=deployed_fixture('vulkan')), \
              patch('browser_bridge.start', side_effect=RuntimeError('The native worker disconnected.')), \
              patch.object(lab.webbrowser, 'open') as browser:
             self.execute(self.button('Start simulation').invoke, lambda: not self.controller.busy
@@ -1400,7 +1447,7 @@ class TkControllerIntegration(unittest.TestCase):
             on_progress('Compiling the worker…')
             self.assertTrue(cancelled.wait(3))
             cancelled_in_build.set()
-            return 'PUMP_LAB_MODE=vulkan'
+            return deployed_fixture('vulkan')
 
         with patch('host_identity.existing_host_key', return_value=pin), \
              patch.object(lab, 'deploy_selected', side_effect=deploy), \
@@ -1442,7 +1489,7 @@ class TkControllerIntegration(unittest.TestCase):
         pin.write_text('fixture')
         bridge = types.SimpleNamespace(url='http://127.0.0.1:1/#fixture', close=lambda: None, status=lambda: ('active', ''))
         with patch('host_identity.existing_host_key', return_value=pin), \
-             patch.object(lab, 'deploy_selected', side_effect=[ValueError('interrupted build'), 'receipt']) as deploy, \
+             patch.object(lab, 'deploy_selected', side_effect=[ValueError('interrupted build'), deployed_fixture('vulkan')]) as deploy, \
              patch('browser_bridge.start', return_value=bridge), \
              patch.object(lab.webbrowser, 'open', return_value=True), patch.object(messagebox, 'askyesno') as confirm:
             self.execute(self.button('Start simulation').invoke,
@@ -1548,7 +1595,7 @@ class TkControllerIntegration(unittest.TestCase):
             return Bridge()
         browser = types.SimpleNamespace(start=start)
         with patch.dict('sys.modules', {'browser_bridge': browser}), patch.object(lab.webbrowser, 'open', return_value=True), \
-             patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=vulkan'):
+             patch.object(lab, 'deploy_selected', return_value=deployed_fixture('vulkan', live=True)):
             self.execute(self.button('Start simulation').invoke,
                          lambda: not self.controller.busy and self.controller.bridge is not None)
         command = observed['command']

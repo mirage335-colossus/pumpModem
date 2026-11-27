@@ -19,6 +19,30 @@ from unittest.mock import patch
 import deploy
 
 
+def remote_wrapper(destination):
+    root_assignment = "directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'"
+    if root_assignment not in deploy.REMOTE_DEPLOY:
+        raise AssertionError('Cannot redirect fixture deployment root')
+    return deploy.REMOTE_DEPLOY.replace(root_assignment, 'directory = ' + repr(str(destination)), 1)
+
+
+def revision_path(destination, payload, mode, profile, builder):
+    source = hashlib.sha256(payload).hexdigest()
+    build_id = hashlib.sha256(builder.encode()).hexdigest()
+    revision = deploy.deployment_revision(source, mode, profile, build_id)
+    return Path(destination) / 'revisions' / revision
+
+
+def fixture_archive(files):
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode='w:gz') as archive:
+        for name, data in files.items():
+            entry = tarfile.TarInfo(name)
+            entry.size = len(data)
+            archive.addfile(entry, io.BytesIO(data))
+    return payload.getvalue()
+
+
 class DeployTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -39,7 +63,8 @@ class DeployTests(unittest.TestCase):
         with patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle):
             result = deploy.deploy('pod.example.com', 'root', 2244, self.known,
                                    mode='cuda', runner=self.runner)
-        self.assertEqual(result, '/workspace/pump-lab/build/lab/datapump-worker')
+        revision = revision_path('/workspace/pump-lab', b'test archive', 'cuda', 'simulation', deploy.REMOTE_BUILD)
+        self.assertEqual(result, str(revision / 'build/lab/datapump-worker'))
         self.assertEqual(len(self.calls), 1)
         command = self.calls[0][0]
         self.assertIn('StrictHostKeyChecking=yes', command)
@@ -59,7 +84,8 @@ class DeployTests(unittest.TestCase):
             with self.subTest(mode=mode), patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle):
                 result = deploy.deploy('pod.example.com', 'root', 22, self.known,
                                        mode=mode, profile='live', runner=self.runner)
-                self.assertEqual(result, '/workspace/pump-lab-live/build/lab/datapump-lab-worker')
+                revision = revision_path('/workspace/pump-lab-live', b'test archive', mode, 'live', deploy.REMOTE_BUILD)
+                self.assertEqual(result, str(revision / 'build/lab/datapump-lab-worker'))
                 self.assertEqual(shlex.split(self.calls[-1][0][-1])[-4:], [digest, mode, 'live', '12'])
 
     def test_default_and_legacy_cpu_request_the_same_gpu_capable_build(self):
@@ -133,12 +159,12 @@ class DeployTests(unittest.TestCase):
 
     def test_progress_is_delivered_before_remote_build_finishes(self):
         destination = self.root / 'managed'
-        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
-                                             'directory = ' + repr(str(destination)))
+        script = remote_wrapper(destination)
         build = '''set -eu
 echo PUMP_LAB_STAGE=compile
 python3 -c "import time; from pathlib import Path; gate=Path('ready'); exec('while not gate.exists(): time.sleep(.01)')"
-mkdir -p build/lab
+mkdir -p build/lab _zLab
+printf 'relay' > _zLab/worker_relay.py
 printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
 chmod +x build/lab/datapump-worker
 echo PUMP_LAB_MODE=vulkan
@@ -151,7 +177,7 @@ echo PUMP_LAB_MODE=vulkan
         def progress(message):
             stages.append(message)
             if message == deploy._STAGE_MESSAGES[b'compile']:
-                (destination / 'ready').touch()
+                (revision_path(destination, data, 'gpu', 'simulation', build) / 'ready').touch()
 
         status, tail = deploy._bounded_process(
             [sys.executable, '-c', code, digest, 'gpu', 'simulation', str(len(data))],
@@ -220,17 +246,10 @@ echo PUMP_LAB_MODE=vulkan
             with self.subTest(mode=requested, profile=profile, generator=generator_case):
                 home = self.root / (requested + '-' + profile + '-' + generator_case)
                 home.mkdir(mode=0o700)
-                archive = home / 'source.tar.gz'
                 sizing = (b"import sys\nassert sys.argv[1] == '--runpod'\n"
                           b"print({'vulkan': 12, 'cuda': 8, 'cpu': 24}[sys.argv[2]])\n")
-                with tarfile.open(archive, 'w:gz') as tar:
-                    info = tarfile.TarInfo('source-file')
-                    info.size = 1
-                    tar.addfile(info, io.BytesIO(b'x'))
-                    info = tarfile.TarInfo('tools/build_capacity.py')
-                    info.size = len(sizing)
-                    tar.addfile(info, io.BytesIO(sizing))
-                digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+                files = {'source-file': b'x', 'tools/build_capacity.py': sizing,
+                         '_zLab/worker_relay.py': b'# relay fixture\n'}
                 bin_dir = home / 'bin'
                 bin_dir.mkdir()
                 cmake = bin_dir / 'cmake'
@@ -345,8 +364,7 @@ fi
                     prepare = prepare.replace(
                         "sources = (Path('/etc/vulkan/icd.d/nvidia_icd.json'), Path('/usr/share/vulkan/icd.d/nvidia_icd.json'))",
                         f'sources = (Path({str(source)!r}), Path({str(alternate_source)!r}))')
-                    (home / '_zLab').mkdir()
-                    (home / '_zLab/prepare_vulkan.sh').write_text(prepare)
+                    files['_zLab/prepare_vulkan.sh'] = prepare.encode()
                     loader = home / 'libOpenCL.so.1'
                     if has_toolkit and generator_case != 'existing-make':
                         loader.touch()
@@ -356,19 +374,16 @@ for arg do package=$arg; done
 [ "$package" = ocl-icd-libopencl1:amd64 ] && [ "$FAKE_GENERATOR" != make ] && printf installed
 ''')
                     dpkg_query.chmod(0o755)
-                script = deploy.REMOTE_BUILD.replace('cd "$directory"', 'directory=' + shlex.quote(str(home)) + '\ncd "$directory"', 1)
+                script = deploy.REMOTE_BUILD
                 # Model the image layout in the test's private directory.
                 script = script.replace('/usr/local/cuda/bin/nvcc', shlex.quote(str(nvcc)))
                 if vulkan:
                     script = script.replace('/usr/lib/x86_64-linux-gnu/libOpenCL.so.1', shlex.quote(str(loader)))
-                (home / '.deployment.json').write_text(json.dumps(
-                    {'source': digest, 'mode': mode, 'profile': profile,
-                     'builder': hashlib.sha256(script.encode()).hexdigest()}))
-                wrapper = deploy.REMOTE_DEPLOY.replace(
-                    "directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
-                    'directory = ' + repr(str(home)))
-                code = 'BUILD = ' + repr(script) + '\nRESOURCES = ' + repr(deploy.RESOURCE_RECEIPT) + '\n' + wrapper
-                data = archive.read_bytes()
+                destination = home / 'managed'
+                data = fixture_archive(files)
+                digest = hashlib.sha256(data).hexdigest()
+                revision = revision_path(destination, data, mode, profile, script)
+                code = 'BUILD = ' + repr(script) + '\nRESOURCES = ' + repr(deploy.RESOURCE_RECEIPT) + '\n' + remote_wrapper(destination)
                 run = subprocess.run([sys.executable, '-c', code, digest, mode, profile, str(len(data))],
                                      input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, timeout=20)
                 output = run.stdout.decode()
@@ -377,7 +392,7 @@ for arg do package=$arg; done
                     self.assertIn("CUDA device discovery failed inside the worker's no-socket boundary", output)
                     self.assertNotIn('PUMP_LAB_STAGE=configure', output)
                     self.assertFalse(log.exists())
-                    self.assertFalse((home / '.worker-receipt.json').exists())
+                    self.assertFalse((revision / '.worker-receipt.json').exists())
                     continue
                 self.assertEqual(run.returncode, 0, output)
                 expected_stages = ['upload', 'unpack', 'environment']
@@ -398,7 +413,7 @@ for arg do package=$arg; done
                     self.assertIn('-DDATAPUMP_TRIAD_VULKAN=OFF', flags)
                     self.assertIn('--target datapump-worker triad_receiver_probe', flags)
                     self.assertIn('build-essential', (home / 'apt.log').read_text())
-                    self.assertTrue((home / 'build/lab/triad_receiver_probe').is_file())
+                    self.assertTrue((revision / 'build/lab/triad_receiver_probe').is_file())
                     self.assertIn('PUMP_LAB_DEVICE=CPU-only worker', output)
                 else:
                     self.assertNotIn('triad_receiver_probe', flags)
@@ -418,14 +433,14 @@ for arg do package=$arg; done
                                   if line.startswith(f'PUMP_LAB_MEASURE={stage} '))
                     self.assertRegex(metric, r'wall_seconds=[0-9.]+ child_user_cpu_seconds=[0-9.]+ '
                                      r'child_system_cpu_seconds=[0-9.]+ child_peak_rss_bytes=[0-9]+')
-                receipt = json.loads((home / '.worker-receipt.json').read_text())
+                receipt = json.loads((revision / '.worker-receipt.json').read_text())
                 self.assertEqual(receipt['request']['mode'], mode)
                 self.assertEqual(receipt['backend'], backend)
                 if mode == 'native-cpu':
                     self.assertEqual(receipt['probe_sha256'], hashlib.sha256(
-                        (home / 'build/lab/triad_receiver_probe').read_bytes()).hexdigest())
+                        (revision / 'build/lab/triad_receiver_probe').read_bytes()).hexdigest())
                 if mode == 'vulkan' or not has_toolkit:
-                    self.assertFalse((home / 'build/lab/probe-cuda-worker').exists())
+                    self.assertFalse((revision / 'build/lab/probe-cuda-worker').exists())
                 self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}', receipt['text'].splitlines())
                 self.assertIn(f'PUMP_LAB_BUILD_GENERATOR={selected_generator}', receipt['text'].splitlines())
                 self.assertTrue(any(line.startswith('PUMP_LAB_MEASURE=configure ')
@@ -441,7 +456,7 @@ for arg do package=$arg; done
                 self.assertRegex(output, r'PUMP_LAB_CGROUP_MEMORY_LIMIT_BYTES=(?:[0-9]+|unavailable|unlimited)')
                 self.assertRegex(output, r'PUMP_LAB_CGROUP_CPU_QUOTA_CORES=(?:[0-9/]+|unavailable|unlimited)')
                 if profile == 'live':
-                    self.assertIn('-DCMAKE_PROJECT_DataPump_INCLUDE=' + str(home) + '/_zLab/audio/inject.cmake', flags)
+                    self.assertIn('-DCMAKE_PROJECT_DataPump_INCLUDE=' + str(revision) + '/_zLab/audio/inject.cmake', flags)
                     self.assertIn('--target datapump-lab-worker', flags)
                 else:
                     self.assertNotIn('CMAKE_PROJECT_DataPump_INCLUDE', flags)
@@ -473,17 +488,17 @@ for arg do package=$arg; done
                         self.assertIn('PUMP_LAB_DEVICE=Vulkan support compiled (runtime device selection pending)', output)
                         expected_loader = str(loader) if has_toolkit and generator_case == 'ninja' else ''
                         self.assertIn('-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=' + expected_loader + ' ', flags)
-                        manifest = home / 'build/lab/nvidia-headless-icd.json'
+                        manifest = revision / 'build/lab/nvidia-headless-icd.json'
                         vendors = manifest.parent / 'nvidia-opencl-vendors'
                         if no_nvidia_icd:
                             self.assertFalse(manifest.exists())
                             self.assertFalse(vendors.exists())
-                            strict = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                            strict = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=revision, env=env,
                                                      capture_output=True, timeout=5)
                             self.assertNotEqual(strict.returncode, 0)
                             self.assertIn(b'Missing NVIDIA Vulkan ICD manifest', strict.stderr)
                             optional_env = dict(env, PUMP_LAB_OPTIONAL_NVIDIA_ICD='1')
-                            optional = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home,
+                            optional = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=revision,
                                                       env=optional_env, capture_output=True, timeout=5)
                             self.assertEqual(optional.returncode, 0, optional.stderr)
                         else:
@@ -494,13 +509,13 @@ for arg do package=$arg; done
                             self.assertEqual((vendors / 'nvidia.icd').read_text(), 'libnvidia-opencl.so.1\n')
                             self.assertEqual((vendors / 'nvidia.icd').stat().st_mode & 0o777, 0o600)
                             original = manifest.read_bytes()
-                            resumed = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                            resumed = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=revision, env=env,
                                                      capture_output=True, timeout=5)
                             self.assertEqual(resumed.returncode, 0, resumed.stderr)
                             self.assertEqual(manifest.read_bytes(), original)
                             source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
                                                                     'api_version': '1.4.313'}}))
-                            incompatible = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                            incompatible = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=revision, env=env,
                                                           capture_output=True, timeout=5)
                             self.assertNotEqual(incompatible.returncode, 0)
                             self.assertIn(b'manifest does not match', incompatible.stderr)
@@ -687,134 +702,205 @@ fi
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual(run.stdout, '')
 
-    def test_remote_wrapper_reuses_and_resumes_only_matching_deployments(self):
+    def test_remote_wrapper_refreshes_source_and_builder_on_one_host(self):
+        import fcntl
         destination = self.root / 'managed'
-        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
-                                             'directory = ' + repr(str(destination)))
-        build = '''set -eu
+        build = """set -eu
 echo build >> attempts
-test ! -f fail-build
+tar -xzf source.tar.gz
+test "${FAIL_BUILD:-no}" = no
 mkdir -p build/lab
 printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
 chmod +x build/lab/datapump-worker
-echo PUMP_LAB_PROFILE=simulation
 echo PUMP_LAB_MODE=vulkan
-echo PUMP_LAB_DEVICE=Vulkan
-echo PUMP_LAB_TORCH=not-requested
-echo PUMP_LAB_CUDA=not-requested
 printf 'PUMP_LAB_WORKER_SHA256='
 sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
-'''
-        code = 'BUILD = ' + repr(build) + '\nRESOURCES = ' + repr("print('fresh resources')") + '\n' + script
-        data = b'bounded archive'
-        digest = hashlib.sha256(data).hexdigest()
+"""
+        relay = {'_zLab/worker_relay.py': b'# original relay\n'}
+        first = fixture_archive({**relay, 'retired-modem.cpp': b'old'})
+        second = fixture_archive({**relay, 'new-modem.cpp': b'current'})
+        first_dir = revision_path(destination, first, 'gpu', 'simulation', build)
+        second_dir = revision_path(destination, second, 'gpu', 'simulation', build)
+        current = destination / 'current'
 
-        def invoke(payload=data, checksum=digest, mode='gpu'):
-            return subprocess.run([sys.executable, '-c', code, checksum, mode, 'simulation', str(len(data))],
-                                  input=payload, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+        def invoke(archive, builder=build, fail=False, payload=None, mode='gpu'):
+            code = ('BUILD = ' + repr(builder) + "\nRESOURCES = \"print('fresh resources')\"\n"
+                    + remote_wrapper(destination))
+            return subprocess.run([sys.executable, '-c', code, hashlib.sha256(archive).hexdigest(),
+                                   mode, 'simulation', str(len(archive))],
+                                  input=archive if payload is None else payload,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10,
+                                  env=dict(os.environ, FAIL_BUILD='yes' if fail else 'no'))
 
-        first = invoke()
-        self.assertEqual(first.returncode, 0, first.stdout)
-        self.assertEqual((destination / 'attempts').read_text(), 'build\n')
-        second = invoke()
-        self.assertEqual(second.returncode, 0, second.stdout)
-        self.assertIn(b'fresh resources', second.stdout)
-        self.assertEqual((destination / 'attempts').read_text(), 'build\n')
+        installed = invoke(first)
+        self.assertEqual(installed.returncode, 0, installed.stdout)
+        self.assertEqual(current.resolve(strict=True), first_dir)
+        self.assertEqual((destination / 'build/lab/datapump-worker').resolve(strict=True),
+                         first_dir / 'build/lab/datapump-worker')
+        self.assertEqual((destination / '_zLab/worker_relay.py').resolve(strict=True),
+                         first_dir / '_zLab/worker_relay.py')
 
-        # A precisely identified prior builder may migrate only the same
-        # source/mode/profile request so an interrupted retry can reuse its
-        # existing CMake cache and selected generator.
-        deployment = destination / '.deployment.json'
-        current_request = json.loads(deployment.read_text())
-        for builder in ('7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5',
-                        '200bce2484affd29702fe15275135bdbe5b196e7458830204c05604505eacdfc'):
-            deployment.write_text(json.dumps({**current_request, 'builder': builder}))
-            migrated = invoke()
-            self.assertEqual(migrated.returncode, 0, migrated.stdout)
-            self.assertEqual(json.loads(deployment.read_text()), current_request)
-        self.assertEqual((destination / 'attempts').read_text(), 'build\n')
+        reused = invoke(first)
+        self.assertEqual(reused.returncode, 0, reused.stdout)
+        self.assertIn(b'PUMP_LAB_STAGE=reuse', reused.stdout)
+        self.assertIn(b'fresh resources', reused.stdout)
+        self.assertEqual((first_dir / 'attempts').read_text(), 'build\n')
 
-        self.assertNotEqual(invoke(mode='cuda').returncode, 0)
-        self.assertNotEqual(invoke(mode='vulkan').returncode, 0)
-        self.assertNotEqual(invoke(checksum='0' * 64).returncode, 0)
-        self.assertEqual((destination / 'attempts').read_text(), 'build\n')
+        for payload in [b'short', bytes(len(second))]:
+            result = invoke(second, payload=payload)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(current.resolve(strict=True), first_dir)
+            self.assertEqual(list(destination.rglob('.upload-*')), [])
+        result = invoke(second, fail=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((second_dir / '.worker-receipt.json').exists())
+        self.assertEqual(current.resolve(strict=True), first_dir)
 
-        # A missing receipt represents interruption after extraction/build.
-        receipt_path = destination / '.worker-receipt.json'
-        receipt_path.unlink()
-        (destination / 'fail-build').touch()
-        failed = invoke()
-        self.assertNotEqual(failed.returncode, 0)
-        self.assertFalse(receipt_path.exists())
-        (destination / 'fail-build').unlink()
-        resumed = invoke()
+        with (second_dir / '.run.lock').open('a') as busy:
+            fcntl.flock(busy, fcntl.LOCK_SH)
+            blocked = invoke(second)
+            self.assertNotEqual(blocked.returncode, 0, blocked.stdout)
+            self.assertFalse((second_dir / '.worker-receipt.json').exists())
+            self.assertEqual(current.resolve(strict=True), first_dir)
+        with (first_dir / '.run.lock').open('a') as running:
+            fcntl.flock(running, fcntl.LOCK_SH)
+            # Reuse the running version, then publish a changed version
+            # while the existing session still holds its original files.
+            self.assertIn(b'PUMP_LAB_STAGE=reuse', invoke(first).stdout)
+            resumed = invoke(second)
+            self.assertEqual((first_dir / 'retired-modem.cpp').read_bytes(), b'old')
+            self.assertEqual((first_dir / '_zLab/worker_relay.py').read_bytes(), relay['_zLab/worker_relay.py'])
         self.assertEqual(resumed.returncode, 0, resumed.stdout)
-        self.assertEqual((destination / 'attempts').read_text(), 'build\nbuild\nbuild\n')
+        self.assertNotIn(b'PUMP_LAB_STAGE=reuse', resumed.stdout)
+        self.assertEqual(current.resolve(strict=True), second_dir)
+        self.assertFalse((second_dir / 'retired-modem.cpp').exists())
+        self.assertEqual((second_dir / 'new-modem.cpp').read_bytes(), b'current')
+        self.assertEqual((second_dir / 'attempts').read_text(), 'build\nbuild\n')
 
-        # Truncated retries preserve the validated archive and completed worker.
-        self.assertNotEqual(invoke(payload=b'partial').returncode, 0)
-        self.assertEqual((destination / 'source.tar.gz').read_bytes(), data)
-        self.assertEqual(list(destination.glob('.upload-*')), [])
+        changed_builder = build + '\n# changed build settings\n'
+        third_dir = revision_path(destination, second, 'gpu', 'simulation', changed_builder)
+        updated = invoke(second, builder=changed_builder)
+        self.assertEqual(updated.returncode, 0, updated.stdout)
+        self.assertNotIn(b'PUMP_LAB_STAGE=reuse', updated.stdout)
+        self.assertNotEqual(third_dir, second_dir)
+        self.assertEqual(current.resolve(strict=True), third_dir)
+        self.assertEqual((third_dir / 'attempts').read_text(), 'build\n')
 
-        # Even matching request and worker hashes cannot admit a CPU receipt.
+        # A selected backend is part of the deployment identity, even when
+        # both modes successfully build Vulkan on this host.
+        same_backend = invoke(second, mode='vulkan')
+        self.assertEqual(same_backend.returncode, 0, same_backend.stdout)
+        self.assertEqual(current.resolve(strict=True),
+                         revision_path(destination, second, 'vulkan', 'simulation', build))
+
+    def test_remote_wrapper_never_reuses_damaged_or_incompatible_revision(self):
+        destination = self.root / 'managed'
+        build = """set -eu
+tar -xzf source.tar.gz
+mkdir -p build/lab
+printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
+chmod +x build/lab/datapump-worker
+echo PUMP_LAB_MODE=vulkan
+"""
+        data = fixture_archive({'_zLab/worker_relay.py': b'relay'})
+        digest = hashlib.sha256(data).hexdigest()
+        code = 'BUILD = ' + repr(build) + "\nRESOURCES = ''\n" + remote_wrapper(destination)
+        revision = revision_path(destination, data, 'gpu', 'simulation', build)
+        receipt_path = revision / '.worker-receipt.json'
+
+        def invoke():
+            return subprocess.run([sys.executable, '-c', code, digest, 'gpu', 'simulation', str(len(data))],
+                                  input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+
+        initial = invoke()
+        self.assertEqual(initial.returncode, 0, initial.stdout)
         receipt = json.loads(receipt_path.read_text())
-        receipt_path.write_text(json.dumps({**receipt, 'backend': 'cpu'}))
-        rebuilt = invoke()
-        self.assertEqual(rebuilt.returncode, 0, rebuilt.stdout)
-        self.assertNotIn(b'PUMP_LAB_STAGE=reuse', rebuilt.stdout)
-        self.assertEqual(json.loads(receipt_path.read_text())['backend'], 'vulkan')
-        self.assertEqual((destination / 'attempts').read_text(), 'build\n' * 4)
+        for path, replacement in ((revision / 'build/lab/datapump-worker', b'changed worker'),
+                                  (revision / '_zLab/worker_relay.py', b'changed relay'),
+                                  (receipt_path, json.dumps({**receipt, 'backend': 'cpu'}).encode())):
+            with self.subTest(path=path.name):
+                saved = path.read_bytes()
+                path.write_bytes(replacement)
+                result = invoke()
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertNotIn(b'PUMP_LAB_STAGE=reuse', result.stdout)
+                self.assertEqual(path.read_bytes(), replacement)
+                path.write_bytes(saved)
+        receipt_path.unlink()
+        orphaned = invoke()
+        self.assertNotEqual(orphaned.returncode, 0, orphaned.stdout)
+        self.assertFalse(receipt_path.exists())
 
-        deployment.write_text(json.dumps({**current_request, 'mode': 'cpu'}))
-        rejected = invoke()
-        self.assertNotEqual(rejected.returncode, 0)
-        self.assertIn(b'Existing deployment uses different source or build settings', rejected.stdout)
-        deployment.unlink()
-        self.assertNotEqual(invoke().returncode, 0)
-        self.assertEqual((destination / 'attempts').read_text(), 'build\n' * 4)
-
-    def test_previous_explicit_vulkan_builder_reuses_worker_and_updates_receipt(self):
+    def test_remote_wrapper_preserves_existing_flat_deployment(self):
         destination = self.root / 'managed-vulkan'
-        legacy_builder = 'e1e3dd5cf08bf30ebb9375f8453b3cd5a5902f61e1b753241b4b91c49e64ad4c'
-        current_builder = 'a' * 64
-        wrapper = deploy.REMOTE_DEPLOY.replace(
-            "directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
-            'directory = ' + repr(str(destination)))
-        wrapper = wrapper.replace("'builder':hashlib.sha256(BUILD.encode()).hexdigest()",
-                                  "'builder':'" + current_builder + "'")
-        data = b'legacy Vulkan source'
+        data = fixture_archive({'_zLab/worker_relay.py': b'new relay'})
         digest = hashlib.sha256(data).hexdigest()
         destination.mkdir(mode=0o700)
-        worker = destination / 'build/lab/datapump-worker'
-        worker.parent.mkdir(parents=True)
-        worker.write_text('#!/bin/sh\nexit 0\n')
-        worker.chmod(0o700)
-        worker_hash = hashlib.sha256(worker.read_bytes()).hexdigest()
+        flat_worker = destination / 'build/lab/datapump-worker'
+        flat_worker.parent.mkdir(parents=True)
+        flat_worker.write_bytes(b'old worker')
+        flat_relay = destination / '_zLab/worker_relay.py'
+        flat_relay.parent.mkdir()
+        flat_relay.write_bytes(b'old relay')
         old_request = {'source': digest, 'mode': 'vulkan', 'profile': 'simulation',
-                       'builder': legacy_builder}
-        (destination / '.deployment.json').write_text(json.dumps(old_request))
-        old_text = 'PUMP_LAB_MODE=vulkan'
-        (destination / '.worker-receipt.json').write_text(json.dumps({
-            'request': old_request, 'text': old_text, 'backend': 'vulkan',
-            'worker_sha256': worker_hash,
-        }))
-        code = "BUILD = ''\nRESOURCES = \"print('fresh resources')\"\n" + wrapper
-        result = subprocess.run([sys.executable, '-c', code, digest, 'vulkan', 'simulation', str(len(data))],
-                                input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn(b'PUMP_LAB_STAGE=reuse', result.stdout)
-        self.assertEqual(json.loads((destination / '.deployment.json').read_text())['builder'], current_builder)
-        receipt = json.loads((destination / '.worker-receipt.json').read_text())
-        self.assertEqual(receipt['request']['builder'], current_builder)
-        self.assertEqual(receipt['backend'], 'vulkan')
+                       'builder': 'e1e3dd5cf08bf30ebb9375f8453b3cd5a5902f61e1b753241b4b91c49e64ad4c'}
+        marker = destination / '.deployment.json'
+        marker.write_text(json.dumps(old_request))
+        marker.chmod(0o600)
+        flat_receipt = destination / '.worker-receipt.json'
+        flat_receipt.write_text(json.dumps({'request': old_request, 'text': 'PUMP_LAB_MODE=vulkan',
+                                           'backend': 'vulkan', 'worker_sha256': hashlib.sha256(b'old worker').hexdigest()}))
+        flat_receipt.chmod(0o600)
+        original = {path: path.read_bytes() for path in (flat_worker, flat_relay, marker, flat_receipt)}
+        build = """set -eu
+tar -xzf source.tar.gz
+mkdir -p build/lab
+printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
+chmod +x build/lab/datapump-worker
+echo PUMP_LAB_MODE=vulkan
+"""
+        code = 'BUILD = ' + repr(build) + "\nRESOURCES = ''\n" + remote_wrapper(destination)
+        for reuse in (False, True):
+            result = subprocess.run([sys.executable, '-c', code, digest, 'vulkan', 'simulation', str(len(data))],
+                                    input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(b'PUMP_LAB_STAGE=reuse' in result.stdout, reuse)
+            for path, expected in original.items():
+                self.assertEqual(path.read_bytes(), expected)
+            self.assertEqual((destination / 'current/_zLab/worker_relay.py').read_bytes(), b'new relay')
+
+    def test_remote_wrapper_rejects_unmanaged_or_redirected_directory(self):
+        data = b'x'
+        digest = hashlib.sha256(data).hexdigest()
+        for unsafe in ('unmanaged', 'symlink-root', 'symlink-revisions'):
+            with self.subTest(unsafe=unsafe):
+                destination = self.root / unsafe
+                other = self.root / ('other-' + unsafe)
+                other.mkdir(mode=0o700)
+                if unsafe == 'symlink-root':
+                    destination.symlink_to(other, target_is_directory=True)
+                else:
+                    destination.mkdir(mode=0o700)
+                if unsafe == 'symlink-revisions':
+                    marker = destination / '.deployment.json'
+                    marker.write_text(json.dumps({'layout': 2, 'profile': 'simulation'}))
+                    marker.chmod(0o600)
+                    (destination / 'revisions').symlink_to(other, target_is_directory=True)
+                code = "BUILD = ''\nRESOURCES = ''\n" + remote_wrapper(destination)
+                result = subprocess.run([sys.executable, '-c', code, digest, 'gpu', 'simulation', str(len(data))],
+                                        input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(list(other.iterdir()), [])
+                self.assertFalse((destination / 'current').exists())
 
     def test_remote_wrapper_rejects_unexpected_built_backend(self):
         destination = self.root / 'managed'
-        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
-                                             'directory = ' + repr(str(destination)))
+        script = remote_wrapper(destination)
         build = '''set -eu
-mkdir -p build/lab
-touch build/lab/datapump-worker
+mkdir -p build/lab _zLab
+printf 'relay' > _zLab/worker_relay.py
+printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
+chmod +x build/lab/datapump-worker
 echo "PUMP_LAB_MODE=$REPORTED_BACKEND"
 '''
         code = 'BUILD = ' + repr(build) + "\nRESOURCES = ''\n" + script
@@ -827,17 +913,18 @@ echo "PUMP_LAB_MODE=$REPORTED_BACKEND"
                                         env=dict(os.environ, REPORTED_BACKEND=reported))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(b'Build did not return a complete deployment receipt', result.stdout)
-                self.assertFalse((destination / '.worker-receipt.json').exists())
+                self.assertFalse((revision_path(destination, data, requested, 'simulation', build) /
+                                  '.worker-receipt.json').exists())
                 shutil.rmtree(destination)
 
     def test_remote_wrapper_keeps_running_build_locked(self):
         import fcntl
         destination = self.root / 'managed'
         destination.mkdir(mode=0o700)
-        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
-                                             'directory = ' + repr(str(destination)))
+        script = remote_wrapper(destination)
         code = "BUILD = ''\nRESOURCES = ''\n" + script
         with (destination / '.deploy.lock').open('w') as lock:
+            os.fchmod(lock.fileno(), 0o600)
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             result = subprocess.run([sys.executable, '-c', code, '0' * 64, 'gpu', 'simulation', '1'],
                                     input=b'x', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
@@ -847,14 +934,14 @@ echo "PUMP_LAB_MODE=$REPORTED_BACKEND"
 
     def test_remote_wrapper_drains_output_before_large_script_is_consumed(self):
         destination = self.root / 'managed'
-        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
-                                             'directory = ' + repr(str(destination)))
+        script = remote_wrapper(destination)
         # Force small stdout pipes, and emit more than their capacity before
         # the shell consumes the rest of its script. A synchronous stdin pipe
         # write would deadlock against this early output.
-        script = script.replace('pass_fds=(lock,)', 'pass_fds=(lock,), pipesize=4096')
+        script = script.replace('pass_fds=(lock, run_lock)', 'pass_fds=(lock, run_lock), pipesize=4096')
         build = "python3 -c 'print(\"x\" * 65536)'\n" + '# padding\n' * 2000 + '''
-mkdir -p build/lab
+mkdir -p build/lab _zLab
+printf 'relay' > _zLab/worker_relay.py
 printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
 chmod +x build/lab/datapump-worker
 echo PUMP_LAB_MODE=vulkan
@@ -866,7 +953,7 @@ echo PUMP_LAB_MODE=vulkan
                                 input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
         self.assertEqual(result.returncode, 0, result.stdout[-1000:])
         self.assertIn(b'PUMP_LAB_MODE=vulkan', result.stdout)
-        self.assertTrue((destination / '.worker-receipt.json').is_file())
+        self.assertTrue((revision_path(destination, data, 'gpu', 'simulation', build) / '.worker-receipt.json').is_file())
 
     def test_gpu_receipt_fallbacks_and_no_full_device_claim(self):
         namespace = {'__name__': 'receipt_test'}
@@ -910,8 +997,8 @@ echo PUMP_LAB_MODE=vulkan
 
     def test_hash_mismatch_aborts_before_extraction_or_build(self):
         (self.root / 'source.tar.gz').write_bytes(b'not the bundle')
-        script = deploy.REMOTE_BUILD.replace('cd "$directory"', 'directory=' + shlex.quote(str(self.root)) + '\ncd "$directory"', 1)
-        result = subprocess.run(['sh', '-s', '--', '0' * 64, 'gpu', 'simulation'], input=script, text=True,
+        script = deploy.REMOTE_BUILD
+        result = subprocess.run(['sh', '-s', '--', '0' * 64, 'gpu', 'simulation'], input=script, text=True, cwd=self.root,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / 'build').exists())

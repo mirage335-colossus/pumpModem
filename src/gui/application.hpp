@@ -55,6 +55,7 @@ public:
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
     void start();
+    ui::SimulationStartup simulation_startup() const;
     bool tick(); // Polls at 25 Hz; true when native state should be presented.
     bool finished() const;
     int result() const;

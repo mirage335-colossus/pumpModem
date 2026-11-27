@@ -4,7 +4,7 @@ import {decodeFrame,encodeAudio} from './protocol.mjs';
 // service. Neither this adapter nor the isolated renderer opens a connection.
 const sourceLimit=1024*1024;
 function encoded(text){const bytes=new TextEncoder().encode(text);let raw='';for(let i=0;i<bytes.length;i+=32768)raw+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(raw);}
-export function createHostedFrontend({container,rendererSource,protocolSource,styleText='',workletSource,send,handleService=null,status=()=>{}}) {
+export function createHostedFrontend({container,rendererSource,protocolSource,styleText='',workletSource,dark=false,send,handleService=null,status=()=>{}}) {
     if(!container?.ownerDocument||typeof send!=='function')throw new TypeError('A container and bounded host transport callback are required');
     for(const asset of [rendererSource,protocolSource,styleText,workletSource])if(typeof asset!=='string'||asset.length>sourceLimit)throw new RangeError('Preloaded bounded renderer assets are required');
     const document=container.ownerDocument,window=document.defaultView;
@@ -16,7 +16,7 @@ export function createHostedFrontend({container,rendererSource,protocolSource,st
     const assets={renderer:encoded(rendererSource),protocol:encoded(protocolSource),style:encoded(styleText)};
     // Only reviewed static code assets and generated hex nonce are interpolated.
     // Acoustic text, filenames, fields and host file paths never enter srcdoc.
-    frame.srcdoc=`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; connect-src 'none'; img-src data: blob:; form-action 'none'; base-uri 'none'"><style>html,body{margin:0;height:100%;overflow:hidden}#root.datapump{height:100%;min-height:0}</style><main id="root"></main><script type="module">
+    frame.srcdoc=`<!doctype html><html${dark===true?' style="color-scheme: dark"':''}><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; connect-src 'none'; img-src data: blob:; form-action 'none'; base-uri 'none'"><style>html,body{margin:0;height:100%;overflow:hidden}#root.datapump{height:100%;min-height:0}</style><main id="root"></main><script type="module">
 const nonce=${JSON.stringify(nonce)},assets=${JSON.stringify(assets)};
 window.addEventListener('error',event=>parent.postMessage({type:'datapump-init-error',nonce,message:String(event.message).slice(0,512)},'*'));
 const decode=s=>new TextDecoder().decode(Uint8Array.from(atob(s),c=>c.charCodeAt(0)));

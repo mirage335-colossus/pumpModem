@@ -31,6 +31,7 @@ public:
     Controller(const Controller&) = delete;
     Controller& operator=(const Controller&) = delete;
     void start(bool active=true);
+    ui::SimulationStartup simulation_startup() const;
     void poll(bool expanded_spectrum = false, bool planner_visible = false);
     void close();
     // TX-idle audio handoff cancels partial DSP capture and retains incomplete

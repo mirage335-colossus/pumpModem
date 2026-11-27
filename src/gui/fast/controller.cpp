@@ -127,9 +127,12 @@ struct Controller::Impl {
     std::vector<ui::ServiceCompletion> service_completions;
     ui::FieldState& f(F field) {return fields.at(static_cast<std::size_t>(field));}
     const ui::FieldState& f(F field) const {return fields.at(static_cast<std::size_t>(field));}
-    explicit Impl(std::function<bool()> acquire):acquire_audio(std::move(acquire)) {
-        f(F::fast_simulation).options={{"live","Live audio"},{"simulation","Simulation"},{"loopback","Live loopback test"}};
-        f(F::fast_simulation).selected="live";
+    const bool simulation_only;
+    explicit Impl(std::function<bool()> acquire,bool restrict_to_simulation)
+        :acquire_audio(std::move(acquire)),simulation_only(restrict_to_simulation) {
+        f(F::fast_simulation).options={{"live","Live audio",!simulation_only},{"simulation","Simulation"},
+                                      {"loopback","Live loopback test",!simulation_only}};
+        f(F::fast_simulation).selected=simulation_only?"simulation":"live";
         f(F::fast_sim_tx_power).text="40";
         f(F::fast_sim_tx_power).options={{"40","Manual · 40 W"},{"150000","150 kW"}};
         f(F::fast_sim_path_loss).text="130";
@@ -631,7 +634,7 @@ struct Controller::Impl {
         f(F::fast_exclusive).enabled=edit&&audio::exclusive_supported();
         const auto mode=f(F::fast_simulation).selected;
         const bool simulated=mode=="simulation";
-        f(F::fast_simulation).enabled=edit;
+        f(F::fast_simulation).enabled=edit&&!simulation_only;
         for(const auto field:simulation_budget_fields) {
             f(field).enabled=edit&&simulated;
             f(field).disabled_text=simulated?"":"Simulation only";
@@ -836,7 +839,8 @@ struct Controller::Impl {
         });
     }
 };
-Controller::Controller(std::function<bool()> acquire):impl_(std::make_unique<Impl>(std::move(acquire))) {}
+Controller::Controller(std::function<bool()> acquire,bool simulation_only)
+    :impl_(std::make_unique<Impl>(std::move(acquire),simulation_only)) {}
 Controller::~Controller() {close();}
 void Controller::poll() {
     auto& p=*impl_;
@@ -944,6 +948,10 @@ void Controller::set_shellcode_mode(bool enabled) {
 void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.discard_pending_start();p.worker.request_stop();p.session.close();p.pending_generated.reset();p.pending.clear();p.services.clear();p.refresh();}
 bool Controller::ready_to_close() const {return impl_->closing&&!impl_->key_loading&&impl_->session.ready_to_close();}
 bool Controller::active() const {return impl_->session.active()||impl_->pending_start!=C::none;}
+ui::SimulationStartup Controller::simulation_startup() const {
+    const auto& error=impl_->declaration_error.empty()?impl_->simulation_validation_error:impl_->declaration_error;
+    return {!impl_->live_audio_mode()&&error.empty(),error};
+}
 void Controller::set_devices(const std::vector<audio::Device>& devices) {
     auto& p=*impl_;audio_controls::set_device_options(p.f(F::fast_device),devices);++p.revision;
 }

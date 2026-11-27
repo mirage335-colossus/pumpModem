@@ -456,11 +456,21 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
     def test_package_verifies_without_inventing_abi_floor(self):
         _, calls = self.run_wrapper("package")
         self.assertIn("release", calls[0])
+        self.assertIn(str(self.source / "build/release"), calls[0])
         self.assertIn("-DDATAPUMP_PORTABLE=ON", calls[0])
+        self.assertIn("-UDATAPUMP_BUILD_WEB_WORKER", calls[0])
         self.assertIn("package", calls[1])
         self.assertTrue(calls[2][-1].endswith("/tools/verify-native-archives.cmake"))
         self.assertIn("-DREQUIRE_MANUALS=ON", calls[2])
         self.assertFalse(any(arg.startswith("-DMAX_GLIBC=") for arg in calls[2]))
+
+    def test_package_respects_worker_overrides_and_cli_profile(self):
+        _, calls = self.run_wrapper("package", "--", "-DDATAPUMP_BUILD_WEB_WORKER=OFF")
+        self.assertLess(calls[0].index("-UDATAPUMP_BUILD_WEB_WORKER"),
+                        calls[0].index("-DDATAPUMP_BUILD_WEB_WORKER=OFF"))
+        self.log.unlink()
+        _, calls = self.run_wrapper("package", "--cli")
+        self.assertIn("-DDATAPUMP_BUILD_WEB_WORKER=OFF", calls[0])
 
     def test_package_accepts_explicit_abi_ceiling(self):
         _, calls = self.run_wrapper("package", DATAPUMP_MAX_GLIBC="2.35")

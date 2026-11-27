@@ -1197,6 +1197,18 @@ void fhss_rate_compatibility() {
 void simulation_launch_defaults() {
     using F=gui::ui::Field;
     using C=gui::ui::Command;
+    gui::Application app({.simulation=true,.simulation_only=true});
+    const auto& mode=app.field(F::fast_mode);
+    check(mode.enabled&&mode.selected=="robust");
+    const auto legacy=std::ranges::find(mode.options,std::string("legacy"),&gui::ui::Option::id);
+    check(legacy!=mode.options.end()&&!legacy->enabled&&legacy->label.find("live audio only")!=std::string::npos);
+    app.select(F::fast_mode,"legacy");check(mode.selected=="robust");
+    app.select(F::fast_mode,"fast");check(mode.selected=="fast");
+    const auto& fast_simulation=app.field(F::fast_simulation);
+    check(!fast_simulation.enabled&&fast_simulation.selected=="simulation"&&!app.enabled(C::fast_listen));
+    app.select(F::fast_simulation,"loopback");app.select(F::fast_simulation,"live");
+    check(fast_simulation.selected=="simulation");
+    app.select(F::fast_mode,"robust");check(mode.selected=="robust");
     gui::Controller simulation({.simulation_only=true});
     check(simulation.settings().simulation && !simulation.field(F::simulation).enabled &&
           simulation.field(F::audio_error).text=="Default");

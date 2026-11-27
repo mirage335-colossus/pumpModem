@@ -1,9 +1,12 @@
-# zLab for Robust modem simulations
+# zLab for Data Pump modem simulations
 
 **Implementation status:** the developer tool integrates managed Linode and
 RunPod compute, simulation and finite Live/Duplex controls with the native
 worker and local audio companion. The shared GUI runs through an SSH relay to
-a separately deployed worker. A short RunPod simulation decoded `e` on both a
+the same native application worker shipped in Linux portable builds. In
+Simulation, the application's modem selector offers Fast and Robust. Legacy
+uses physical audio and is unavailable in this mode. A short Robust RunPod
+simulation decoded `e` on both a
 full RTX PRO
 6000 Blackwell Server Edition and a full GeForce RTX 5090. Both used Vulkan for
 coarse search and the native CPU receiver for fine processing. Local tests
@@ -20,7 +23,8 @@ checks at startup.
 All cloud API calls, SSH and credential handling belong to the separate lab
 tool. This work does not add networking to Data Pump's modem, GUI, CLI or
 socket-free pipe worker. The local lab currently runs from this source tree:
-it imports `tools/preview.py` and serves shared `tools/` and `web/` assets, so
+it imports `tools/preview.py` and serves the shared browser host. The worker's
+hosted browser assets come from the selected checkout or package, so
 copying `_zLab/` alone does not produce an independently distributable package.
 
 ## Local controller
@@ -40,6 +44,33 @@ interpreter. Then launch the controller:
 ```sh
 python3 _zLab/app.py
 ```
+
+### Choose the application to simulate
+
+Leave the portable package directory blank to test the current checkout.
+zLab uploads the working source, including uncommitted modem changes under
+`src/` and `include/`, and builds the ordinary `datapump-worker` target on
+the selected machine. It keeps the browser assets fixed for that session.
+
+To test an exact portable distribution, build with `./build.sh package` on
+Linux or extract a current Linux portable release. In **Advanced → Simulation
+package**, select the extracted directory containing `manifest.sha256` and
+`bin/datapump-worker`. Select a package from a trusted build. zLab checks the
+package inventory, transfers the worker and its packaged runtime libraries,
+and serves the matching hosted browser assets locally.
+The remote machine must support the package's CPU architecture and Linux
+runtime. zLab checks for the simulator startup protocol before creating
+compute. Rebuild an older package if that check fails. The deployment receipt
+identifies what ran. Build a fresh package
+to test edits made after packaging, or use the checkout option.
+
+The standalone Wasm page uses the same C++ application and browser renderer.
+zLab runs the native worker on the selected host so it can use that host's
+threads, RAM and supported GPU backends. When adding a modem, implement its
+simulation in the normal application and register its simulation capability
+in the shared modem selector. The selector and startup status reach zLab over
+the ordinary worker protocol. Finite Live/Duplex uses its dedicated dated
+audio provider for the local physical device.
 
 Enter the Linode or RunPod API key in its masked field. zLab stores both
 credentials in the gitignored `Cloud_API_Keys/` directory at the checkout
@@ -157,7 +188,7 @@ is deliberately excluded. You can run a brief relative regression that
 generates its own fixed inputs:
 
 ```sh
-cd /workspace/pump-lab
+cd -P /workspace/pump-lab/current
 cmake --build build/lab --target triad_receiver_probe \
   --parallel "$(python3 -B tools/build_capacity.py)"
 build/lab/triad_receiver_probe describe --backend cpu \
@@ -283,9 +314,10 @@ and requests termination or queue cancellation. RunPod confirms termination
 before the lab removes the row. Pending requests are saved locally
 so the controller can check them again after a restart.
 
-The simulation action expects the lab relay at
-`/workspace/pump-lab/_zLab/worker_relay.py` and the native worker at
-`/workspace/pump-lab/build/lab/datapump-worker` on the selected running pod.
+The simulation action starts the relay and worker from the exact revision
+returned by deployment. Checkout revisions live under
+`/workspace/pump-lab/revisions/` and portable selections under
+`/workspace/pump-lab-portable/`.
 Select the `simulation` worker profile and click **Start simulation**.
 New pods receive a unique host key generated locally before creation through
 the authenticated RunPod request. The lab also creates a client identity for
@@ -367,14 +399,19 @@ and the worker runs on CPU with the reason in receiver diagnostics. The same
 runtime rule applies regardless of the RunPod allocation label. The checkbox
 selection lasts for the worker session. Use the relay's `--require-gpu` option
 for strict GPU qualification.
-Check the receiver's backend, scored rows and stage counters to see where GPU work ran. Reopening a managed deployment
-checks the source, build settings and worker hash before reuse. An interrupted
-matching build can resume. A different source or an unmanaged directory requires
-a fresh pod. A timeout or lost SSH connection may leave remote work active.
+Check the receiver's backend, scored rows and stage counters to see where GPU
+work ran. Each checkout deployment has its own revision directory, keyed by
+the source archive, builder, build mode and profile. Reopening it verifies
+the worker and relay before reuse. An interrupted matching build can resume.
+Changing source builds a new revision on the same managed host. Running sessions
+keep their pinned executable and relay. If the deployment directory belongs
+to another installation, use a fresh instance. A timeout or lost SSH connection may leave remote
+work active.
 The remote deployment lock prevents two attempts from building concurrently.
-The helper does not stop the pod. The source archive remains on the pod for deployment
-verification; remove it after the build is verified and it is no longer needed
-for diagnosis, or terminate the pod when the job ends.
+The helper does not stop the pod. On retained storage, remove superseded
+revisions once their sessions, command-line probes and validation work have
+finished. Keep the shared compiler cache while compatible builds use it, or
+terminate the pod and release its storage when the job ends.
 
 When using the command-line deployment helper, enter the same verified
 known-hosts file and, if needed, the same identity path in the GUI to open a
@@ -695,8 +732,9 @@ provider job settings separately typed. Send user-entered values as data.
 
 ## Reuse the native session and keep networking in the lab
 
-For simulation, the existing Linux `datapump-worker --simulation` hosts the
-shared C++ application, settings, drafts and UI snapshots. The live profile
+For simulation, the existing Linux `datapump-worker --simulation-only` hosts the
+shared C++ application, settings, drafts and UI snapshots. Its permitted modes
+use simulated input and output. The live profile
 uses a lab-only native worker linked to the same modem and GPU libraries, with
 its dated-audio provider. The lab relay starts each with local anonymous pipes
 and forwards framed events over SSH. The workers reject terminal, named FIFO

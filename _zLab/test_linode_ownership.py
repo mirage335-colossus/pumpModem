@@ -47,9 +47,11 @@ class LinodeOwnershipTests(unittest.TestCase):
         self.assertNotIn(payload['metadata']['user_data'], self.state.path.read_text())
         known = self.state.path.parent / 'known_hosts'
         known.touch()
-        deploy = Mock()
-        deploy_selected(self.details, record, str(known), record['ssh_identity'], deploy_func=deploy)
+        worker = '/workspace/pump-lab/revisions/' + 'a' * 64 + '/build/lab/datapump-worker'
+        deploy = Mock(return_value=worker)
+        selection = deploy_selected(self.details, record, str(known), record['ssh_identity'], deploy_func=deploy)
         self.assertEqual(deploy.call_args.kwargs['mode'], 'native-cpu')
+        self.assertEqual(selection.worker_path, worker)
 
     def test_lost_create_response_binds_approved_pending_name_before_deleting(self):
         def lost_response(payload):

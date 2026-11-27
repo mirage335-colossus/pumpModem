@@ -35,7 +35,7 @@ struct Application::Impl {
             // The first attempt can initiate asynchronous device closure.
             // Remember that attempt even before its acknowledgement arrives.
             audio_suspended=true;return controller.try_suspend_capture();
-        }),legacy_controller([this] {
+        },launch.simulation_only),legacy_controller([this] {
             if(fast_controller.active())return false;
             audio_suspended=true;return controller.try_suspend_capture();
         }) {}
@@ -79,6 +79,12 @@ struct Application::Impl {
     bool fast_selected() const {return fast_mode.selected=="fast";}
     bool legacy_selected() const {return fast_mode.selected=="legacy";}
     bool regular_selected() const {return fast_mode.selected=="robust";}
+    struct Modem {
+        const char* id;
+        const char* label;
+        ui::SimulationStartup (*simulation_startup)(const Impl&);
+    };
+    static const Modem modems[];
     bool auxiliary_active() const {return fast_controller.active()||legacy_controller.active();}
     ui::Page regular_page=ui::Page::console;
     std::uint64_t mode_generation=0,next_service=0;
@@ -104,18 +110,37 @@ struct Application::Impl {
         bool details=false,draft=false,closing=false,can_load=false,can_sample=false;
     } planner_document;
 };
+const Application::Impl::Modem Application::Impl::modems[]={
+    {"fast","Fast Modem",[](const Impl& app){return app.fast_controller.simulation_startup();}},
+    {"robust","Robust Modem",[](const Impl& app){return app.controller.simulation_startup();}},
+    {"legacy","Legacy Modem",nullptr}
+};
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
     // Smoke runs exercise every page; ordinary launches start with the simpler view.
     impl_->developer_mode.checked=launch.smoke;
     impl_->controller.set_developer_mode(launch.smoke);
     impl_->shellcode_mode.visible=launch.smoke;
-    impl_->fast_mode.options={{"fast","Fast Modem"},{"robust","Robust Modem"},{"legacy","Legacy Modem"}};
+    const bool robust_required=launch.require_gpu||launch.finite_duplex;
+    for(const auto& modem:Impl::modems) {
+        std::string label=modem.label;
+        const bool supports_mode=!launch.simulation_only||modem.simulation_startup;
+        if(!supports_mode)label+=" · live audio only";
+        impl_->fast_mode.options.push_back({modem.id,std::move(label),
+            supports_mode&&(!robust_required||std::string_view(modem.id)=="robust")});
+    }
     // Explicit Robust simulation/settings/page launches keep their requested work.
     impl_->fast_mode.selected=launch.require_gpu||launch.finite_duplex||launch.simulation_only||launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
-    if(launch.require_gpu||launch.finite_duplex||launch.simulation_only)impl_->fast_mode.enabled=false;
+    impl_->fast_mode.enabled=std::ranges::count_if(impl_->fast_mode.options,&ui::Option::enabled)>1;
     select_page(launch.page);
 }
 Application::~Application()=default;
+ui::SimulationStartup Application::simulation_startup() const {
+    if(!impl_->started_session)return {};
+    const auto mode=std::ranges::find(Impl::modems,impl_->fast_mode.selected,&Impl::Modem::id);
+    if(mode==std::end(Impl::modems)||!mode->simulation_startup)
+        return {false,"The selected modem has no simulation controller."};
+    return mode->simulation_startup(*impl_);
+}
 WindowSizing initial_window_sizing(const Launch& options) {
     const bool fast=!(options.require_gpu||options.finite_duplex||options.simulation_only||options.simulation||options.smoke||options.settings||options.page!=ui::Page::console);
     return fast?WindowSizing{ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height}:WindowSizing{};
@@ -204,8 +229,9 @@ void Application::preset(const ui::Control& declaration,const std::string& id) {
 void Application::select(ui::Field field,std::string id) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
     if(field==ui::Field::fast_mode) {
-        if(launch.require_gpu||launch.finite_duplex||launch.simulation_only)return; // Other modem modes do not implement these policies.
-        if((id!="robust"&&id!="fast"&&id!="legacy")||impl_->fast_mode.selected==id)return;
+        const auto& mode=impl_->fast_mode;
+        const auto option=std::ranges::find(mode.options,id,&ui::Option::id);
+        if(!mode.enabled||option==mode.options.end()||!option->enabled||mode.selected==id)return;
         dismiss_overlay();++impl_->mode_generation;
         if(impl_->regular_selected()) {
             impl_->regular_page=impl_->page;
@@ -217,7 +243,8 @@ void Application::select(ui::Field field,std::string id) {
         impl_->page=ui::Page::console;
         impl_->fast_mode.selected=std::move(id);
         if(impl_->legacy_selected())impl_->legacy_controller.selected(true);
-        if(impl_->fast_selected()&&impl_->started_session&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
+        if(impl_->fast_selected()&&impl_->started_session&&(launch.simulation_only||(!launch.simulation&&!launch.smoke)))
+            impl_->fast_controller.set_selected(true);
         if(impl_->regular_selected()) {
             select_page(impl_->regular_page);
             if(impl_->audio_suspended&&!impl_->auxiliary_active()) {

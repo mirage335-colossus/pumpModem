@@ -2263,9 +2263,9 @@ same fixture, launcher and stock worker environment.
   decisions near it, raise `--noise-dbm-hz` towards −82 on the stable
   channel. `--signal-gain-db` is accepted on the CPU backend only, and the
   probe rejects a repeated option.
-- A deployed worker refuses a second deployment of different source. Copy
-  changed files to the deployed tree, rebuild the two targets and record
-  source and binary hashes with the results.
+- Deploy the reference and candidate from their respective checkouts. zLab
+  gives each revision its own build tree on the same host. Use the returned
+  paths and record both source and binary hashes with the results.
 - Check kernel changes first with `triad_opencl_nvfp4_emulated`,
   `triad_opencl_coarse_session_emulated` and its one-ray variant,
   `triad_opencl_fine_session_emulated` and its deferred-execution variant.

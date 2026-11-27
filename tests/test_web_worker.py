@@ -96,16 +96,15 @@ def string(value):
     return struct.pack("<I", len(data)) + data
 
 
-def wait_for_gpu_state(process, predicate):
+def wait_for_simulation_state(process, predicate):
     end = time.monotonic() + 15
     while time.monotonic() < end:
         kind, payload = read_frame(process, end - time.monotonic())
-        assert kind != 103, payload
-        if kind == 101:
-            state = json.loads(payload)
-            if predicate(state):
-                return state
-    raise AssertionError("GPU selection deadline")
+        assert kind == 101, f"Simulation-only worker emitted frame {kind}: {payload[:80]!r}"
+        state = json.loads(payload)
+        if predicate(state):
+            return state
+    raise AssertionError("simulation worker deadline")
 
 
 def label_text(state):
@@ -113,7 +112,7 @@ def label_text(state):
 
 
 def simulation_ready(state):
-    return "Robust simulation ready" in label_text(state)
+    return state["simulationStartup"]["state"] == "ready"
 
 
 def gpu_unavailable(state):
@@ -126,7 +125,7 @@ def gpu_toggle(state):
     return toggle
 
 
-def send_gpu_test_event(process, state, kind, target, value="", checked=False):
+def send_simulation_event(process, state, kind, target, value="", checked=False):
     sequence = int(state["ack"]) + 1
     event = (struct.pack("<IQQQIII", 1, int(state["generation"]), sequence,
                          int(target), kind, int(checked), 0)
@@ -135,9 +134,75 @@ def send_gpu_test_event(process, state, kind, target, value="", checked=False):
     return sequence
 
 
-def update_gpu_test_state(process, state, kind, target, value=""):
-    sequence = send_gpu_test_event(process, state, kind, target, value)
-    return wait_for_gpu_state(process, lambda updated: int(updated["ack"]) >= sequence)
+def update_simulation_state(process, state, kind, target, value=""):
+    sequence = send_simulation_event(process, state, kind, target, value)
+    return wait_for_simulation_state(process, lambda updated: int(updated["ack"]) >= sequence)
+
+
+def rejected_simulation_event(process, state, kind, target, reason, value="", checked=False):
+    sequence = send_simulation_event(process, state, kind, target, value, checked)
+    deadline = time.monotonic() + 15
+    while True:
+        frame_kind, payload = read_frame(process, deadline - time.monotonic())
+        if frame_kind == 103:
+            assert payload == string(reason), payload
+            break
+        assert frame_kind == 101, f"Unexpected simulation worker frame {frame_kind}"
+    return wait_for_simulation_state(process, lambda updated: int(updated["ack"]) >= sequence)
+
+
+def check_fast_simulation(process, state):
+    def catalog():
+        return next(item for item in state["controls"] if item["selected"] in ("fast", "robust")
+                    and any(option["id"] == "fast" for option in item["options"]))
+
+    def control(label):
+        return next(item for item in state["controls"] if item["label"] == label)
+
+    def event(kind, target, value=""):
+        nonlocal state
+        state = update_simulation_state(process, state, kind, target, value)
+
+    def open_tab(label):
+        event(11, next(tab["id"] for tab in state["tabs"] if tab["label"] == label))
+
+    modes = {option["id"]: option["enabled"] for option in catalog()["options"]}
+    assert catalog()["selected"] == "robust" and catalog()["enabled"]
+    assert modes["fast"] and modes["robust"] and not modes["legacy"], modes
+    state = rejected_simulation_event(process, state, 2, catalog()["id"], "Unknown or disabled option", "legacy")
+    assert catalog()["selected"] == "robust"
+    event(2, catalog()["id"], "fast")
+    assert catalog()["selected"] == "fast" and simulation_ready(state)
+    open_tab("Simulation / live testing")
+    route = control("Mode")
+    assert route["selected"] == "simulation" and not route["enabled"], route
+    for unavailable in ("live", "loopback"):
+        state = rejected_simulation_event(process, state, 2, control("Mode")["id"],
+                                          "Web control is unavailable", unavailable)
+        assert control("Mode")["selected"] == "simulation"
+    event(1, control("Noise (dBm/Hz or off)")["id"], "off")
+    open_tab("Console")
+    for label, value in (("Doppler / delay", "none"), ("Selective AM", "off"),
+                         ("Baseband oscillator", "off"), ("Shift oscillator", "off"),
+                         ("Expected SNR", "13")):
+        event(2, control(label)["id"], value)
+    event(1, control("Message")["id"], "Lab")
+    assert control("Simulate text")["enabled"]
+    event(4, control("Simulate text")["id"])
+
+    def complete(snapshot):
+        signals = next(item for item in snapshot["controls"] if item["label"] == "Signals")
+        return any("SIMULATED" in cell["text"] and "checksum verified" in cell["text"]
+                   and cell["text"].endswith("3 bytes · Lab")
+                   for record in signals["records"] for cell in record["cells"])
+
+    if not complete(state):
+        state = wait_for_simulation_state(process, complete)
+    event(2, catalog()["id"], "robust")
+    assert catalog()["selected"] == "robust"
+    if not simulation_ready(state):
+        state = wait_for_simulation_state(process, simulation_ready)
+    return state
 
 
 def document_nodes(node):
@@ -170,24 +235,25 @@ with tempfile.TemporaryDirectory(prefix="datapump-vulkan-unavailable-") as direc
                 assert b"GPU reception is unavailable in this build" in error, error
                 continue
 
-            startup = wait_for_gpu_state(process, gpu_unavailable)
+            startup = wait_for_simulation_state(process, gpu_unavailable)
             diagnostic = gpu_unavailable(startup)
             if flag == "--require-gpu":
                 assert diagnostic.startswith("GPU reception unavailable:"), diagnostic
-                assert not simulation_ready(startup), label_text(startup)
+                assert startup["simulationStartup"] == {"state": "failed", "reason": diagnostic}
                 assert not gpu_toggle(startup)["enabled"] and gpu_toggle(startup)["checked"]
             else:
                 assert "using CPU" in diagnostic and not diagnostic.startswith("GPU reception unavailable"), diagnostic
                 gpu_compiled = no_compiled_gpu not in diagnostic
                 if not simulation_ready(startup):
-                    startup = wait_for_gpu_state(process, simulation_ready)
+                    startup = wait_for_simulation_state(process, simulation_ready)
                 assert not gpu_toggle(startup)["enabled"] and not gpu_toggle(startup)["checked"]
 
             if flag is None:
+                startup = check_fast_simulation(process, startup)
                 # The saved setting goes through the same planner load action
                 # as an ordinary browser session.
                 planner = next(tab for tab in startup["tabs"] if tab["label"] == "Link planner")
-                state = update_gpu_test_state(process, startup, 11, planner["id"])
+                state = update_simulation_state(process, startup, 11, planner["id"])
                 nodes = list(document_nodes(state["document"]))
                 legend_inks = []
                 for name in ("Time/bit", "CPU", "RX DATA model", "Workspace", "RX sample"):
@@ -196,38 +262,30 @@ with tempfile.TemporaryDirectory(prefix="datapump-vulkan-unavailable-") as direc
                 assert len(set(legend_inks)) == 5, "planner series lost their distinct legend colors"
                 command = next(node["control"] for node in nodes
                                if (node.get("control") or {}).get("label") == "Launch command")
-                state = update_gpu_test_state(process, state, 1, command["id"], "--gpu yes")
+                state = update_simulation_state(process, state, 1, command["id"], "--gpu yes")
                 load = next(node for node in document_nodes(state["document"])
                             if node["kind"] == "action" and node["text"] == "Load")
-                state = update_gpu_test_state(process, state, 4, load["id"])
+                state = update_simulation_state(process, state, 4, load["id"])
                 command = next(node["control"] for node in document_nodes(state["document"])
                                if (node.get("control") or {}).get("label") == "Launch command")
                 assert "--gpu no" in command["text"], command["text"]
                 console = next(tab for tab in state["tabs"] if tab["label"] == "Console")
-                state = update_gpu_test_state(process, state, 11, console["id"])
+                state = update_simulation_state(process, state, 11, console["id"])
                 assert not gpu_toggle(state)["enabled"] and not gpu_toggle(state)["checked"]
                 assert "using CPU" in gpu_unavailable(state), label_text(state)
 
                 # A disabled GPU target rejects the event at the protocol
                 # boundary. A draft can still be transmitted on the CPU route.
-                sequence = send_gpu_test_event(process, state, 3, gpu_toggle(state)["id"], checked=True)
-                deadline = time.monotonic() + 15
-                while time.monotonic() < deadline:
-                    kind, payload = read_frame(process, deadline - time.monotonic())
-                    if kind == 103:
-                        assert payload == string("Web control is unavailable"), payload
-                        break
-                else:
-                    raise AssertionError("Disabled GPU selection was not rejected")
-                state = wait_for_gpu_state(process, lambda updated: int(updated["ack"]) >= sequence)
+                state = rejected_simulation_event(process, state, 3, gpu_toggle(state)["id"],
+                                                  "Web control is unavailable", checked=True)
                 message = next(item for item in state["controls"] if item["kind"] == "text"
                                and item.get("byteLimit") == 4 * 1024 * 1024)
-                state = update_gpu_test_state(process, state, 1, message["id"], "CPU draft")
+                state = update_simulation_state(process, state, 1, message["id"], "CPU draft")
                 def can_transmit(updated):
                     return any(item["label"] == "Transmit" and item["enabled"]
                                for item in updated["controls"])
                 if not can_transmit(state):
-                    state = wait_for_gpu_state(process, can_transmit)
+                    state = wait_for_simulation_state(process, can_transmit)
                 assert not gpu_toggle(state)["enabled"] and not gpu_toggle(state)["checked"]
 
             process.stdin.close()

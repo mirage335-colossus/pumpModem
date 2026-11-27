@@ -11,9 +11,10 @@ header,#status{flex:0 0 auto}#status{margin:0;white-space:pre-wrap}
 #root{flex:1 1 0;min-height:0;--datapump-viewport-height:100%}
 dialog{max-width:80vw}dialog input{width:min(65vw,40rem)}
 </style>
-<header><strong>Native Data Pump worker</strong>
+<header><strong id="host-title">Native Data Pump worker</strong>
 <button id="audio" disabled>Enable microphone and audio</button>
 <button id="stop" disabled>Stop worker</button></header>
+<p id="lab-resources" hidden>Local audio resources awaiting receipt</p>
 <p id="status" role="status">Connecting…</p><main id="root"></main>
 <dialog id="chooser"><h3 id="choice-title"></h3>
 <p id="file-root"></p><input id="path" autocomplete="off" aria-label="Host path">

@@ -10,6 +10,7 @@ from collections import deque
 import json
 import os
 from pathlib import Path
+from types import MappingProxyType
 import secrets
 import select
 import signal
@@ -29,6 +30,29 @@ MAX_FILE = 256 * 1024 * 1024
 LEASE = 15.0
 WEB_ASSETS = {'hosted.mjs', 'protocol.mjs', 'renderer.mjs', 'browser_audio.mjs',
               'audio_worklet.js', 'style.css'}
+MAX_WEB_ASSET = 1024 * 1024
+
+
+def capture_web_assets(directory):
+    """Read one bounded copy of the hosted assets for a worker session."""
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        assets = {}
+        for name in WEB_ASSETS:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+            with os.fdopen(fd, 'rb') as file:
+                info = os.fstat(file.fileno())
+                if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_WEB_ASSET:
+                    raise ValueError(f'Invalid hosted asset: {name}')
+                data = file.read(MAX_WEB_ASSET + 1)
+                after = os.fstat(file.fileno())
+                if (len(data) != info.st_size or after.st_size != info.st_size or
+                        after.st_mtime_ns != info.st_mtime_ns or after.st_ctime_ns != info.st_ctime_ns):
+                    raise ValueError(f'Hosted asset changed during read: {name}')
+                assets[name] = data
+        return assets
+    finally:
+        os.close(directory_fd)
 
 
 class PreviewError(Exception):
@@ -473,8 +497,17 @@ class PreviewServer(ThreadingHTTPServer):
     daemon_threads = False
     allow_reuse_address = False
 
-    def __init__(self, options, port=0):
+    def __init__(self, options, port=0, *, web_assets=None):
         self.options, self.worker = options, None
+        if options.mode == 'worker':
+            assets = capture_web_assets(ROOT/'web') if web_assets is None else dict(web_assets)
+            if assets.keys() != WEB_ASSETS or any(type(value) is not bytes or not 0 < len(value) <= MAX_WEB_ASSET
+                                                  for value in assets.values()):
+                raise ValueError('Expected the complete bounded set of hosted browser assets')
+            self.web_assets = MappingProxyType(assets)
+            self.shell = (ROOT/'tools/preview.html').read_bytes()
+            self.client = (ROOT/'tools/preview.mjs').read_bytes()
+            self.host_config = {'profile': 'preview', 'managed': False}
         self.owner_lock = threading.Lock()
         self.stopping = threading.Event()
         self.slots = threading.BoundedSemaphore(16)
@@ -596,12 +629,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(options.page.read_bytes(), 'text/html; charset=utf-8')
                 if options.mode == 'worker':
                     if self.path == '/':
-                        return self.reply((ROOT/'tools/preview.html').read_bytes(), 'text/html; charset=utf-8')
+                        return self.reply(self.server.shell, 'text/html; charset=utf-8')
                     if self.path == '/tools/preview.mjs':
-                        return self.reply((ROOT/'tools/preview.mjs').read_bytes(), 'text/javascript')
+                        return self.reply(self.server.client, 'text/javascript')
                     if self.path.startswith('/web/') and self.path[5:] in WEB_ASSETS:
-                        path = ROOT/'web'/self.path[5:]
-                        return self.reply(path.read_bytes(), 'text/css' if path.suffix == '.css' else 'text/javascript')
+                        name = self.path[5:]
+                        return self.reply(self.server.web_assets[name], 'text/css' if name.endswith('.css') else 'text/javascript')
             if options.mode != 'worker':
                 raise PreviewError('Not found', 404)
             if method == 'POST' and self.path == '/close':
@@ -612,6 +645,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply()
             if not self.authenticated():
                 raise PreviewError('Unauthorized', 403)
+            if method == 'GET' and self.path == '/host-config':
+                return self.reply(json.dumps(self.server.host_config), 'application/json')
             if method == 'POST' and self.path == '/start':
                 if self.body(0):
                     raise PreviewError('Unexpected start body')

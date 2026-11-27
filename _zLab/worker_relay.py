@@ -22,6 +22,8 @@ explicitly escapes that group is outside this relay's process-control boundary.
 """
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -171,10 +173,67 @@ def _stop_group(child):
         child.wait()
 
 
-def gpu_environment(worker, live):
-    """Use the headless Vulkan driver selected by this private lab deployment."""
+def _deployment_directory(path, private=True):
+    entry = path.lstat()
+    if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.geteuid()
+            or (private and entry.st_mode & 0o077)):
+        raise RelayError("Unsafe deployment directory")
+
+
+def _deployment_worker(worker, live):
+    """Resolve a managed launch once, before selecting its worker and drivers."""
     deployed = DEPLOYMENTS[live]
-    if os.fspath(worker) != str(deployed):
+    root = deployed.parents[2]
+    revisions = root / "revisions"
+    path = Path(worker)
+    if path == deployed:
+        _deployment_directory(root)
+        if (root / "build").is_symlink():
+            if os.readlink(root / "build") != "current/build":
+                raise RelayError("Unexpected deployment build link")
+            current = os.readlink(root / "current")
+            if not re.fullmatch(r"revisions/[a-f0-9]{64}", current):
+                raise RelayError("Unexpected deployment revision link")
+            path = root / current / deployed.relative_to(root)
+    elif not path.is_relative_to(revisions):
+        return None
+    if path != deployed:
+        parts = path.relative_to(revisions).parts
+        if (len(parts) != 4 or not re.fullmatch(r"[a-f0-9]{64}", parts[0])
+                or parts[1:] != deployed.relative_to(root).parts):
+            raise RelayError("Invalid deployment worker path")
+        _deployment_directory(root)
+        _deployment_directory(revisions)
+        _deployment_directory(revisions / parts[0])
+    _deployment_directory(path.parents[1], private=False)
+    _deployment_directory(path.parent, private=False)
+    return path
+
+
+@contextmanager
+def _worker_lease(deployed, live):
+    if deployed is None or deployed == DEPLOYMENTS[live]:
+        yield
+        return
+    # The relay holds this through worker shutdown. Its native child admits
+    # only the protocol pipes in its inherited descriptor set.
+    fd = os.open(deployed.parents[2] / ".run.lock", os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        entry = os.fstat(fd)
+        if not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid() or entry.st_mode & 0o077:
+            raise RelayError("Unsafe deployment run lock")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RelayError("The worker revision is being prepared. Retry after setup finishes.") from None
+        yield
+    finally:
+        os.close(fd)
+
+
+def _gpu_environment(deployed):
+    """Use the headless Vulkan driver selected by this private lab deployment."""
+    if deployed is None:
         return None
     manifest = deployed.parent / "nvidia-headless-icd.json"
     try:
@@ -186,12 +245,6 @@ def gpu_environment(worker, live):
         if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
                 or entry.st_mode & 0o077 or not 0 < entry.st_size <= 1024):
             raise RelayError("Unsafe deployment Vulkan manifest")
-        deployment = deployed.parents[2]  # deploy.py creates it with mode 0700.
-        for folder in (deployment, deployed.parents[1], deployed.parent):
-            info = folder.lstat()
-            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
-                    or (folder == deployment and info.st_mode & 0o077)):
-                raise RelayError("Unsafe deployment Vulkan directory")
         try:
             contents = json.loads(source.read(1025))
             api_version = contents["ICD"]["api_version"]
@@ -225,8 +278,24 @@ def gpu_environment(worker, live):
     return dict(environment, OPENCL_VENDOR_PATH=str(vendors), OCL_ICD_VENDORS=str(vendors))
 
 
+def gpu_environment(worker, live):
+    return _gpu_environment(_deployment_worker(worker, live))
+
+
 def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=False, live=False,
           prefer_gpu=False):
+    deployed = _deployment_worker(worker, live)
+    with _worker_lease(deployed, live):
+        if deployed is not None:
+            entry = deployed.lstat()
+            if not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid() or entry.st_mode & 0o022:
+                raise RelayError("Unsafe deployment worker executable")
+            worker = str(deployed)
+        _run_worker(worker, stop_requested, require_gpu, file_channel, live, prefer_gpu,
+                    _gpu_environment(deployed))
+
+
+def _run_worker(worker, stop_requested, require_gpu, file_channel, live, prefer_gpu, environment):
     # Explicit pipes ensure the worker's no-socket/anonymous-pipe checks remain
     # meaningful even when this relay's own stdio is an SSH channel.
     command = [worker] + ([] if live else ["--simulation-only"])
@@ -234,8 +303,6 @@ def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=
         command.append("--require-gpu")
     elif prefer_gpu:
         command.append("--prefer-gpu")
-    # A worker starting on CPU can select its GPU later in the GUI.
-    environment = gpu_environment(worker, live)
     file_read = file_write = None
     if file_channel:
         file_read, file_write = os.pipe()

@@ -2594,6 +2594,14 @@ std::string Controller::command_label(Command command) const {
     return {};
 }
 const live::Snapshot& Controller::snapshot() const { return impl_->snapshot; }
+ui::SimulationStartup Controller::simulation_startup() const {
+    const auto& p=*impl_;
+    if(!p.settings_valid)return {false,p.settings_error};
+    const auto& view=p.snapshot;
+    if(!p.active_requested||!view.simulation)return {};
+    if(!view.running&&!view.receiver_error.empty())return {false,view.receiver_error};
+    return {view.running&&view.bit_seconds.has_value()&&!view.transmit_unavailable,{}};
+}
 std::chrono::steady_clock::time_point Controller::presentation_time() const {
     return Clock::now();
 }

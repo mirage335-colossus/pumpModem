@@ -42,22 +42,23 @@ console.log('Preview batching, admission credits, frame boundaries, bounds and s
 // pagehide during startup and the adapter's abort on native acknowledgment.
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const response=value=>({ok:true,text:async()=>'',json:async()=>value,arrayBuffer:async()=>value});
-function harness() {
+function harness(profile='preview',managed=false) {
     const elements=new Map(),events={},calls=[],beacons=[],requests=[];
-    const document={querySelector:id=>{if(!elements.has(id))elements.set(id,{});return elements.get(id);}};
-    const start=deferred(),output=deferred(),service=deferred(),ready=deferred(),seenStart=deferred(),seenService=deferred();
+    const document={documentElement:{style:{}},querySelector:id=>{if(!elements.has(id))elements.set(id,{disabled:true});return elements.get(id);}};
+    const start=deferred(),output=deferred(),service=deferred(),ready=deferred(),seenStart=deferred(),seenService=deferred(),seenOutput=deferred();
     const environment={location:{hash:'#token'},navigator:{sendBeacon:(path,body)=>beacons.push(JSON.parse(body)),clipboard:{writeText:async()=>{}}},
         addEventListener:(event,handler)=>events[event]=handler,
         fetch:async(path,options)=>{
             calls.push(path);requests.push({path,options});
+            if(path==='/host-config')return response({profile,managed});
             if(path==='/start'){seenStart.resolve();return start.promise;}
-            if(path==='/output')return output.promise;
+            if(path==='/output'){seenOutput.resolve();return output.promise;}
             if(path==='/service'){seenService.resolve();return service.promise;}
             return response(null);
         }};
     let options,controller;
     const frontend=value=>{options=value;return {ready:ready.promise,dispose(){},feed(){controller?.abort();}};};
-    return {document,environment,frontend,start,output,service,ready,seenStart,seenService,events,calls,beacons,requests,
+    return {document,environment,frontend,start,output,service,ready,seenStart,seenService,seenOutput,events,calls,beacons,requests,
         get options(){return options;},set controller(value){controller=value;}};
 }
 {
@@ -87,12 +88,30 @@ function harness() {
 }
 console.log('Preview startup close and acknowledged service withdrawal passed');
 
-function labHarness() {
-    const h=harness();
-    h.document.documentElement={hasAttribute:key=>key==='data-lab-managed'};
+function labHarness(profile='lab-simulation',managed=true) {
+    const h=harness(profile,managed);
     h.environment.sessionStorage={getItem:()=>null,setItem(){}};
     h.environment.crypto={getRandomValues:bytes=>bytes.fill(1)};
     return h;
+}
+for(const [profile,managed] of [['preview',false],['lab-simulation',false],['lab-simulation',true],['lab-live',true],['lab-live',false]]) {
+    const h=labHarness(profile,managed),running=boot(h.document,h.environment,h.frontend);
+    h.ready.resolve();h.start.resolve(response({session:'session',simulation:profile!=='lab-live'}));
+    await h.seenOutput.promise;
+    const lab=profile!=='preview',audio=h.document.querySelector('#audio'),stop=h.document.querySelector('#stop');
+    assert.equal(h.options.dark,lab);
+    assert.equal(audio.disabled,lab);
+    assert.equal(typeof audio.onclick,lab?'undefined':'function');
+    assert.equal(Boolean(audio.hidden),managed);
+    assert.equal(h.calls.includes('/lab-resources'),profile==='lab-live');
+    if(lab){
+        assert.equal(h.document.documentElement.style.colorScheme,'dark');
+        assert.equal(h.document.querySelector('#host-title').textContent,profile==='lab-live'?'zLab Live/Duplex':'zLab simulation');
+        if(managed)assert.equal(stop.textContent,profile==='lab-live'?'End Live/Duplex':'End simulation');
+    }
+    h.events.pagehide();h.output.resolve(response(new ArrayBuffer(0)));await running;
+    assert.equal(h.calls.includes('/detach'),managed);
+    assert.equal(h.beacons.length,managed?0:1);
 }
 {
     const h=labHarness(),running=boot(h.document,h.environment,h.frontend);

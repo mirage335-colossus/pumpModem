@@ -24,8 +24,9 @@ depends on the build and actual device. A build or device without a usable GPU
 receiver reports the failure rather than treating CPU processing as the
 requested accelerator. A ready backend alone does not prove that a particular
 simulation performed GPU work; inspect its executed-work diagnostics. The
-separate [RunPod lab](../_zLab/README.md) uses a CUDA-only build for its GPU
-pods and has not yet qualified actual pod execution.
+separate [zLab controller](../_zLab/README.md) can build the current checkout
+on the host or run a selected Linux portable package. The effective backend
+depends on the compiled worker and the available device.
 
 The current worker installs a Linux seccomp filter with `no_new_privs` before
 application startup. It denies socket creation, connection, listening, all
@@ -135,6 +136,14 @@ from received audio. Existing controller file-size/format checks still apply.
 | 106 authorized file bytes | `u64 target, byte_position; u32 count; byte[count]` |
 | 107 file export ends | `u64 target; string error` (empty on complete byte delivery) |
 | 108 clock reply | `u64 nonce; float64 client_epoch, server_receive_epoch, server_send_epoch` |
+
+For a native `--simulation-only` worker, each snapshot includes a
+`simulationStartup` object from the selected modem controller. Its `state`
+is `pending` during preparation, `ready` when the simulator is available,
+or `failed` with a human-readable `reason`. Hosts can use this field while
+attaching without depending on the selected page or the wording of a label.
+Linux portable packages implementing this contract declare
+`"simulation_startup_version": 1` in `share/datapump/web/hosted/web-manifest.json`.
 
 Output queues are bounded to 16 MiB; wholly unsent snapshots can coalesce, audio
 and partial frames cannot. Audio/clock messages take priority over an entirely

@@ -87,7 +87,7 @@ int main(int argc,char** argv) {
         datapump::host::install_no_socket_boundary();
         if(version){std::cout<<"Data Pump " DATAPUMP_VERSION " (pipe worker, protocol 1)\n";return 0;}
         if(check){std::cout<<"No-socket worker boundary active; protocol 1\n";return 0;}
-        if(help){std::cout<<"Data Pump pipe worker\n  --file-events-fd N  trusted anonymous pipe for host-selected file services\n  --simulation       start in shared application simulation mode\n  --simulation-only  restrict the worker to Robust simulation\n  --prefer-gpu       accepted as a compatibility alias; GPU use is selected automatically when usable\n  --require-gpu      require a GPU receiver for Robust settings\n  --self-check --version\nThe existing host owns HTTP and file selection. stdin/stdout must be anonymous pipes.\n";return 0;}
+        if(help){std::cout<<"Data Pump pipe worker\n  --file-events-fd N  trusted anonymous pipe for host-selected file services\n  --simulation       start in shared application simulation mode\n  --simulation-only  offer the application's simulated modem modes and disable physical audio\n  --prefer-gpu       accepted as a compatibility alias; GPU use is selected automatically when usable\n  --require-gpu      require a GPU receiver for Robust settings\n  --self-check --version\nThe existing host owns HTTP and file selection. stdin/stdout must be anonymous pipes.\n";return 0;}
 #if defined(__linux__)
         std::signal(SIGPIPE,SIG_IGN);
         return run(file_fd,simulation,require_gpu,simulation_only);

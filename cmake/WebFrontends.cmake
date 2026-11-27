@@ -15,7 +15,7 @@ if(DATAPUMP_BUILD_WEB_WORKER)
   target_compile_definitions(datapump-worker PRIVATE DATAPUMP_VERSION="${DATAPUMP_VERSION}")
   list(APPEND datapump_executables datapump-worker)
   file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/web-worker-manifest.json"
-    CONTENT "{\"schema_version\":1,\"target\":\"datapump-worker\",\"protocol\":\"DPW1\",\"audio\":\"browser\",\"files\":\"host\",\"transport\":\"inherited-anonymous-pipes\",\"socket_policy\":\"forbidden\",\"unsupported_platforms\":\"fail-closed\"}\n")
+    CONTENT "{\"schema_version\":1,\"target\":\"datapump-worker\",\"protocol\":\"DPW1\",\"simulation_startup_version\":1,\"audio\":\"browser\",\"files\":\"host\",\"transport\":\"inherited-anonymous-pipes\",\"socket_policy\":\"forbidden\",\"unsupported_platforms\":\"fail-closed\"}\n")
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/web-worker-manifest.json"
     DESTINATION share/datapump/web/hosted RENAME web-manifest.json)
   install(DIRECTORY web/ DESTINATION share/datapump/web/hosted

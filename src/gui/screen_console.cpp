@@ -43,7 +43,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Retained-message rescoring is unavailable; continuous reception keeps listening on its configured calendar.";
     }
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
-    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Fast Modem, Robust Modem or Legacy Modem. Each mode keeps its own settings.";}
+    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose a modem. Each modem keeps its own settings.";}
     if(slot==Slot::gpu||slot==Slot::developer_mode||slot==Slot::shellcode_mode)control.scope=ScreenScope::shared;
     if(slot==Slot::gpu)control.help="Use a compatible GPU for Robust reception and simulation. The control is enabled after a GPU initializes. Device failures appear in receiver diagnostics.";
     if(slot==Slot::shellcode_mode) {control.developer_only=true;control.help="Allow printable English ASCII in received text. Newlines are allowed in both modes; other controls and non-ASCII bytes remain underscores. Turning Developer mode off resets this exception.";}

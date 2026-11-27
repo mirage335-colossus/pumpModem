@@ -408,6 +408,12 @@ std::string Bridge::snapshot(int width,int height) {
     s.retained.clear();s.targets.clear();s.occurrences.clear();s.document_occurrences.clear();s.used_bitmaps.clear();
     s.node_measures.clear();for(auto& [key,value]:s.text_measures)value.used=false;
     std::ostringstream body;
+    if(s.app.launch.simulation_only) {
+        const auto startup=s.app.simulation_startup();
+        body<<",\"simulationStartup\":{\"state\":"<<json_string(!startup.error.empty()?"failed":startup.ready?"ready":"pending");
+        if(!startup.error.empty())body<<",\"reason\":"<<json_string(startup.error);
+        body<<'}';
+    }
     body<<",\"title\":"<<json_string(ui::window_title())
         <<",\"ack\":"<<identifier(s.sequence)<<",\"closing\":"<<(s.app.closing()?"true":"false")
         <<",\"layout\":{\"width\":"<<s.width<<",\"height\":"<<s.height<<",\"page\":";

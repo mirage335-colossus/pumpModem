@@ -16,6 +16,12 @@ into the application. Starting Fast does not start a Robust receiver or acquire
 its audio device. Mode changes and pending key loads preserve active intent
 without starting a session with a different key.
 
+zLab Simulation uses the shared modem selector in the native package worker.
+Fast and Robust expose their simulated channels there. Legacy requires live
+audio. A new modem declares its simulation capability and startup state in
+the shared C++ application alongside its normal controller. The desktop and
+browser consume the same declarations. [zLab application selection](../_zLab/README.md#choose-the-application-to-simulate)
+
 Robust GUI operation requires a key for transmission and reception. A normal
 startup selects the built-in public Amateur key. A file-backed key replaces
 that key after the file validates. The key selector lists only loaded keys,

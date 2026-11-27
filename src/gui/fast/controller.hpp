@@ -9,7 +9,7 @@ namespace datapump::gui::fast_ui {
 // The mode host supplies exclusive audio acquisition; no toolkit enters here.
 class Controller {
 public:
-    explicit Controller(std::function<bool()> acquire_audio);
+    explicit Controller(std::function<bool()> acquire_audio,bool simulation_only=false);
     ~Controller();
     void poll();
     // Selected Fast mode keeps receiving until explicitly paused.
@@ -19,6 +19,7 @@ public:
     void close();
     bool ready_to_close() const;
     bool active() const;
+    ui::SimulationStartup simulation_startup() const;
     void edit(ui::Field,std::string);
     void select(ui::Field,std::string);
     void toggle(ui::Field,bool);

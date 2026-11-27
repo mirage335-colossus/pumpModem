@@ -18,6 +18,15 @@ use standard error. Socket-backed descriptors and unqualified containment
 platforms are rejected. Do not invoke the protocol interactively in a terminal.
 .SH OPTIONS
 .TP
+.B \-\-simulation
+Start in the application's simulation view. The embedding host can still use
+the ordinary modem and audio controls.
+.TP
+.B \-\-simulation\-only
+Offer modems that implement simulation and keep physical audio disabled.
+The worker starts in Robust. Fast uses its simulated channel when selected.
+Legacy requires live audio and is unavailable in this profile.
+.TP
 .B \-\-prefer\-gpu
 Start Robust on a usable GPU. If a compiled GPU backend cannot initialize,
 the worker starts on the CPU and reports the reason in receiver diagnostics.

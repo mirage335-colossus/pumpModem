@@ -172,7 +172,7 @@ Both transmitter and receiver must be designed to maximize computational ceiling
   - Doppler
 
   - Tone bandwidth (ie. auto, no other options yet)
-  - Tone symbol rate (ie. auto, no othre options yet)
+  - Tone symbol rate (ie. auto, no other options yet)
 
   - Total bandwidth (eg. 2.2kHz)
 

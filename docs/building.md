@@ -141,8 +141,12 @@ successful build of their existing native frontends.
 ./build.sh package --cli --web-worker --sdk /absolute/prepared/linux-sdk
 ```
 
-`--web-worker` is independent of `--backend`; it adds an executable named
-`datapump-worker` and hosted browser assets under `share/datapump/web/hosted`.
+The ordinary Linux GUI portable package (`./build.sh package`) includes
+`bin/datapump-worker` and hosted browser assets under `share/datapump/web/hosted`.
+The `--web-worker` option also selects them in development or CLI profiles.
+The worker shares the application, modem controllers and simulation code with
+the desktop GUI. zLab can run this exact packaged worker and renderer, or
+compile the same target from the current checkout. [zLab build selection](../_zLab/README.md#choose-the-application-to-simulate)
 Existing coinstallable native package ownership is retained: Debian commands are
 `datapump-worker` for the FLTK-owned package and `datapump-worker-rev` for the
 Rev-owned package, each pointing into its own `/opt/datapump/<backend>/bin`.

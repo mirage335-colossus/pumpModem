@@ -107,7 +107,11 @@ class SimulationTest(unittest.TestCase):
                 update()
 
         def control(label):
-            return next(item for item in snapshot["controls"] if item["label"].split(" · Budget target ", 1)[0] == label)
+            controls = snapshot["controls"]
+            for item in controls:
+                if item["label"].split(" · Budget target ", 1)[0] == label:
+                    return item
+            self.fail(f"Missing Robust console control {label!r}")
 
         def event(kind, target, value):
             sequence = int(snapshot["ack"]) + 1
@@ -156,13 +160,13 @@ class SimulationTest(unittest.TestCase):
                                  ("Noise (dBm/Hz)", "-174 dBm/Hz"), ("Clock sync", "1ms"),
                                  ("Region", "1ms"), ("Offset", "0ms"), ("Audio error", "0ms"),
                                  ("Margin", "1x"), ("Rate", rate), ("Carrier", "1725 Hz"),
-                                 ("Target SNR (dB-Hz)", "80")):
+                                 ("Target SNR", "80")):
                 event(1, control(label)["id"], value)
             for label, value in (("Baseband Osc", base_oscillator), ("Shift Osc", "gpsdo-ocxo")):
                 event(2, control(label)["id"], value)
             self.assertEqual(control("Rate")["text"], rate)
             self.assertEqual(control("Baseband Osc")["selected"], base_oscillator)
-            self.assertIn("Budget target 80", control("Target SNR (dB-Hz)")["label"])
+            self.assertIn("Budget target 80", control("Target SNR")["label"])
             message = next(item for item in snapshot["controls"]
                            if item["kind"] == "text" and item.get("byteLimit") == 4 * 1024 * 1024)
             event(1, message["id"], "e")
