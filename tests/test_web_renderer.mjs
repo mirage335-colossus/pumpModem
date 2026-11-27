@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {Renderer,validText,eventKinds} from '../web/renderer.mjs';
 import {encodeEvent,encodeViewport,encodeAudio,FrameDecoder,decodeFrame,maxFrame} from '../web/protocol.mjs';
 class Node {
-    constructor(doc,tag){this.ownerDocument=doc;this.tagName=tag;this.children=[];this.parentNode=null;this.listeners={};this.style={};this.attributes={};const classes=new Set();this.classList={add:(...names)=>names.forEach(name=>classes.add(name)),contains:name=>classes.has(name)};this.value='';this.selectionStart=this.selectionEnd=this.scrollTop=0;this.clientHeight=this.scrollHeight=this.scrollWidth=100;this.textContent='';this.hidden=false;}
+    constructor(doc,tag){this.ownerDocument=doc;this.tagName=tag;this.children=[];this.parentNode=null;this.listeners={};this.style={setProperty(name,value){this[name]=value;}};this.attributes={};const classes=new Set();this.classList={add:(...names)=>names.forEach(name=>classes.add(name)),contains:name=>classes.has(name)};this.value='';this.selectionStart=this.selectionEnd=this.scrollTop=0;this.clientHeight=this.scrollHeight=this.scrollWidth=100;this.textContent='';this.hidden=false;}
     set innerHTML(_){throw new Error('Renderer must never interpret HTML');}
     get isConnected(){return this===this.ownerDocument.root||Boolean(this.parentNode?.isConnected);}
     get scrollTop(){for(let node=this;node;node=node.parentNode)if(node.hidden)return 0;return this._scrollTop??0;}
@@ -174,20 +174,22 @@ const geometryDoc={createElement(tag){return new Node(this,tag);},defaultView:{n
 geometryDoc.root=new Node(geometryDoc,'root');
 const geometryRenderer=new Renderer(geometryDoc.root,event=>measuredEvents.push(event));
 const box=(x,y,w,h,allocated=true)=>({frame:{x,y,w,h},content:{x:3,y:4,w:Math.max(0,w-6),h:Math.max(0,h-8)},allocated});
-const paragraph={kind:'text',text:'Literal <text> that wraps',fontSize:12,bold:true,geometry:box(7,9,90,52),measure:{id:'300',width:84,height:-1}};
+const paragraph={kind:'text',text:'Literal <text> that wraps',foreground:'rgb(144,192,184)',fontSize:12,bold:true,geometry:box(7,9,90,52),measure:{id:'300',width:84,height:-1}};
 const action={kind:'action',id:'301',text:'Clipped action',available:false,enabled:false,geometry:box(110,70,80,30,false)};
 const documentSnapshot={...snapshot,controls:[],layout:{width:1000,height:760,page:{x:16,y:100,w:968,h:500},documentPadding:{side:22,top:17,bottom:23}},document:{kind:'column',geometry:box(0,0,300,60),children:[paragraph,action]}};
 geometryRenderer.apply(documentSnapshot);
 const paragraphView=geometryRenderer.documentViews.get('root:0'),actionView=geometryRenderer.documentViews.get('action:301');
 assert.equal(paragraphView.node.style.left,'7px');assert.equal(paragraphView.node.style.top,'9px');assert.equal(paragraphView.node.style.height,'52px');
 assert.equal(paragraphView.content.style.left,'3px');assert.equal(paragraphView.content.style.width,'84px');assert.equal(paragraphView.content.textContent,paragraph.text);
+assert.equal(paragraphView.content.style['--dp-document-ink'],paragraph.foreground);
 assert.equal(geometryRenderer.document.style.padding,'17px 22px 23px');assert.equal(actionView.node.hidden,true);assert.equal(actionView.node.disabled,true);
 assert.equal(measuredEvents.length,1);assert.equal(measuredEvents[0].kind,eventKinds.measure);assert.equal(measuredEvents[0].target,'0');assert.equal(measuredEvents[0].value,'300 45\n');
 geometryRenderer.apply(documentSnapshot);assert.equal(measuredEvents.length,1,'Unchanged polling repeated browser measurements');
-const resizedParagraph={...paragraph,geometry:box(17,19,206,37),measure:{id:'302',width:200,height:-1}};
+const resizedParagraph={...paragraph,foreground:undefined,geometry:box(17,19,206,37),measure:{id:'302',width:200,height:-1}};
 geometryRenderer.apply({...documentSnapshot,document:{...documentSnapshot.document,children:[resizedParagraph,action]}});
 assert.equal(paragraphView.node.style.left,'17px');assert.equal(paragraphView.node.style.width,'206px');assert.equal(measuredEvents.at(-1).value,'302 30\n');
 assert.equal(geometryRenderer.documentViews.get('root:0'),paragraphView,'Resize discarded retained document content');
+assert.equal(paragraphView.content.style['--dp-document-ink'],'','A reused label retained its old foreground');
 geometryRenderer.apply({...documentSnapshot,document:{...documentSnapshot.document,geometry:box(0,0,300,40000),children:[{...resizedParagraph,geometry:box(7,20000,206,37)}]}});
 assert.equal(geometryRenderer.documentViews.get('root').node.style.height,'40000px');assert.equal(paragraphView.node.style.top,'20000px','Tall document was incorrectly limited by desktop viewport bounds');
 assert.throws(()=>geometryRenderer.apply({...documentSnapshot,document:{...documentSnapshot.document,geometry:box(0,0,300,16*1024*1024+1)}}),RangeError);

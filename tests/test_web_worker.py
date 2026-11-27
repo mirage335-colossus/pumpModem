@@ -189,6 +189,11 @@ with tempfile.TemporaryDirectory(prefix="datapump-vulkan-unavailable-") as direc
                 planner = next(tab for tab in startup["tabs"] if tab["label"] == "Link planner")
                 state = update_gpu_test_state(process, startup, 11, planner["id"])
                 nodes = list(document_nodes(state["document"]))
+                legend_inks = []
+                for name in ("Time/bit", "CPU", "RX DATA model", "Workspace", "RX sample"):
+                    label = next(node for node in nodes if node["text"].startswith(name + " · "))
+                    legend_inks.append(label["foreground"])
+                assert len(set(legend_inks)) == 5, "planner series lost their distinct legend colors"
                 command = next(node["control"] for node in nodes
                                if (node.get("control") or {}).get("label") == "Launch command")
                 state = update_gpu_test_state(process, state, 1, command["id"], "--gpu yes")

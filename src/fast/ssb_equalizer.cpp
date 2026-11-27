@@ -656,8 +656,8 @@ struct VerifiedRow {
 std::optional<VerifiedWindow> verified_window(const Profile& profile, const SingleCarrierSchedule& schedule,
         Frame frame, const FeedbackSlice& slice, std::size_t cycle_intervals, std::span<const std::uint8_t> bits) {
     const auto slot = slice.ordinal % cycle_intervals;
-    const auto offset = slot * physical_interval_bits;
-    if (offset >= bits.size()) return {};
+    if (bits.empty() || slot > (bits.size() - 1) / physical_interval_bits) return {};
+    const auto offset = static_cast<std::size_t>(slot) * physical_interval_bits;
     const auto slot_bits = bits.subspan(offset, std::min(physical_interval_bits, bits.size() - offset));
     frame = protected_frame(frame, schedule, slice.ordinal, slot_bits.size());
     VerifiedWindow result{frame, &slice, {}};

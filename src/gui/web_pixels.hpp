@@ -4,13 +4,13 @@
 #include <vector>
 
 namespace datapump::gui::web::detail {
-inline BitmapImage render_bitmap(const BitmapSource& source,int width,int height) {
+inline BitmapImage render_bitmap(const BitmapSource& source,int width,int height,bool use_color) {
     const auto w=static_cast<unsigned>(std::clamp(width,1,640));
     const auto h=static_cast<unsigned>(std::clamp(height,1,320));
     BitmapImage image(w,h,PixelFormat::rgb24);
     // Preserve the same startup blanks and time window as native adapters.
     const auto request=full_bitmap_request(w,h,false,true);
-    source.paint(request,[&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);});
+    source.paint(request,[&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);},use_color);
     return image;
 }
 // Lossless independent RGB runs keep flat plot backgrounds off the relay.

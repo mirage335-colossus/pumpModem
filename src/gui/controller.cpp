@@ -1174,8 +1174,8 @@ struct Controller::Impl {
         apply_cached_samples(ready->model);
         if(!unsampled_status.empty())ready->model.sample_status=unsampled_status;
         const auto& input=ready->model.inputs;
-        const bool gpu_initializing=input.awaiting_gpu||
-            (input.settings&&input.settings->gpu&&input.backend.expired()&&!ready->sample);
+        const bool gpu_initializing=ready->model.workers&&(input.awaiting_gpu||
+            (input.settings&&input.settings->gpu&&input.backend.expired()&&!ready->sample));
         if(!ready->model.error.empty())planner_fit_requested=false;
         if(ready->model.error.empty()&&planner_fit_requested&&!gpu_initializing) {
             if(snapshot.transmitting) {
@@ -1195,7 +1195,7 @@ struct Controller::Impl {
                         " dB-Hz to fit receiver workspace.");
                     return;
                 }
-                if(!fitted)notice("No checked target fits the configured receiver workspace.");
+                if(!fitted)target_fit_unavailable(ready->model);
             }
         }
         planner_model=std::make_shared<const planner::Model>(std::move(ready->model));
@@ -1209,10 +1209,19 @@ struct Controller::Impl {
         planner_inputs.target_db_hz=value;planner_target_valid=true;invalidate_planner();
         set_target_text(planner_number(value));configure(false,nullptr,true,nullptr,nullptr,KeyOrigin::file,true);
     }
+    void target_fit_unavailable(const planner::Model& model) {
+        notice(model.workers?"No checked target fits the configured receiver workspace.":
+            "Target fitting is unavailable. "+model.workspace_status);
+    }
     void request_target_fit() {
         planner_fit_requested=true;
         if(planner_model&&planner_model->calculating)return;
         if(planner_model&&planner_model->available) {
+            if(!planner_model->workers) {
+                planner_fit_requested=false;
+                target_fit_unavailable(*planner_model);
+                return;
+            }
             if(planner_model->inputs.awaiting_gpu)return;
             planner_fit_requested=false;
             if(planner_model->fitted_target&&
@@ -1227,7 +1236,7 @@ struct Controller::Impl {
                     planner_fit_requested=true;
                     return;
                 }
-                notice("No checked target fits the configured receiver workspace.");
+                target_fit_unavailable(*planner_model);
             }
             return;
         }
@@ -2320,7 +2329,8 @@ void Controller::poll(bool expanded_spectrum,bool planner_visible) {
                 p.request_link_plan();
             if(p.planner_sample_requested&&!p.planner_fit_requested&&p.planner_model) {
                 if(p.settings.finite_duplex||!p.planner_model->error.empty()||(p.planner_model->available&&
-                    !p.planner_model->inputs.awaiting_gpu&&!p.planner_model->fitted_target))p.planner_sample_requested=false;
+                    (!p.planner_model->workers||!p.planner_model->inputs.awaiting_gpu)&&!p.planner_model->fitted_target))
+                    p.planner_sample_requested=false;
                 else if(p.can_start_planner_sample(*p.planner_model))p.request_planner_sample();
             }
             p.dispatch_planner();

@@ -33,6 +33,8 @@ body.dp-page { margin:0; height:100dvh; display:flex; flex-direction:column; ove
 .dp-caption-overlay { pointer-events:none; }
 .dp-document { overflow:auto; scrollbar-gutter:stable; }
 .dp-document-text>span,.dp-document-action>span,.dp-document-measure { display:block; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.25; }
+/* The native palette is drawn on a dark canvas. Deepen the same ink on light pages. */
+.dp-document-text>span,.dp-document-action>span { color:light-dark(color-mix(in srgb,var(--dp-document-ink) 48%,black),var(--dp-document-ink)); }
 .dp-document-measure { position:fixed; top:0; left:0; visibility:hidden; pointer-events:none; padding:0; border:0; margin:0; height:auto; }
 .dp-document-control { display:flex; flex-direction:column; min-height:0; }
 .dp-document-control>input,.dp-document-control>select,.dp-document-control>textarea { width:100%; flex:1 1 0; }

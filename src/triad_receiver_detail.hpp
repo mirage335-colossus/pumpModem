@@ -4,11 +4,25 @@
 #include "search_fft.hpp"
 
 #include <functional>
+#include <limits>
 #include <stop_token>
 
 namespace datapump::triad::v3::receiver_detail {
 
 double calendar_operational_threshold(const CalendarAdmissionContext&);
+
+// Modified Bessel I0 for the Helper and DATA Kaiser windows (beta <= 10).
+// The positive series converges to double precision over this range.
+inline double bessel_i0(double value) {
+    const auto factor = .25 * value * value;
+    double sum = 1, term = 1;
+    for (unsigned k = 1; k <= 64; ++k) {
+        term *= factor / (k * k);
+        sum += term;
+        if (term <= std::numeric_limits<double>::epsilon() * sum) break;
+    }
+    return sum;
+}
 
 struct FrequencyInterval { double lower_hz = 0, upper_hz = 0; };
 

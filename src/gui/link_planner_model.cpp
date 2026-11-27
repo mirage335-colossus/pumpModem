@@ -28,7 +28,8 @@ struct Evaluation {
 
 class Sweep {
 public:
-    Sweep(const Inputs& inputs, double cn0, std::stop_token stop)
+    Sweep(const Inputs& inputs, double cn0, const std::optional<std::string>& worker_unavailability,
+          std::stop_token stop)
         : settings(*inputs.settings), actual_cn0(cn0),
           calendar(settings.calendar.value_or(live::detail::automatic_live_calendar)),
           backend(settings.gpu ? inputs.backend.lock() : nullptr), stop(stop) {
@@ -36,14 +37,24 @@ public:
         resources.memory_limit_bytes = settings.receiver_memory_limit;
         resources.maximum_input_chunk_samples = live::detail::receiver_input_chunk_samples;
         resources.maximum_pending_messages = live::detail::receiver_pending_messages;
-        const auto limits = native::resolve_stream_receiver_resources(resources);
-        resources.memory_limit_bytes = limits.memory_limit_bytes;
-        resources.workers = limits.workers;
-        resources.slot_owners = limits.slot_owners;
+        try {
+            const auto limits = native::resolve_stream_receiver_resources(resources);
+            if (worker_unavailability) {
+                resource_error = *worker_unavailability;
+                return;
+            }
+            resources.memory_limit_bytes = limits.memory_limit_bytes;
+            resources.workers = limits.workers;
+            resources.slot_owners = limits.slot_owners;
+        } catch (const Error& error) {
+            // Duration and fixed-energy detection do not require a host workspace quote.
+            resource_error = error.what();
+        }
     }
 
-    bool workspace_available() const { return !settings.gpu || bool(backend); }
-    unsigned workers() const { return *resources.workers; }
+    bool workspace_available() const { return resources.workers && (!settings.gpu || backend); }
+    unsigned workers() const { return resources.workers.value_or(0); }
+    const std::string& workspace_error() const { return resource_error; }
 
     const Evaluation& evaluate(double target, bool exact = false) {
         if (const auto prior = evaluations.find(target); prior != evaluations.end() &&
@@ -189,6 +200,7 @@ private:
     const std::shared_ptr<native::receiver_detail::ReceiverBulkBackend> backend;
     const std::stop_token stop;
     native::StreamReceiverOptions resources;
+    std::string resource_error;
     std::array<std::optional<Evaluation>, 2> minimum_tile;
     std::map<double, Evaluation> evaluations;
     std::map<std::pair<bool, std::uint64_t>, native::detail::StreamWorkspaceQuote> quotes;
@@ -248,14 +260,21 @@ Model build(const Inputs& inputs, std::stop_token stop) {
     result.rx_status = "Provisional true-candidate DATA detection bound. Complete RX success is unqualified.";
     result.workspace_status = "Nominal host reservation for one DATA window and two quiet windows. Target actions use exact shaping.";
     try {
-        Sweep sweep(inputs, result.actual_cn0_db_hz, stop);
+        const auto worker_unavailability = live::detail::receiver_worker_unavailability();
+        Sweep sweep(inputs, result.actual_cn0_db_hz, worker_unavailability, stop);
         result.workers = sweep.workers();
         const auto& selected = sweep.evaluate(inputs.target_db_hz, true);
         result.selected = selected.point;
         result.receiver_status = selected.limit;
         if (!selected.point.rx_data_detection_probability && selected.point.bit_seconds)
             result.rx_status = "The fixed-energy DATA model is unavailable for this channel or FHSS setting.";
-        if (inputs.awaiting_gpu)
+        if (!sweep.workspace_error().empty()) {
+            result.workspace_status = sweep.workspace_error();
+            if (worker_unavailability)
+                result.cpu_status = *worker_unavailability;
+            else if (!inputs.settings->finite_duplex)
+                result.cpu_status = "A receiver workspace allowance is required to measure processing pace.";
+        } else if (inputs.awaiting_gpu)
             result.workspace_status = "Native CPU workspace preview while the selected GPU route initializes.";
         else if (!sweep.workspace_available())
             result.workspace_status = "Host workspace will be available after the selected GPU route initializes.";

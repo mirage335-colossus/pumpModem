@@ -41,6 +41,9 @@ std::string json_string(std::string_view value) {
     out+='"';return out;
 }
 std::string identifier(std::uint64_t id) {return json_string(std::to_string(id));}
+std::string css_rgb(theme::Rgb rgb) {
+    return "rgb("+std::to_string(rgb.red)+","+std::to_string(rgb.green)+","+std::to_string(rgb.blue)+")";
+}
 std::string base64(const std::vector<unsigned char>& bytes) {
     constexpr char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out((bytes.size()+2)/3*4,'\0');std::size_t at=0;
@@ -91,8 +94,8 @@ void geometry(std::ostream& out,const ui::ControlLayout& layout) {
        <<",\"border\":"<<(layout.border?"true":"false")
        <<",\"captionOverlay\":"<<(layout.caption_overlay?"true":"false")<<'}';
 }
-void bitmap(std::ostream& out,const BitmapSource& source,int width,int height,std::uint64_t revision) {
-    const auto image=detail::render_bitmap(source,width,height);
+void bitmap(std::ostream& out,const BitmapSource& source,int width,int height,std::uint64_t revision,bool use_color) {
+    const auto image=detail::render_bitmap(source,width,height,use_color);
     const auto runs=detail::rgb_runs(image.pixels());
     out<<"{\"revision\":"<<identifier(revision)<<",\"width\":"<<image.width()<<",\"height\":"<<image.height()<<",\"sampling\":"
        <<json_string(source.sampling()==BitmapSampling::discrete?"discrete":"continuous")
@@ -126,7 +129,7 @@ struct Bridge::Impl {
     std::string signature;
     std::string previous_payload;
     std::uint64_t presentation_revision=0;
-    struct CachedBitmap {std::uint64_t revision=0;int width=0,height=0;std::string json;};
+    struct CachedBitmap {std::uint64_t revision=0;int width=0,height=0;bool color=false;std::string json;};
     std::map<std::string,CachedBitmap> bitmaps;
     std::map<std::string,bool> used_bitmaps;
     std::uint64_t bitmap_serial=0,document_revision=0;
@@ -141,9 +144,9 @@ struct Bridge::Impl {
                  std::uint64_t revision,int w,int h) {
         w=std::clamp(w,1,640);h=std::clamp(h,1,320);used_bitmaps[key]=true;
         auto& cached=bitmaps[key];
-        if(cached.json.empty()||cached.revision!=revision||cached.width!=w||cached.height!=h) {
-            std::ostringstream encoded;bitmap(encoded,source,w,h,++bitmap_serial);
-            cached={revision,w,h,encoded.str()};
+        if(cached.json.empty()||cached.revision!=revision||cached.width!=w||cached.height!=h||cached.color!=app.launch.color) {
+            std::ostringstream encoded;bitmap(encoded,source,w,h,++bitmap_serial,app.launch.color);
+            cached={revision,w,h,app.launch.color,encoded.str()};
         }
         // Every snapshot remains independently usable after queue coalescing.
         // Reuse the whole encoding, including JSON quoting, on unchanged polls.
@@ -183,8 +186,7 @@ struct Bridge::Impl {
     }
     std::string foreground(ui::TextTone tone,bool enabled) const {
         if(tone==ui::TextTone::normal)return {};
-        const auto rgb=theme::text_rgb(tone,app.launch.color,enabled);
-        return "rgb("+std::to_string(rgb.red)+","+std::to_string(rgb.green)+","+std::to_string(rgb.blue)+")";
+        return css_rgb(theme::text_rgb(tone,app.launch.color,enabled));
     }
     void options(std::ostream& out,const ui::FieldState& state,bool inherited_enabled) {
         out<<"[";bool first=true;
@@ -343,6 +345,10 @@ struct Bridge::Impl {
            <<",\"top\":"<<node.top<<",\"bottom\":"<<node.bottom<<",\"right\":"<<node.right
            <<",\"fontSize\":"<<node.font_size<<",\"fill\":"<<static_cast<unsigned>(node.fill)
            <<",\"equalHeight\":"<<(node.equal_height?"true":"false");
+        // Neutral labels inherit the host's system colors in both browser schemes.
+        if((node.kind==ui::DocumentKind::text||node.kind==ui::DocumentKind::action)&&
+           node.tone!=ui::DocumentTone::text&&node.tone!=ui::DocumentTone::muted)
+            out<<",\"foreground\":"<<json_string(css_rgb(theme::text_rgb(node.tone,app.launch.color,placement.enabled)));
         out<<",\"geometry\":{\"frame\":";rectangle(out,rectangle(placement.relative));
         out<<",\"content\":";rectangle(out,rectangle(placement.content));
         out<<",\"allocated\":"<<(placement.allocated?"true":"false")<<'}';

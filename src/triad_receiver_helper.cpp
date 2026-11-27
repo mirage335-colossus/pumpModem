@@ -378,12 +378,12 @@ double refine_frequency(std::span<const Complex> input, std::span<const double> 
 }
 std::vector<double> lowpass(std::size_t half, double fs, double cutoff) {
     std::vector<double> taps(checked_add(checked_mul(half, 2), 1));
-    const double denominator = std::cyl_bessel_i(0., 8.);
+    const double denominator = bessel_i0(8.);
     double sum = 0;
     for (std::size_t i = 0; i < taps.size(); ++i) {
         const double x = static_cast<double>(i) - half;
         const double z = half ? x / half : 0;
-        const double window = std::cyl_bessel_i(0., 8 * std::sqrt(std::max(0., 1 - z * z))) / denominator;
+        const double window = bessel_i0(8 * std::sqrt(std::max(0., 1 - z * z))) / denominator;
         taps[i] = (x == 0 ? 2 * cutoff / fs : std::sin(tau * cutoff * x / fs) / (pi * x)) * window;
         sum += taps[i];
     }

@@ -1972,16 +1972,12 @@ struct Session::Impl {
     }
 
     std::optional<std::string> basic_transmit_reason(const Settings& s) const {
-#ifdef DATAPUMP_EXECUTION_FIBERS
-        (void)s;
-        return "Robust needs the desktop native receiver workers. Use the native application for Robust.";
-#else
+        if (auto reason = detail::receiver_worker_unavailability()) return reason;
         if (s.simulation) return {};
         if (!s.calendar && !s.auto_calendar) return "Choose Auto or enter a shared UTC anchor in Robust Setup.";
         if (!audio::utc_follow_supported())
             return "This audio provider cannot schedule a dated Robust calendar. Simulation is available.";
         return {};
-#endif
     }
 
     void lock_status(Snapshot& out) const {

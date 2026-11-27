@@ -39,6 +39,10 @@ SampleResult sample(const Inputs& inputs, std::stop_token stop,
         result.status = "Receiver settings are unavailable.";
         return result;
     }
+    if (const auto reason = live::detail::receiver_worker_unavailability()) {
+        result.status = *reason;
+        return result;
+    }
     auto settings = *inputs.settings;
     settings.tx_dbm = inputs.tx_dbm;
     settings.path_loss_db = inputs.path_loss_db;

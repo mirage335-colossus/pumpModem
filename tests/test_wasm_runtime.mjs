@@ -79,8 +79,10 @@ const act=async(kind,id,value='')=>{const sequence=BigInt(snapshot.ack)+1n,start
 const modem=snapshot.controls.find(item=>item.options?.some(option=>option.label==='Robust Modem'));
 assert(modem,'modem selector missing');
 await act(2,modem.id,modem.options.find(option=>option.label==='Robust Modem').id);
-await wait(()=>control('Message')?.enabled);
-await act(1,control('Message').id,literal);
+const robustComposer=()=>snapshot.controls.find(item=>item.kind==='text'&&item.multiline&&
+    item.enabled&&!item.readOnly&&item.byteLimit===4*1024*1024);
+await wait(()=>robustComposer());
+await act(1,robustComposer().id,literal);
 await wait(()=>snapshot.controls.some(item=>item.text==='Robust needs the desktop native receiver workers. Use the native application for Robust.'));
 assert.equal(control('Transmit')?.enabled,false,'Wasm must report its native Robust worker requirement');
 assert.equal(control('Attach file')?.enabled,false,'Robust text profile must reject attachments');
@@ -90,6 +92,29 @@ assert(snapshot.tabs.some(tab=>tab.label==='Robust setup'),'configured-calendar 
 const planner=snapshot.tabs.find(tab=>tab.label==='Link planner');
 assert(planner,'document page missing');await act(11,planner.id);
 assert(snapshot.document,'document navigation did not publish a document');
+const nodes=node=>[node,...(node.children??[]).flatMap(nodes)];
+const plannerNodes=()=>nodes(snapshot.document);
+const plannerControl=label=>plannerNodes().find(node=>node.control?.label.startsWith(label))?.control;
+const plannerAction=label=>plannerNodes().find(node=>node.kind==='action'&&node.text===label);
+const plannerLabel=prefix=>plannerNodes().find(node=>node.kind==='text'&&node.text.startsWith(prefix));
+const workersReason='Robust needs the desktop native receiver workers. Use the native application for Robust.';
+const checkPartialSweep=async(workspaceReason)=>{
+    await wait(()=>plannerLabel('DSP workspace: '+workspaceReason),60000);
+    assert(plannerControl('Target SNR')?.text,'target editor has no selected target');
+    const duration=plannerLabel('Time/bit · ')?.text,detection=plannerLabel('RX DATA model · ')?.text;
+    assert.match(duration,/^Time\/bit · [\d.e+-]+ (s|min|h|days) · log s: [\d.e+-]+\.\./);
+    assert.match(detection,/^RX DATA model · [\d.e+-]+%/);
+    assert(plannerLabel('Workspace · Unavailable · range unavailable'));
+    assert(plannerLabel('CPU: '+workersReason));
+    for(const label of ['Run simulation','Stronger','Weaker'])assert.equal(plannerAction(label)?.available,false,label);
+    return [duration,detection];
+};
+const automaticSweep=await checkPartialSweep('Robust receiver operating RAM is unavailable or insufficient');
+const launch=plannerControl('Launch command');
+assert(launch?.enabled,'planner launch command is unavailable');
+await act(1,launch.id,'--dsp-workspace 25%');
+await act(4,plannerAction('Load').id);
+assert.deepEqual(await checkPartialSweep(workersReason),automaticSweep);
 const paragraph=snapshot.document.children.find(node=>node.kind==='text'&&node.height===0&&node.geometry?.allocated&&node.measure);
 assert(paragraph,'document has no measurable auto-height paragraph');
 const priorHeight=paragraph.geometry.frame.h,measurementId=paragraph.measure.id,glyphHeight=priorHeight+37;

@@ -1,5 +1,5 @@
 #include "link_planner_page.hpp"
-#include "theme.hpp"
+#include "presentation_palette.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -72,7 +72,12 @@ std::optional<double> series_value(const planner::Point& point,std::size_t index
 
 ScaleRange series_range(const std::vector<planner::Point>& points,std::size_t index) {
     if(index==2||index==4)return {0,1,true};
-    if(index==3)return {0,1.5,true};
+    if(index==3) {
+        const bool available=std::any_of(points.begin(),points.end(),[](const auto& point) {
+            return point.workspace_fraction&&std::isfinite(*point.workspace_fraction)&&*point.workspace_fraction>=0;
+        });
+        return {0,1.5,available};
+    }
     ScaleRange range{std::numeric_limits<double>::infinity(),0,false};
     for(const auto& point:points) {
         const auto value=series_value(point,index);
@@ -119,13 +124,27 @@ void draw_number(const auto& put,int x,int y,std::string_view label,theme::Rgb i
     }
 }
 
-BitmapSource planner_chart(const planner::Model& model) {
-    const auto points=model.points;
-    const auto selected=model.selected;
-    const auto budget_target=model.budget_target_db_hz;
-    std::array<ScaleRange,5> ranges{};
-    for(std::size_t index=0;index<ranges.size();++index)ranges[index]=series_range(points,index);
-    return BitmapSource([points,selected,budget_target,ranges](const BitmapRequest& request,
+struct SeriesStroke {
+    Tone tone;
+    std::uint8_t shade;
+    int period,ink_length,thickness;
+
+    theme::Rgb ink(bool color) const {
+        return color?theme::text_rgb(tone,true):theme::grayscale(shade);
+    }
+    void draw(const auto& put,int x,int y,int phase,theme::Rgb color) const {
+        if(phase%period<ink_length)
+            for(int dy=0;dy<thickness;++dy)put(x,y+dy,color);
+    }
+};
+constexpr std::array<SeriesStroke,5> strokes{{
+    {Tone::accent,248,1,1,1}, {Tone::positive,224,13,8,1},
+    {Tone::caution,200,11,4,2}, {Tone::comparison,176,17,11,1},
+    {Tone::negative,152,7,3,1}
+}};
+
+BitmapSource planner_bitmap(auto draw,PixelRect minimum_extent={}) {
+    return BitmapSource([draw=std::move(draw)](const BitmapRequest& request,
             const BitmapSink& sink,bool color_enabled) {
         const auto width=request.width,height=request.height;
         if(!width||!height)return;
@@ -133,7 +152,7 @@ BitmapSource planner_chart(const planner::Model& model) {
         const auto format=color?PixelFormat::rgb24:PixelFormat::gray8;
         const auto stride=pixel_row_bytes(width,format);
         if (stride > std::numeric_limits<std::size_t>::max() / height) return;
-        std::vector<unsigned char> pixels(stride*height,0);
+        std::vector<unsigned char> pixels(stride*height,theme::background);
         const auto put=[&](int x,int y,theme::Rgb value) {
             if(x<0||y<0||x>=static_cast<int>(width)||y>=static_cast<int>(height))return;
             const auto offset=static_cast<std::size_t>(y)*stride+
@@ -142,22 +161,17 @@ BitmapSource planner_chart(const planner::Model& model) {
                 pixels[offset]=value.red;pixels[offset+1]=value.green;pixels[offset+2]=value.blue;
             } else pixels[offset]=value.red;
         };
-        const auto background=theme::grayscale(theme::background);
+        draw(width,height,put,color);
+        sink(0,0,{width,height,stride,format,pixels.data()});
+    },BitmapSampling::continuous,minimum_extent);
+}
+
+BitmapSource planner_chart(const planner::Model& model) {
+    std::array<ScaleRange,strokes.size()> ranges{};
+    for(std::size_t index=0;index<ranges.size();++index)ranges[index]=series_range(model.points,index);
+    return planner_bitmap([points=model.points,selected=model.selected,budget_target=model.budget_target_db_hz,ranges]
+        (unsigned width,unsigned height,const auto& put,bool color) {
         const auto grid=theme::grayscale(theme::grid);
-        const auto series_color=[&](std::size_t index) {
-            if(color) {
-                switch(index) {
-                case 0:return theme::data_tint;
-                case 1:return theme::positive_tint;
-                case 2:return theme::caution_tint;
-                case 3:return theme::comparison_tint;
-                default:return theme::negative_tint;
-                }
-            }
-            constexpr std::array<std::uint8_t,5> shades{248,224,200,176,152};
-            return theme::grayscale(shades[index%shades.size()]);
-        };
-        std::fill(pixels.begin(),pixels.end(),background.red);
         const int left=width>48?38:2,right=static_cast<int>(width)-5;
         const int top=7,bottom=static_cast<int>(height)-18;
         const int graph_width=std::max(1,right-left),graph_height=std::max(1,bottom-top);
@@ -172,10 +186,7 @@ BitmapSource planner_chart(const planner::Model& model) {
         }
         for(int x=left;x<=right;++x)put(x,bottom,theme::grayscale(theme::muted));
         for(int y=top;y<=bottom;++y)put(left,y,theme::grayscale(theme::muted));
-        if(points.empty()) {
-            sink(0,0,{width,height,stride,format,pixels.data()});
-            return;
-        }
+        if(points.empty())return;
         const auto [minimum,maximum]=std::minmax_element(points.begin(),points.end(),
             [](const auto& a,const auto& b){return a.target_db_hz<b.target_db_hz;});
         const auto target_span=maximum->target_db_hz-minimum->target_db_hz;
@@ -190,19 +201,13 @@ BitmapSource planner_chart(const planner::Model& model) {
             draw_number(put,std::max(left,std::min(right-label_width,x-label_width/2)),
                 bottom+4,label,theme::grayscale(theme::muted));
         }
-        const auto draw_line=[&](int x0,int y0,int x1,int y1,theme::Rgb ink,std::size_t style) {
+        const auto draw_line=[&](int x0,int y0,int x1,int y1,theme::Rgb ink,const SeriesStroke& stroke) {
             const int start_x=x0;
             const int dx=std::abs(x1-x0),sx=x0<x1?1:-1;
             const int dy=-std::abs(y1-y0),sy=y0<y1?1:-1;
             int error=dx+dy,step=0;
             for(;;) {
-                const auto phase=(start_x-left+step);
-                const bool visible=style==0||(style==1?(phase%13<8):style==2?(phase%11<4):
-                    style==3?(phase%17<11):(phase%7<3));
-                if(visible) {
-                    put(x0,y0,ink);
-                    if(style==2)put(x0,y0+1,ink);
-                }
+                stroke.draw(put,x0,y0,start_x-left+step,ink);
                 if(x0==x1&&y0==y1)break;
                 const int twice=2*error;
                 if(twice>=dy){error+=dy;x0+=sx;}
@@ -210,16 +215,16 @@ BitmapSource planner_chart(const planner::Model& model) {
                 ++step;
             }
         };
-        for(std::size_t index=0;index<5;++index) {
+        for(std::size_t index=0;index<strokes.size();++index) {
             if(!ranges[index].available)continue;
-            const auto color_value=series_color(index);
+            const auto color_value=strokes[index].ink(color);
             std::optional<std::pair<int,int>> prior;
             for(const auto& point:points) {
                 const auto value=series_value(point,index);
                 if(!value||!std::isfinite(*value)||*value<0) {prior.reset();continue;}
                 const int x=x_for(point.target_db_hz);
                 const int y=bottom-static_cast<int>(std::lround(normalized_value(*value,index,ranges[index])*graph_height));
-                if(prior)draw_line(prior->first,prior->second,x,y,color_value,index);
+                if(prior)draw_line(prior->first,prior->second,x,y,color_value,strokes[index]);
                 else put(x,y,color_value);
                 prior=std::pair{x,y};
             }
@@ -232,19 +237,22 @@ BitmapSource planner_chart(const planner::Model& model) {
                 put(x,std::max(top,cpu_baseline-1),theme::grayscale(248));
             }
         }
-        const int workspace_limit_y=bottom-static_cast<int>(std::lround((1./1.5)*graph_height));
-        for(int x=left;x<=right;++x)if((x-left)%6<3)
-            put(x,workspace_limit_y,series_color(3));
+        if(ranges[3].available) {
+            const int workspace_limit_y=bottom-static_cast<int>(std::lround((1./1.5)*graph_height));
+            for(int x=left;x<=right;++x)if((x-left)%6<3)
+                put(x,workspace_limit_y,strokes[3].ink(color));
+        }
         if(selected) {
             const int x=x_for(selected->target_db_hz);
             for(int y=top;y<=bottom;++y)if(y%3!=0)put(x,y,theme::grayscale(255));
             for(int dx=-3;dx<=3;++dx)for(int dy=-3;dy<=3;++dy)
-                if(std::abs(dx)+std::abs(dy)<=4)put(x+dx,top+3+dy,theme::grayscale(255));
+                if(dx*dx+dy*dy<=10)put(x+dx,top+3+dy,theme::grayscale(255));
         }
         if(budget_target&&*budget_target>=minimum->target_db_hz&&*budget_target<=maximum->target_db_hz) {
             const int x=x_for(*budget_target);
             for(int y=top;y<=bottom;++y)if(y%4!=0)put(x,y,theme::grayscale(248));
-            for(int dx=-3;dx<=3;++dx)put(x+dx,bottom-3,theme::grayscale(248));
+            for(int dx=-3;dx<=3;++dx)for(int dy=-3;dy<=3;++dy)
+                if(std::abs(dx)+std::abs(dy)<=3)put(x+dx,bottom-3+dy,theme::grayscale(248));
         }
         const auto threshold_marker=[&](std::size_t index,double threshold) {
             if(!ranges[index].available)return;
@@ -259,13 +267,12 @@ BitmapSource planner_chart(const planner::Model& model) {
                 const auto x=x_for(points[i-1].target_db_hz+fraction*(points[i].target_db_hz-points[i-1].target_db_hz));
                 const auto y=bottom-static_cast<int>(std::lround(normalized_value(threshold,index,ranges[index])*graph_height));
                 for(int dx=-4;dx<=4;++dx)for(int dy=-4;dy<=4;++dy)
-                    if(std::abs(dx)+std::abs(dy)<=5)put(x+dx,y+dy,theme::grayscale(255));
+                    if(std::abs(dx)<=1||std::abs(dy)<=1)put(x+dx,y+dy,theme::grayscale(255));
             }
         };
         threshold_marker(1,1.);
         threshold_marker(3,1.);
-        sink(0,0,{width,height,stride,format,pixels.data()});
-    },BitmapSampling::continuous,{0,0,640,160});
+    },{0,0,640,160});
 }
 
 std::string selected_value(const planner::Model& model,std::size_t index) {
@@ -278,6 +285,12 @@ std::string selected_value(const planner::Model& model,std::size_t index) {
     case 3:return point.workspace_fraction?number(100* *point.workspace_fraction)+"%":"Unavailable";
     default:return point.rx_success_probability?number(100* *point.rx_success_probability)+"%":"Unavailable";
     }
+}
+
+bool budget_on_chart(const planner::Model& model) {
+    return model.budget_target_db_hz&&!model.points.empty()&&
+        *model.budget_target_db_hz>=model.points.front().target_db_hz&&
+        *model.budget_target_db_hz<=model.points.back().target_db_hz;
 }
 
 Node chart_legend(const planner::Model& model,float width) {
@@ -294,13 +307,23 @@ Node chart_legend(const planner::Model& model,float width) {
         "RX DATA model · "+selected_value(model,2)+" · "+range_label(2,"%"),
         "Workspace · "+selected_value(model,3)+" · "+range_label(3,"%"),
         "RX sample · "+selected_value(model,4)+" · "+range_label(4,"%")};
-    const std::array<Tone,5> tones{Tone::accent,Tone::positive,Tone::caution,Tone::comparison,Tone::negative};
-    for(std::size_t i=0;i<labels.size();++i) {
-        if(i%2!=0)continue;
+    const std::size_t columns=width>=480?2:1;
+    const float item_width=columns==2?(width-8)/2:width;
+    for(std::size_t i=0;i<labels.size();i+=columns) {
         auto row=column(width);row.kind=Kind::row;
-        for(std::size_t column_index=i;column_index<std::min(i+2,labels.size());++column_index) {
-            auto item=text(labels[column_index],std::max(50.f,(width-16)/2),11,tones[column_index]);
-            item.bottom=3;item.right=8;row.children.push_back(std::move(item));
+        row.bottom=3;
+        for(std::size_t index=i;index<std::min(i+columns,labels.size());++index) {
+            auto entry=column(item_width);entry.kind=Kind::row;
+            if(index+1<std::min(i+columns,labels.size()))entry.right=8;
+            auto sample=column(40);sample.kind=Kind::bitmap;sample.height=14;sample.right=6;
+            sample.plot_name="planner/legend-"+std::to_string(index);
+            sample.plot=planner_bitmap([stroke=strokes[index]](unsigned w,unsigned h,const auto& put,bool color) {
+                const auto ink=stroke.ink(color);
+                for(int x=0;x<static_cast<int>(w);++x)stroke.draw(put,x,static_cast<int>(h/2),x,ink);
+            });
+            entry.children.push_back(std::move(sample));
+            entry.children.push_back(text(labels[index],0,11,strokes[index].tone));
+            row.children.push_back(std::move(entry));
         }
         legend.children.push_back(std::move(row));
     }
@@ -313,8 +336,8 @@ Node chart_legend(const planner::Model& model,float width) {
         auto item=text(std::move(label),std::max(60.f,(width-12)/2),10,Tone::text);
         item.bottom=2;item.right=6;markers.children.push_back(std::move(item));
     };
-    if(model.selected)marker_label("● selected target");
-    if(model.budget_target_db_hz)marker_label("◆ budget C/N₀ intercept");
+    if(model.selected&&!model.points.empty())marker_label("● selected target");
+    if(budget_on_chart(model))marker_label("◆ budget C/N₀ intercept");
     const auto crosses=[&](std::size_t index,double threshold) {
         const auto range=series_range(model.points,index);
         const auto nt=normalized_value(threshold,index,range);
@@ -369,9 +392,14 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
     auto legend=chart_legend(model,root.width-2*root.padding);legend.bottom=3;
     root.children.push_back(std::move(legend));
     paragraph(root,"Target C/N₀ (dB-Hz) · Scaled y grid (0–100%)",10,Tone::muted,false,3);
-    paragraph(root,"Dashed limits at 1 s/s CPU and 100% workspace",10,Tone::muted,false,2);
-    if(model.budget_target_db_hz&&(model.points.empty()||*model.budget_target_db_hz<model.points.front().target_db_hz||
-        *model.budget_target_db_hz>model.points.back().target_db_hz))
+    std::string limits;
+    if(series_range(model.points,1).available)limits="Long horizontal dashes mark 1 s/s CPU.";
+    if(series_range(model.points,3).available) {
+        if(!limits.empty())limits+=' ';
+        limits+="Short horizontal dashes mark 100% workspace.";
+    }
+    if(!limits.empty())paragraph(root,std::move(limits),10,Tone::muted,false,2);
+    if(model.budget_target_db_hz&&!budget_on_chart(model))
         paragraph(root,"Budget C/N₀ intercept: "+number(*model.budget_target_db_hz)+" dB-Hz (outside plotted target range).",10,Tone::caution,false,3);
     else if(model.budget_target_db_hz)
         paragraph(root,"Budget C/N₀ intercept at "+number(*model.budget_target_db_hz)+" dB-Hz is marked on the plot.",10,Tone::muted,false,3);

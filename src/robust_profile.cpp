@@ -323,6 +323,14 @@ void validate_settings(const Settings& s) {
 }
 
 namespace detail {
+
+std::optional<std::string> receiver_worker_unavailability() {
+#ifdef DATAPUMP_EXECUTION_FIBERS
+    return "Robust needs the desktop native receiver workers. Use the native application for Robust.";
+#else
+    return {};
+#endif
+}
 CarrierBand plan_carrier_band(const Settings& settings, std::optional<double> doppler_ratio) {
     const auto& modem = settings.transfer.modem;
     auto geometry_options = modem;

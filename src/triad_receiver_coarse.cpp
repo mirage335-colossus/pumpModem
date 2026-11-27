@@ -734,19 +734,6 @@ Plan make_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
     return plan;
 }
 
-double bessel_i0(double value) {
-    // beta <= 10 here. The positive power series converges to double
-    // precision without a platform special-function dependency.
-    const auto factor = .25 * value * value;
-    double sum = 1, term = 1;
-    for (unsigned k = 1; k <= 64; ++k) {
-        term *= factor / (k * k);
-        sum += term;
-        if (term <= std::numeric_limits<double>::epsilon() * sum) break;
-    }
-    return sum;
-}
-
 std::vector<double> fir_taps(const Plan& plan, std::stop_token stop) {
     // Windowed sinc with the same 96 dB Kaiser design and DC normalization as
     // the reference rate-aware public projection.

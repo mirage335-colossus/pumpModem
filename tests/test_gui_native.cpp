@@ -4,14 +4,18 @@
 #include "../src/gui/controller.hpp"
 #include "../src/gui/link_planner_model.hpp"
 #include "../src/gui/link_planner_page.hpp"
+#include "../src/gui/document_layout.hpp"
+#include "../src/gui/presentation_palette.hpp"
 #include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/live.hpp"
 #include "datapump/robust_profile.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <source_location>
 #include <thread>
@@ -52,6 +56,67 @@ void planner_quick_references() {
     app.dispatch(gui::ui::Command::planner_toggle_details);
     const auto hidden=app.document(gui::ui::Page::planner,900);
     check(hidden && !document_contains(*hidden,"Quick references"));
+}
+void planner_legend_strokes() {
+    using namespace gui;
+    using Tone=ui::DocumentTone;
+    planner::Model model;
+    planner::Point point{.bit_seconds=10,.cpu_seconds_per_audio_second=.5,.rx_data_detection_probability=.3,
+        .workspace_fraction=.6,.rx_success_probability=.19};
+    model.points={point,point,point};
+    model.points[1].target_db_hz=1;
+    model.points[2].target_db_hz=2;
+    model.points[2].cpu_seconds_per_audio_second=.01;
+
+    const auto paint=[](const ui::DocumentNode& node,unsigned width,unsigned height,bool color) {
+        BitmapImage result(width,height);
+        node.plot.paint(full_bitmap_request(width,height,!color,color),[&](auto x,auto y,auto block) {
+            result.blit(x,y,block);
+        },color);
+        return result;
+    };
+    const auto pixel=[](const BitmapImage& image,int x,int y) {
+        const auto* p=image.pixels().data()+y*image.block().stride_bytes+3*x;
+        return theme::Rgb{p[0],p[1],p[2]};
+    };
+    struct Series {const char* label;Tone tone;std::uint8_t gray;int period,ink,chart_y;};
+    constexpr std::array<Series,5> series{{
+        {"Time/bit",Tone::accent,248,1,1,74},{"CPU",Tone::positive,224,13,8,27},
+        {"RX DATA model",Tone::caution,200,11,4,101},{"Workspace",Tone::comparison,176,17,11,88},
+        {"RX sample",Tone::negative,152,7,3,116}
+    }};
+    for(const int width:{220,900}) {
+        const auto page=planner_page::build(model,width,false,false);
+        const auto chart=std::find_if(page.children.begin(),page.children.end(),[](const auto& child) {
+            return child.plot_name=="planner/robust-target-sweep";
+        });
+        check(chart!=page.children.end()&&std::next(chart)!=page.children.end());
+        const auto& legend=*std::next(chart);
+        const auto layout=ui::layout_document(legend,width,[](const auto&,int){return 14;});
+        const std::size_t columns=width==220?1:2;
+        for(bool color:{true,false}) {
+            const auto graph=paint(*chart,320,160,color);
+            for(std::size_t i=0;i<series.size();++i) {
+                const auto& entry=legend.children.at(i/columns).children.at(i%columns);
+                const auto& children=layout.root.children.at(i/columns).children.at(i%columns).children;
+                const auto& spec=series[i];
+                check(entry.children.size()==2&&entry.children[0].kind==ui::DocumentKind::bitmap);
+                check(entry.children[1].text.starts_with(spec.label)&&entry.children[1].tone==spec.tone);
+                const auto& sample=children.at(0).bounds;
+                const auto& label=children.at(1).bounds;
+                check(sample.width>=2*spec.period&&label.width>=150&&sample.x+sample.width<label.x);
+                const auto key=paint(entry.children[0],sample.width,sample.height,color);
+                const auto ink=color?theme::text_rgb(spec.tone,true):theme::grayscale(spec.gray);
+                // The fixture has five flat, separated strokes at the left of
+                // the chart. Read the same length as the allocated legend key.
+                for(int x=0;x<sample.width;++x) {
+                    const bool visible=x%spec.period<spec.ink;
+                    check((pixel(key,x,sample.height/2)==ink)==visible);
+                    check((pixel(graph,38+x,spec.chart_y)==ink)==visible);
+                }
+            }
+        }
+    }
 }
 void planner_target_navigation_and_graph() {
     using gui::planner::Point;
@@ -101,10 +166,7 @@ void planner_target_navigation_and_graph() {
     const auto page=gui::planner_page::build(model,900,false,false);
     std::vector<const gui::ui::DocumentNode*> nodes;
     document_nodes(page,nodes);
-    const auto plots=std::count_if(nodes.begin(),nodes.end(),[](const auto* node) {
-        return node->kind==gui::ui::DocumentKind::bitmap;
-    });
-    check(plots==1&&document_contains(page,"Target C/N₀")&&document_contains(page,"100%")&&
+    check(document_contains(page,"Target C/N₀")&&document_contains(page,"100%")&&
           document_contains(page,"RX DATA model")&&document_contains(page,"12 s")&&
           document_contains(page,"91%")&&document_contains(page,"98%"));
     check(document_contains(page,"Budget C/N₀ intercept at -50 dB-Hz")&&
@@ -201,6 +263,44 @@ void planner_target_navigation_and_graph() {
           std::isfinite(*actual.selected->rx_data_detection_probability)&&
           *actual.selected->rx_data_detection_probability>=0&&
           *actual.selected->rx_data_detection_probability<=1);
+    auto no_allowance=actual_inputs;
+    no_allowance.settings->receiver_memory_limit=0;
+    const auto partial=gui::planner::build(no_allowance);
+    check(partial.available&&partial.error.empty()&&!partial.workers&&partial.selected);
+    check(partial.selected->bit_seconds==actual.selected->bit_seconds&&
+          partial.selected->rx_data_detection_probability==actual.selected->rx_data_detection_probability);
+    check(!partial.selected->workspace_fraction&&!partial.selected->workspace_fits&&
+          !partial.fitted_target&&!partial.stronger_fit_target&&!partial.weaker_fit_target);
+    check(std::count_if(partial.points.begin(),partial.points.end(),[](const auto& point) {
+        return point.bit_seconds&&point.rx_data_detection_probability;
+    })>1);
+    for(const auto& point:partial.points) {
+        if(point.target_db_hz!=std::floor(point.target_db_hz))continue;
+        const auto quoted=std::lower_bound(actual.points.begin(),actual.points.end(),point.target_db_hz,
+            [](const auto& candidate,double target){return candidate.target_db_hz<target;});
+        check(quoted!=actual.points.end()&&quoted->target_db_hz==point.target_db_hz&&
+              quoted->bit_seconds==point.bit_seconds&&
+              quoted->rx_data_detection_probability==point.rx_data_detection_probability);
+    }
+    check(std::none_of(partial.points.begin(),partial.points.end(),[](const auto& point) {
+        return point.workspace_fraction||point.workspace_fits;
+    }));
+    const auto partial_page=gui::planner_page::build(partial,900,false,false);
+    check(document_contains(partial_page,"Workspace · Unavailable · range unavailable")&&
+          document_contains(partial_page,"Robust receiver operating RAM is unavailable or insufficient")&&
+          !document_contains(partial_page,"dashes mark 100% workspace"));
+    auto tiny_allowance=actual_inputs;
+    tiny_allowance.settings->receiver_memory_limit=1;
+    const auto tiny=gui::planner::build(tiny_allowance);
+    check(tiny.available&&tiny.error.empty()&&tiny.workers==actual.workers&&tiny.workers>0&&tiny.selected);
+    check(tiny.selected->bit_seconds==actual.selected->bit_seconds&&
+          tiny.selected->rx_data_detection_probability==actual.selected->rx_data_detection_probability&&
+          tiny.selected->workspace_fraction&&*tiny.selected->workspace_fraction>1&&!tiny.selected->workspace_fits);
+    const auto tiny_page=gui::planner_page::build(tiny,900,false,false);
+    nodes.clear();
+    document_nodes(tiny_page,nodes);
+    check(!tiny.fitted_target&&!enabled(gui::ui::Command::planner_sample)&&
+          document_contains(tiny_page,"dashes mark 100% workspace"));
     auto weaker=settings;weaker.tx_dbm=-40;
     const auto nominal_profile=live::detail::plan_profile(settings,live::detail::automatic_live_calendar,{});
     const auto weaker_profile=live::detail::plan_profile(weaker,live::detail::automatic_live_calendar,{});
@@ -1208,6 +1308,7 @@ int main() {
     try {
         planner_quick_references();
         planner_target_navigation_and_graph();
+        planner_legend_strokes();
         planner_commits_checked_target();
         planner_simulation_controls();
         shared_robust_target();

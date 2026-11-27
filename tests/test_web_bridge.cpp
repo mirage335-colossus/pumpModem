@@ -89,7 +89,7 @@ void bitmap_history() {
         for(unsigned row=0;row<count;++row)history.push(std::array<double,2>{0,0},20);
         const BitmapSource source=plots::PlotSnapshot::waterfall(history);
         for(const auto& [width,height]:{std::pair{8,4},std::pair{6,160},std::pair{9,320},std::pair{1200,600}}) {
-            const auto actual=web::detail::render_bitmap(source,width,height);
+            const auto actual=web::detail::render_bitmap(source,width,height,true);
             check(actual.width()==static_cast<unsigned>(std::min(width,640))&&
                   actual.height()==static_cast<unsigned>(std::min(height,320)),"Web bitmap raster bounds changed");
             BitmapImage native(actual.width(),actual.height(),PixelFormat::rgb24);
@@ -105,7 +105,14 @@ void bitmap_history() {
             }
         }
     }
-    const auto single=web::detail::render_bitmap({},-1,0);
+    const BitmapSource preference([](const auto&,const auto& paint,bool color){
+        const std::array<unsigned char,3> pixel=color?std::array<unsigned char,3>{0,127,255}:
+            std::array<unsigned char,3>{127,127,127};
+        paint(0,0,{1,1,3,PixelFormat::rgb24,pixel.data()});
+    });
+    check(web::detail::render_bitmap(preference,1,1,false).pixels()==std::vector<unsigned char>{127,127,127},
+        "Web bitmap ignored the monochrome preference");
+    const auto single=web::detail::render_bitmap({},-1,0,true);
     check(single.width()==1&&single.height()==1,"Web bitmap lower raster bound changed");
 }
 void envelopes_and_edits() {
@@ -233,8 +240,8 @@ void document_withdrawal() {
     Launch launch;launch.page=ui::Page::planner;
     Application app(launch);web::Bridge bridge(app);
     const auto snapshot=bridge.snapshot(1000,760);
-    const auto text=snapshot.find("\"text\":\"Use current draft\"");
-    check(text!=std::string::npos,"Planner fixture requires a saved-preference action");
+    const auto text=snapshot.find("\"kind\":\"action\",\"text\":\"Model limits and references\"");
+    check(text!=std::string::npos,"Planner fixture requires the details action");
     const auto begin=snapshot.find(",\"id\":\"",text);
     check(begin!=std::string::npos,"Document action has no opaque identity");
     const auto target=std::stoull(snapshot.substr(begin+7));

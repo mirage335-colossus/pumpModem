@@ -109,6 +109,47 @@ device identity. A second request acquired the resumed backend. This covers
 the startup and handoff control flow. GPU numerical execution requires
 separate device qualification.
 
+### Browser chart and shared planner — 26 November 2026
+
+Firefox showed the same foreground on all five Link planner labels with the
+original zLab browser assets. The updated worker and renderer displayed five
+distinct label colors in the dark zLab window. A local CPU simulation completed
+both one-bit trials, and all five plotted colors matched the corresponding
+legend samples. Native rendering checks matched each sample's dash pattern to
+its curve in both color and monochrome at narrow and wide layout widths.
+
+In the standalone WebAssembly build, Target +32 dB-Hz and actual +47 dB-Hz
+(−117 dBm received) gave the same 8.8-second bit and 100% provisional DATA
+detection bound as the native worker. The compiled module retained both curves
+with automatic RAM and with a 25% RAM preset. Its browser runtime reported
+workspace and receiver sampling unavailable in both cases. Before the fix, a
+failed RAM query left all five series empty. The native plot extended to
+−24.625 dB-Hz to include its host workspace boundary. The standalone plot
+started at −12 dB-Hz. The duration curves agreed within plotting resolution
+at −10, −6, −4 and +2 dB-Hz on their common axis. The native policy test also
+verified identical duration and detection values at every shared integer
+target with and without a workspace allowance. [Planner behavior](link-planner.md)
+
+The Wasm build uses the existing native DATA filter's Bessel I₀ routine for
+the Helper filter as well. Compared with the original libstdc++ routine at
+`0c8444df`, the maximum relative difference over 10,001 inputs from 0 to 10
+was 2.89 × 10⁻¹⁵. The maximum normalized tap difference was 6.94 × 10⁻¹⁸
+across six Helper filters at 12, 24 and 48 kHz with 4 and 25 Hz cutoffs.
+The native Helper, receiver calendar/admission, Fast SSB equalizer and FLTK
+inline-editor checks passed. The checks cover coefficient and application
+behavior. Receiver sensitivity and capacity were outside this comparison.
+
+The native web group passed 12 of 13 checks during concurrent build activity.
+The Fast live-audio fixture reported a playback underrun at 48 kHz. The same
+fixture passed both 48 and 44.1 kHz in an isolated retry lasting 224.71 seconds.
+The compiled Wasm runtime test and local Firefox checks passed.
+
+The ignored `local-evidence/link-planner-legend.png` holds the populated zLab
+chart for visual review and can be removed once reviewed. The packaged Wasm
+page and its pinned SDK remain in the standard build tree for local previews
+and compatible rebuilds. The temporary SDK installation and downloads were
+removed after the packaged page passed its runtime check.
+
 ### Link Planner −3 dB-Hz timeout
 
 The pasted launcher at base `a5bd5f0e` used 3 dBm, 170 dB path loss and

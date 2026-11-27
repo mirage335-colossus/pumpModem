@@ -7,7 +7,21 @@ one Target SNR axis. Console and Link Planner share the target in dB-Hz, initial
 the actual C/N₀ used for the link estimate. The target selects the public
 waveform and can leave the duration unchanged across a range of settings. The
 plot marks the selected target, the link-budget target, and any plotted
-crossings of the 1 s/s processing and 100% workspace limits.
+crossings of the 1 s/s processing and 100% workspace limits. When a host
+workspace quote is available, the lower end of the target axis can extend
+to eight dB below the weakest fitting target found in the sweep.
+
+Each legend entry shows a short sample of its curve beside the name and
+selected value. Match the color or the dash pattern to the graph. The native
+application, zLab worker and standalone WebAssembly build draw the chart and
+these samples with the same C++ code. zLab runs the planner on the selected
+worker, so its workspace and processing figures describe that machine.
+
+The standalone WebAssembly app plots DATA duration and modeled detection for
+the same settings. Its current browser runtime has no supported Robust receiver
+workers. Workspace, measured processing time and RX samples are therefore unavailable
+there, including when a RAM percentage is selected. Use the native application
+or a zLab worker to run a receiver simulation.
 
 The workspace curve quotes one owner at a time for the first DATA window and
 two scored quiet windows, using the current local memory allowance, production

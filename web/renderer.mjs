@@ -337,6 +337,7 @@ export class Renderer {
         if(node.kind==='action')result.disabled=!enabled||node.available===false;
         if(node.kind==='bitmap')this.paint(view.content,node.bitmap);
         else if(node.kind==='text'||node.kind==='action') {
+            view.content.style.setProperty('--dp-document-ink',node.foreground||'');
             text(view.content,node.text||'');
             if(node.measure){if(!decimal(node.measure.id)||!Number.isInteger(node.measure.width)||node.measure.width<1||node.measure.width>4096)throw new RangeError('Invalid text measurement request');this.measurements.set(node.measure.id,node);}
         } else if(node.kind==='control')children(result,node.control?[this.renderControl(node.control,used,enabled,true)]:[]);

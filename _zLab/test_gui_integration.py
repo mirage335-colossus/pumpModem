@@ -466,19 +466,29 @@ class TkControllerIntegration(unittest.TestCase):
         for foreground, background in pairs:
             self.assertGreaterEqual(contrast(foreground, background), 4.5, (foreground, background))
 
-    def test_linode_catalog_is_first_and_explicit_provider_selection_survives_refresh(self):
+    def test_runpod_preferred_and_explicit_linode_selection_survives_refresh(self):
         self.load_linode_catalog()
         self.assertEqual(self.controller.selected_compute(), self.linode.PLAN)
         self.assertIn('256 vCPU', self.controller.compute.get())
 
         self.set_entry(self.controller.accounts['runpod'].key, 'dummy-session-key')
         self.execute(self.button('Refresh compute').invoke, lambda: not self.controller.busy)
-        self.assertEqual(self.controller.selected_compute(), self.linode.PLAN)
-        self.select_compute('runpod')
-        chosen = self.controller.selected_compute()
+        self.assertIn('RunPod GPU: NVIDIA GeForce RTX 4090 · stock high', self.controller.compute.get())
+        self.select_compute('linode')
         self.execute(self.button('Refresh compute').invoke, lambda: not self.controller.busy)
-        self.assertEqual(self.controller.selected_compute(), chosen)
-        self.assertEqual(self.controller.selected_compute().get('provider', 'runpod'), 'runpod')
+        self.assertEqual(self.controller.selected_compute(), self.linode.PLAN)
+
+    def test_mixed_catalog_falls_back_to_linode_when_runpod_has_no_offers(self):
+        self.provider.gpus[0]['availability'] = 'NONE'
+        self.provider.cpus[0]['availability'] = 'NONE'
+        self.set_entry(self.controller.accounts['runpod'].key, 'dummy-session-key')
+        self.load_linode_catalog()
+        self.assertEqual(self.controller.selected_compute(), self.linode.PLAN)
+
+        # Unknown availability permits a single GPU offer, labelled as such.
+        del self.provider.gpus[0]['availability']
+        self.execute(self.button('Refresh compute').invoke, lambda: not self.controller.busy)
+        self.assertIn('RunPod GPU: NVIDIA GeForce RTX 4090 · stock unknown', self.controller.compute.get())
 
     def test_refresh_loads_a_provider_key_created_after_startup(self):
         account = self.controller.accounts['linode']

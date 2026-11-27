@@ -1888,15 +1888,16 @@ class App:
 
         def fetch(clients):
             choices, failures = [], []
+            if 'runpod' in clients:
+                offers, failures = load_catalog(clients['runpod'], cloud)
+                choices.extend((f'RunPod {label}', value) for label, value in offers)
             if 'linode' in clients:
                 try:
-                    choices, failures = clients['linode'].catalog()
+                    offers, issues = clients['linode'].catalog()
+                    choices.extend(offers)
+                    failures.extend(issues)
                 except (OSError, ValueError, RunPodError) as error:
                     failures.append('Linode catalog unavailable. ' + str(error))
-            if 'runpod' in clients:
-                other, issues = load_catalog(clients['runpod'], cloud)
-                choices.extend((f'RunPod {label}', value) for label, value in other)
-                failures.extend(issues)
             return choices, [redact_keys(issue, keys.values()) for issue in failures]
 
         self.background(fetch, done, failed)

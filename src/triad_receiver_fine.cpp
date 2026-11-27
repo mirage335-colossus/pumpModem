@@ -5133,6 +5133,9 @@ std::size_t varying_line_workspace(const ReceiverConfig& config, const ReceiverS
 
 std::optional<LineAtom> find_varying_line(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                                         std::span<const Complex> iq, std::stop_token stop, double threshold) {
+    if (slot.quiet_first_sample < slot.first_sample || slot.quiet_stop_sample < slot.quiet_first_sample ||
+        slot.quiet_stop_sample - slot.first_sample > iq.size())
+        throw Error("varying line aperture lies outside the input window");
     const auto fft_rows = line_fft_rows(slot);
     if (!fft_rows) return std::nullopt;
     std::optional<ProjectionBands> bands;
@@ -5141,8 +5144,8 @@ std::optional<LineAtom> find_varying_line(const ReceiverConfig& config, const Re
     } catch (const Error&) {
         return std::nullopt;
     }
-    const auto first = slot.quiet_first_sample - slot.first_sample;
-    const auto stop_row = slot.quiet_stop_sample - slot.first_sample;
+    const auto first = static_cast<std::size_t>(slot.quiet_first_sample - slot.first_sample);
+    const auto stop_row = static_cast<std::size_t>(slot.quiet_stop_sample - slot.first_sample);
     const auto observed = iq.subspan(first, stop_row - first);
     const auto fs = config.sample_rate_hz;
     const auto search_row_count = std::min(observed.size(), fft_rows / 2);

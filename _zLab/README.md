@@ -55,10 +55,17 @@ stored under `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/`.
 
 ## Managed compute
 
+Prefer RunPod for experiments when it offers the hardware the test needs.
+RunPod bills pod compute by the second, which can substantially reduce the
+cost of a short experiment. zLab selects a RunPod offer by default when
+one is listed. RunPod offers with reported stock come first. Single-GPU and CPU
+offers with unknown stock are labeled accordingly. With no RunPod offer, zLab
+selects the first available Linode. Refreshing preserves an explicit selection
+while that placement is available. [RunPod pricing](https://docs.runpod.io/pods/pricing)
+
 The Linode selector lists G8 Compute Optimized plans with up to 2 vCPUs or
-more than 32 vCPUs. By default, zLab selects the available 256-vCPU
-instance with the lowest published hourly rate. Refreshing the list preserves
-an explicit selection while that placement is available.
+more than 32 vCPUs. Its first choice is the available 256-vCPU instance with
+the lowest published hourly rate, when that size is offered.
 The 256-vCPU shape is Akamai's largest G8 Compute Optimized size, with
 512 GiB of memory.
 
@@ -303,7 +310,11 @@ key independently before using a replacement file. The shared GUI sends the
 remote draft and test modem key material to the pod. Use a designated lab key.
 
 For an already running RunPod pod, [deploy.py](deploy.py) can upload an allowlisted
-source bundle and build the worker. It needs Python, CMake, a C++ toolchain,
+source bundle and build the worker. Aim to keep uploads under a few minutes.
+If build dependencies would add hundreds of megabytes, fetch them on the pod
+and reuse a compatible build cache on a low-cost persistent volume across
+planned runs. Include storage charges when comparing the total cost.
+The pod needs Python, CMake, a C++ toolchain,
 OpenSSL development headers and the relevant native build dependencies on the
 pod; CUDA additionally needs a compatible toolkit, driver and C++11-ABI
 CUDA-enabled LibTorch. The direct SSH port must be accessible and the account

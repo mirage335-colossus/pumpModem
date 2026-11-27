@@ -10,6 +10,9 @@ inline constexpr std::size_t receiver_input_chunk_samples = 4096;
 inline constexpr std::size_t receiver_pending_messages = 1;
 inline constexpr Calendar automatic_live_calendar{1767225600, 0}; // 2026-01-01 00:00:00 UTC
 
+// An analytical profile can be planned even when native receiver workers cannot run.
+std::optional<std::string> receiver_worker_unavailability();
+
 // Public DATA occupied band plus the declared receive allowance. Carrier
 // values here are pre-Doppler baseband frequencies (Carrier minus Shift).
 struct CarrierBand {
