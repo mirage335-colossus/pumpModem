@@ -1219,6 +1219,8 @@ of `lattice_receiver.cpp`; the computed values are at the end of this subsection
   tens of hertz, and does not itself rule out PSK at 2.2 kHz (about 5° per symbol at 2,000
   baud); the symbol energy of −23 to −3 dB does. Kilowatt systems use PSK. To be researched
   before meteor burst enters section 12.
+  (Researched later the same day: the level estimate here was wrong by 15 to 35 dB for small
+  antennas. See [the meteor-burst note](meteor-burst.md), which supersedes this bullet.)
 - **Delay spread and phase steps** (user, 27 November). Truly diffuse delay spread smears a
   phase step over the spread's length, so steps at a rate comparable to it become noise. Agreed,
   and the same holds for tone changes; it is the 50 to 200 Hz rate limit already recorded. It

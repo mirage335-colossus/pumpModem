@@ -16,6 +16,7 @@ exists yet.
 | [OTHR and interference tolerance](othr-and-interference-tolerance.md) | What keeps the link alive under over-the-horizon radar, and how much margin does it take? | Time-domain simulation of model radars ([`othr-interference/`](../../../_appraisal/algorithms-matrixModem/othr-interference/README.md)) and the OTHR review |
 | [Coding and message structure](coding-and-message-structure.md) | Is the 10-bit minimum sound, and which code for short and long blocks? | Exact finite-length energy tables ([`short-message-energy/`](../../../_appraisal/algorithms-matrixModem/short-message-energy/README.md)) and the coding review |
 | [Computation and simulation speed](computation-and-simulation-speed.md) | Can a DFT beat an FFT, where do Tensor Cores help, how fast is simulation? | One run on a full RTX PRO 6000 Blackwell ([`fsk-lattice/results/gpu/`](../../../_appraisal/algorithms-matrixModem/fsk-lattice/README.md#gpu-run)) and the DFT/FFT review |
+| [Meteor burst](meteor-burst.md) | Is meteor burst a usable path at 2–100 mW, and which modulation suits it? | ITU-R P.843 and P.372 formulas, one measured 500 W link, a delegated literature search with verified DOIs, and a link calculation |
 
 Literature reviews written by delegated agents, kept in full with their own source lists,
 verification marks and not-accessed lists:
@@ -206,6 +207,13 @@ verification marks and not-accessed lists:
     not researched; it is an open decision. Hand estimates and general knowledge, from the
     user's questions of 27 November.
 
+27. **Meteor burst is not a usable path at 2–100 mW with small antennas.** The strongest
+    underdense trail gives −6 dB-Hz at 100 mW and −23 dB-Hz at 2 mW between isotropic antennas
+    (50 MHz, 1,300 km). With 17 dBi at each end, 100 mW gets 23 to 73 one-tone bursts an hour.
+    My earlier estimate of +10 to +30 dB-Hz at these powers was wrong; it needs 10 to 17 dBi at
+    each end. The channel in a burst is clean (delay spread under 100 ns, Doppler shift about
+    20 Hz at 40 MHz) and brief (median under 150 ms). See [the meteor-burst note](meteor-burst.md).
+
 ## State of the specification
 
 The specification was rewritten as one consistent document on 27 November 2026, after the
@@ -235,6 +243,9 @@ reasoning in section 4.2.
 
 Section 4.4 also carries the delay-spread loss of phase steps, and section 12 an unresearched
 entry for meteor burst with open decision 16.
+
+The meteor-burst entry of section 12 was then replaced by the researched result (finding 27),
+which lists the path as not supported.
 
 ## Corrections to earlier Matrix Modem documents
 
