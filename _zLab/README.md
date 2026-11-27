@@ -1,9 +1,10 @@
-# Standalone RunPod GUI for Robust modem simulations
+# zLab for Robust modem simulations
 
-**Implementation status:** the developer tool integrates RunPod management,
-simulation and finite Live/Duplex controls with the native worker and local
-audio companion. The shared GUI runs through an SSH relay to a separately
-deployed worker. A short RunPod simulation decoded `e` on both a full RTX PRO
+**Implementation status:** the developer tool integrates managed Linode and
+RunPod compute, simulation and finite Live/Duplex controls with the native
+worker and local audio companion. The shared GUI runs through an SSH relay to
+a separately deployed worker. A short RunPod simulation decoded `e` on both a
+full RTX PRO
 6000 Blackwell Server Edition and a full GeForce RTX 5090. Both used Vulkan for
 coarse search and the native CPU receiver for fine processing. Local tests
 exercised fake-device audio and one physical analog loopback.
@@ -12,10 +13,11 @@ qualified.** The live profile uses the native audio and transport components;
 the simulation bridge rejects audio frames. A fake-device transport test has
 covered capture stopping before a delayed drain, but delayed drain through the
 complete receiver, other physical routes and remote transport remain unqualified.
-A locally enforced deadline requests termination while the controller can
-contact RunPod. The controller resumes pending termination checks at startup.
+At the local deadline, zLab asks before deleting a Linode and requests cleanup
+automatically for a RunPod pod. The controller resumes pending termination
+checks at startup.
 
-All RunPod API calls, SSH and credential handling belong to the separate lab
+All cloud API calls, SSH and credential handling belong to the separate lab
 tool. This work does not add networking to Data Pump's modem, GUI, CLI or
 socket-free pipe worker. The local lab currently runs from this source tree:
 it imports `tools/preview.py` and serves shared `tools/` and `web/` assets, so
@@ -39,26 +41,160 @@ interpreter. Then launch the controller:
 python3 _zLab/app.py
 ```
 
-Enter the RunPod API key in the masked field. The lab saves it in
-`runpod-api-key` at the repository root. The file is gitignored, has
-owner-only permissions (`0600`), and contains a single token. The lab loads
-the key and catalog at startup and migrates previous lab key files.
+Enter the Linode or RunPod API key in its masked field. zLab stores both
+credentials in the gitignored `Cloud_API_Keys/` directory at the checkout
+root, as `linode-api-key` and `runpod-api-key`. The directory is private
+(`0700`) and each key file is owner-only (`0600`). Existing root-level
+keys and the earlier RunPod key locations migrate into this directory when
+zLab starts. If you add a missing key file while zLab is open, click
+**Refresh compute** to load it into the empty masked field.
 
-Select compute and click **Start simulation**. After one billing confirmation,
-the lab creates the pod, waits for SSH, deploys and checks the native worker,
-then opens the shared simulation in the browser. Setup status shows the current
-stage and elapsed time. Selecting an existing owned pod lets you continue its
-setup. **Advanced** contains optional settings.
+Linode state is stored under
+`${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/linode-lab/`; RunPod state is
+stored under `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/`.
 
-Use **End simulation** during setup or while the simulation is open. Closing
-the simulation browser tab also ends its pod. Reloading starts a fresh
-simulation with default settings on the same pod. Loading modem settings
+## Managed compute
+
+The Linode selector lists G8 Compute Optimized plans with up to 2 vCPUs or
+more than 32 vCPUs. By default, zLab selects the available 256-vCPU
+instance with the lowest published hourly rate. Refreshing the list preserves
+an explicit selection while that placement is available.
+The 256-vCPU shape is Akamai's largest G8 Compute Optimized size, with
+512 GiB of memory.
+
+For each size, zLab lists Washington, DC (`us-iad`, falling back to
+`us-iad-2`) and Los Angeles (`us-lax`) when available. It also includes the
+stocked region closest to Austin, Texas, and the stocked region with the lowest
+published hourly rate worldwide for that size. Overlaps appear once, so each
+size has at most four choices. Price ties favor a region already on the list.
+Distance is measured between city centers. New region IDs can qualify on price
+immediately and on distance once their location is added to zLab.
+[Region catalog](https://api.linode.com/v4/regions) ·
+[Distributed region IDs](https://techdocs.akamai.com/cloud-computing/docs/ip-sharing-distributed) ·
+[GeoNames city coordinates](https://www.geonames.org/export/)
+
+Availability and prices depend on the selected region and account.
+zLab refreshes the exact type and region before the single
+billable confirmation and displays the current hourly quote. If the preferred
+shape is unavailable, choose another listed Linode plan or a RunPod option.
+[Akamai's G8 plan guide](https://techdocs.akamai.com/cloud-computing/docs/dedicated-cpu-compute-instances)
+and [Linode region availability API](https://techdocs.akamai.com/linode-api/reference/get-region-availability)
+describe the current plan family and regional stock.
+
+Linode launches use an Ubuntu 24.04 image with cloud-init support in a
+metadata-capable region. zLab provisions its own SSH host identity and client
+key, verifies the host through the saved fingerprint with strict SSH checking,
+and deploys the native CPU worker over SSH. No GPU packages or CUDA runtime
+are required for this CPU build. A Linode run can support fast native
+compilation, simulation, and appropriately abbreviated performance checks or
+calibration. Provisioning support does not demonstrate a speedup or qualify a
+receiver-capacity result. Record the instance's actual CPU model, allocation,
+memory, runtime and executed arithmetic with its results.
+[Akamai's user-data guide](https://techdocs.akamai.com/cloud-computing/docs/add-user-data-when-deploying-a-compute-instance)
+describes cloud-init support. The
+[create-instance API](https://techdocs.akamai.com/linode-api/reference/post-linode-instance)
+charges the account when the instance is created.
+
+The Linode token needs Linodes Read/Write access. The Linode's network and
+account firewall rules must permit inbound TCP 22 from the computer running
+zLab. RunPod requires Catalog Read and Pods Read/Write for its listed
+compute and lifecycle controls.
+
+The default deadline is 36 hours. zLab saves each creation request before
+contacting the provider and checks unresolved requests when you reopen the
+app. Deadline checks run while zLab is open with the provider key entered.
+
+Closing the simulation browser tab keeps the Linode running. zLab also keeps
+it if setup or the simulation fails. The instance, its storage, and its
+managed SSH identity remain available for another session.
+
+**End simulation** and the local deadline ask whether to delete the Linode
+and its instance storage. When you close zLab, the prompt identifies the
+affected Linodes. Choose **Yes** to terminate them and quit, **No** to keep
+them and quit, or **Cancel** to stay in zLab.
+
+Akamai rounds partial hours up to whole hours. Keeping the instance lets you
+use the rest of its current billed hour. Charges continue if you keep it into
+the next billed hour.
+The hourly quote covers compute. Outbound transfer and separately enabled
+backups can add charges. [Akamai billing guide](https://techdocs.akamai.com/cloud-computing/docs/understanding-how-billing-works)
+
+RunPod remains available for GPU work, including RTX PRO 6000 Blackwell and
+RTX 5090. Its existing GPU-capable deployment can use a supported GPU when
+present and falls back to the native CPU receiver when selected. RunPod
+specific setup, image and GPU behavior are described below.
+
+To begin, enter the key for the provider you want, select a listed compute
+option, and click **Start simulation**. Review the refreshed plan, region or
+GPU, hourly quote, image and deadline in the one billable confirmation. zLab
+waits for the instance and SSH setup, deploys the native worker, then opens
+the shared simulation in the browser.
+
+To run a fresh simulation on an existing Linode, select its row and click
+**Restart simulation**. zLab reconnects to the same running instance and
+opens a fresh browser session. You can use this control during an active
+session, after the tab closes, or after reopening zLab with a retained Linode.
+If the local deadline has expired, restarting sets the next reminder using
+the deadline duration in **Advanced**.
+
+### Use the prepared Linode for CPU development
+
+After **Start simulation** finishes preparing a Linode, open **Advanced** and
+choose **Copy SSH command**. Paste that command into a terminal while leaving
+zLab and the managed session open. The command uses zLab's verified host key
+and per-instance SSH identity to open the prepared workspace. The Linode
+native-cpu deployment builds `datapump-worker` and
+`build/lab/triad_receiver_probe`; it also includes the bounded native
+regression and manual-case drivers. The editable `_tests-RobustModem.md` file
+is deliberately excluded. You can run a brief relative regression that
+generates its own fixed inputs:
+
+```sh
+cd /workspace/pump-lab
+cmake --build build/lab --target triad_receiver_probe \
+  --parallel "$(python3 -B tools/build_capacity.py)"
+build/lab/triad_receiver_probe describe --backend cpu \
+  > /tmp/linode-cpu-description.json
+python3 tools/triad_abbreviated.py \
+  --probe build/lab/triad_receiver_probe --device cpu \
+  --benchmark-deadline-ms 60000 --output /tmp/triad-abbreviated.json
+```
+
+The unbaselined abbreviated report records observations for a later matched
+comparison. Add `--baseline PATH` when repeating it against an applicable
+prior native report. It does not test communication sensitivity or establish
+complete-receiver capacity. For a selected manual calibration case, transfer
+an authorized case-list file over the verified SSH connection, then run:
+
+```sh
+python3 tools/triad_manual_cases.py \
+  --case-list /path/to/authorized-cases.md --case-index N \
+  --probe build/lab/triad_receiver_probe \
+  --output /tmp/linode-case-N.json
+```
+
+The full case list is still parsed and validated. Follow the [complete-work calibration workflow](../docs/robust-manual-capacity.md)
+for its required inputs, measurements, sensitivity trials and interpretation.
+Remote Linode results characterize that cloud allocation. Local calibration
+and local complete-receiver capacity claims still require measurements on the
+target computer. Retrieve results before terminating the instance. When you
+are ready to delete it, choose **End simulation** and approve termination.
+zLab removes its managed SSH material after Linode confirms deletion.
+
+The main controls keep the selected provider and compute visible while setup
+runs. Selecting an existing owned resource lets you retry worker setup.
+**Advanced** contains SSH and deployment receipts alongside optional settings.
+
+Use **End simulation** during setup or while the simulation is open.
+For RunPod, closing the simulation browser tab also starts pod cleanup.
+Reloading starts a fresh
+simulation with default settings on the same resource. Loading modem settings
 inside a simulation keeps that worker in Simulation. **Audio error** opens
 at **Default**, and a loaded explicit allowance retains its value.
 **Robust setup** shows compute-host CPU, RAM, GPU and VRAM history.
 Watch the selected row
 change to **Terminating** and the status confirm termination. If termination
-fails, select the affected pod and retry with **End simulation**.
+fails, select the affected resource and retry with **End simulation**.
 
 For DATA bits of at least a minute, the Console waterfall uses the first bit's
 duration for its time span and scrolls through later receiver samples once full.
@@ -72,14 +208,16 @@ In the simulation, choose a **Carrier** preset or enter a frequency with
 units, such as `1850 Hz`. Presets are calculated for the current **Shift**.
 The receiver uses Carrier minus Shift as its audio frequency.
 
-The pod list shows active and pending work. The lab removes confirmed
-closed rows. When a pod is absent from the current account and its deletion
-is unconfirmed, the lab keeps the underlying ownership record and resumes
-termination if the exact pod reappears. Closing
-the lab waits briefly for cleanup. If a pod or connection is still pending,
-the window offers to close while keeping the saved cleanup record.
+The resource list shows active and pending work. zLab keeps the ownership
+record when the provider cannot confirm deletion. For Linodes, it saves your
+termination approval for the named instance so it can resume an interrupted
+request after restart. Older pending requests without approval require your
+confirmation before zLab sends a deletion request. Once the provider confirms
+termination, zLab retires the managed SSH files and removes the row. If a
+cleanup or local connection is still pending when you quit, the window offers
+to close with the cleanup record saved.
 
-Secure Cloud is the default. zLab prefers CPU pods with reported stock, at
+For RunPod, Secure Cloud is the default. zLab prefers CPU pods with reported stock, at
 least 32 vCPUs, and at least 128 GB of RAM. It checks the supported power-of-two
 sizes separately and prefers RunPod's faster CPU5 flavors when available. Within
 that ranking, larger vCPU counts come first and lower hourly prices break ties.
@@ -101,7 +239,7 @@ choose another option. Choices with confirmed stock precede choices with
 unknown stock. Multi-GPU options require stock for the exact count.
 The receiver currently uses one GPU per session on a multi-GPU pod.
 
-**Start simulation** checks the selected hardware, count and tier again when creating a pod. If stock
+**Start simulation** checks the selected hardware, count, region and plan again when creating an instance. If stock
 is **none**, the app stops before confirmation. Otherwise, review the fresh
 stock, price, image and deadline in the confirmation dialog. Stock can change
 before RunPod places the request. A recognized capacity rejection prompts a
@@ -109,7 +247,7 @@ catalog refresh. Billing and field-validation rejections report the provider's
 reason when recognized. The final rate can include storage. For full SSH,
 the image must support the official RunPod `/start.sh` startup script and a
 directly reachable SSH port. The default image supplies this startup.
-The GPU and CPU catalogs load independently.
+The RunPod GPU and CPU catalogs load independently.
 [GPU catalog](https://docs.runpod.io/api-reference-v2/catalog/list-gpu-types)
 and [CPU catalog](https://docs.runpod.io/api-reference-v2/catalog/list-cpu-types).
 
@@ -129,7 +267,7 @@ Its command preflight received HTTP 403 from `POST /v2/pods/{id}/exec` before
 GPU inspection or deployment. The cause of that denial remains unknown. The
 GUI uses SSH for both deployment and simulation.
 
-The controller records its owned pod and queue requests under
+The controller records RunPod pod and queue requests under
 `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/jobs.json`.
 The controller reconciles requests after a lost response or restart. New pods
 default to a 36-hour deadline (2,160 minutes). Set a shorter deadline in
@@ -164,7 +302,7 @@ mismatch stops the connection. Verify the pod, current endpoint and current
 key independently before using a replacement file. The shared GUI sends the
 remote draft and test modem key material to the pod. Use a designated lab key.
 
-For an already running pod, [deploy.py](deploy.py) can upload an allowlisted
+For an already running RunPod pod, [deploy.py](deploy.py) can upload an allowlisted
 source bundle and build the worker. It needs Python, CMake, a C++ toolchain,
 OpenSSL development headers and the relevant native build dependencies on the
 pod; CUDA additionally needs a compatible toolkit, driver and C++11-ABI
@@ -180,7 +318,7 @@ python3 _zLab/deploy.py --host POD_HOST --port POD_PORT --user root \
   --known-hosts "$HOME/.ssh/known_hosts"
 ```
 
-The GUI uses the same GPU-capable deployment for CPU and GPU jobs. The deployer checks whether
+The RunPod GUI uses the same GPU-capable deployment for CPU and GPU pods. The deployer checks whether
 CUDA can discover the device inside the worker's socket restrictions. With
 compatible CUDA and LibTorch prerequisites and a passing probe it builds the
 CUDA worker. If CUDA is unavailable there, it builds the native Vulkan worker
@@ -289,6 +427,7 @@ For local, non-billable component checks:
 
 ```sh
 python3 -m unittest discover -s _zLab -p 'test_runpod.py' -v
+python3 -m unittest discover -s _zLab -p 'test_linode.py' -v
 LAB_ISOLATED_X11=1 xvfb-run -a python3 -m unittest discover -s _zLab -p 'test_gui_integration.py' -v
 python3 -m unittest discover -s _zLab -p 'test_host_identity.py' -v
 python3 -m unittest discover -s _zLab -p 'test_worker_relay.py' -v
@@ -301,14 +440,14 @@ python3 -m unittest discover -s _zLab -p 'test_deploy.py' -v
 The browser bridge checks require permission to bind a loopback listener. The
 native-worker smoke check uses `build/dev-cli-web/datapump-worker` if available;
 build it as described below for that coverage. The fake provider and SSH tests
-do not contact RunPod or establish remote execution.
+do not contact cloud APIs or establish remote execution.
 
 The controller requires Python Tk. Its dark-themed window rendered locally
 under Xvfb using temporary distribution Tk libraries; nine nested-X11 GUI tests
 covered masked key entry, status clipboard and catalog error/partial-load
 handling, and a real Firefox view was checked. The ordinary Python environment
 used for development did not have Tk installed. These GUI checks do not qualify
-a physical audio device or a RunPod session. The source bundle is distinct
+a physical audio device or a managed cloud session. The source bundle is distinct
 from the local controller and its browser assets.
 
 One local CPU test exercised the relay and native worker with a strong, simple
@@ -431,7 +570,7 @@ Use `plan` for a cheap geometry check, `admission` for one scored bit or silence
 and `message` for the probe's fixed complete-message fixture. Preserve the
 distinction between a physical erasure, a resource refusal and an interrupted job.
 
-## Picking compute and running a pod
+## Historical RunPod performance and operating notes
 
 One pod with one native receiver is sufficient for one admitted job. The GUI
 can run locally without renting a pod during development. Additional pods can

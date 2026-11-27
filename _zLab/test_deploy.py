@@ -28,7 +28,7 @@ class DeployTests(unittest.TestCase):
         self.known.write_text('example ssh-ed25519 AAAA\n')
         self.calls = []
 
-    def bundle(self, root, dest):
+    def bundle(self, root, dest, **kwargs):
         dest.write_bytes(b'test archive')
 
     def runner(self, argv, **kwargs):
@@ -210,7 +210,8 @@ echo PUMP_LAB_MODE=vulkan
         # checks branching/arguments, not CUDA availability or a real build.
         cases = itertools.product(('cuda', 'vulkan', 'gpu'), ('simulation', 'live'),
                                   ('ninja', 'make', 'existing-make'))
-        for requested, profile, generator_case in (*cases, ('cuda-unavailable', 'simulation', 'ninja'),
+        for requested, profile, generator_case in (*cases, ('native-cpu', 'simulation', 'ninja'),
+                                                    ('cuda-unavailable', 'simulation', 'ninja'),
                                                     ('gpu-no-icd-or-toolkit', 'simulation', 'ninja'),
                                                     ('gpu-no-icd-or-toolkit', 'live', 'ninja')):
             cuda_unavailable = requested == 'cuda-unavailable'
@@ -221,7 +222,7 @@ echo PUMP_LAB_MODE=vulkan
                 home.mkdir(mode=0o700)
                 archive = home / 'source.tar.gz'
                 sizing = (b"import sys\nassert sys.argv[1] == '--runpod'\n"
-                          b"print({'vulkan': 12, 'cuda': 8}[sys.argv[2]])\n")
+                          b"print({'vulkan': 12, 'cuda': 8, 'cpu': 24}[sys.argv[2]])\n")
                 with tarfile.open(archive, 'w:gz') as tar:
                     info = tarfile.TarInfo('source-file')
                     info.size = 1
@@ -256,9 +257,10 @@ if [ "$1" = -S ]; then
 fi
 if [ "$1" = --build ]; then
   mkdir -p build/lab
-  for arg do worker=$arg; done
-  printf '#!/bin/sh\\necho no-socket-boundary\\n' > "build/lab/$worker"
-  chmod +x "build/lab/$worker"
+  for target in datapump-worker datapump-lab-worker triad_receiver_probe; do
+    printf '#!/bin/sh\\necho no-socket-boundary\\n' > "build/lab/$target"
+    chmod +x "build/lab/$target"
+  done
 fi
 ''')
                 cmake.chmod(0o755)
@@ -288,6 +290,9 @@ def compiled_with_cxx11_abi(): return True
                 for name in ('sh', 'tar', 'gzip', 'sha256sum', 'chmod', 'mkdir', 'dirname', 'readlink', 'timeout', 'sed', 'echo'):
                     (bin_dir / name).symlink_to(shutil.which(name))
                 (bin_dir / 'python3').symlink_to(sys.executable)
+                apt_get = bin_dir / 'apt-get'
+                apt_get.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$APT_LOG"\n')
+                apt_get.chmod(0o755)
                 # A retry's prior CMake cache survives extraction. Seed it
                 # immediately after the mocked source unpack, matching that
                 # remote lifecycle rather than creating it before upload.
@@ -305,7 +310,7 @@ fi
                     (bin_dir / 'ninja').unlink()
                 env = {**os.environ, 'PATH': str(bin_dir),
                        'PYTHONPATH': str(home), 'CMAKE_LOG': str(log),
-                       'FAKE_GENERATOR': generator_case}
+                       'APT_LOG': str(home / 'apt.log'), 'FAKE_GENERATOR': generator_case}
                 toolkit = home / 'toolkit'
                 nvcc = toolkit / 'bin' / 'nvcc'
                 for key in ('CUDACXX', 'CUDA_HOME', 'CUDA_PATH', 'CUDAToolkit_ROOT'):
@@ -376,18 +381,27 @@ for arg do package=$arg; done
                     continue
                 self.assertEqual(run.returncode, 0, output)
                 expected_stages = ['upload', 'unpack', 'environment']
-                if vulkan:
+                if vulkan or mode == 'native-cpu':
                     expected_stages.append('dependencies')
                 expected_stages.extend(('configure', 'build-plan', 'compile', 'check'))
                 self.assertEqual([line.partition('=')[2] for line in output.splitlines()
                                   if line.startswith('PUMP_LAB_STAGE=')], expected_stages)
                 flags = log.read_text()
-                backend = 'vulkan' if vulkan else 'cuda'
-                jobs = {'vulkan': 12, 'cuda': 8}[backend]
+                backend = 'cpu' if mode == 'native-cpu' else 'vulkan' if vulkan else 'cuda'
+                jobs = {'vulkan': 12, 'cuda': 8, 'cpu': 24}[backend]
                 selected_generator = 'Unix Makefiles' if generator_case != 'ninja' else 'Ninja'
                 self.assertIn(f'-G {selected_generator}', flags)
                 self.assertIn(f'--build build/lab --parallel {jobs} --target ', flags)
                 self.assertIn('-DDATAPUMP_COMPILER_CACHE=ON', flags)
+                if mode == 'native-cpu':
+                    self.assertIn('-DDATAPUMP_TRIAD_TENSOR=OFF', flags)
+                    self.assertIn('-DDATAPUMP_TRIAD_VULKAN=OFF', flags)
+                    self.assertIn('--target datapump-worker triad_receiver_probe', flags)
+                    self.assertIn('build-essential', (home / 'apt.log').read_text())
+                    self.assertTrue((home / 'build/lab/triad_receiver_probe').is_file())
+                    self.assertIn('PUMP_LAB_DEVICE=CPU-only worker', output)
+                else:
+                    self.assertNotIn('triad_receiver_probe', flags)
                 self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}\n', output)
                 self.assertIn(f'PUMP_LAB_BUILD_GENERATOR={selected_generator}', output)
                 self.assertIn('PUMP_LAB_CXX_COMPILER=/usr/bin/c++', output)
@@ -407,6 +421,9 @@ for arg do package=$arg; done
                 receipt = json.loads((home / '.worker-receipt.json').read_text())
                 self.assertEqual(receipt['request']['mode'], mode)
                 self.assertEqual(receipt['backend'], backend)
+                if mode == 'native-cpu':
+                    self.assertEqual(receipt['probe_sha256'], hashlib.sha256(
+                        (home / 'build/lab/triad_receiver_probe').read_bytes()).hexdigest())
                 if mode == 'vulkan' or not has_toolkit:
                     self.assertFalse((home / 'build/lab/probe-cuda-worker').exists())
                 self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}', receipt['text'].splitlines())
@@ -445,46 +462,50 @@ for arg do package=$arg; done
                     self.assertIn('-DCUDA_TOOLKIT_ROOT_DIR=' + str(toolkit), flags)
                     self.assertIn('-DCUDAToolkit_ROOT=' + str(toolkit), flags)
                 else:
-                    self.assertIn('-DDATAPUMP_TRIAD_VULKAN=ON', flags)
-                    self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', flags)
                     self.assertIn('-DDATAPUMP_TRIAD_TENSOR=OFF', flags)
-                    self.assertNotIn('-DDATAPUMP_TRIAD_VULKAN=OFF', flags)
-                    self.assertIn('PUMP_LAB_DEVICE=Vulkan support compiled (runtime device selection pending)', output)
-                    expected_loader = str(loader) if has_toolkit and generator_case == 'ninja' else ''
-                    self.assertIn('-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=' + expected_loader + ' ', flags)
-                    manifest = home / 'build/lab/nvidia-headless-icd.json'
-                    vendors = manifest.parent / 'nvidia-opencl-vendors'
-                    if no_nvidia_icd:
-                        self.assertFalse(manifest.exists())
-                        self.assertFalse(vendors.exists())
-                        strict = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
-                                                 capture_output=True, timeout=5)
-                        self.assertNotEqual(strict.returncode, 0)
-                        self.assertIn(b'Missing NVIDIA Vulkan ICD manifest', strict.stderr)
-                        optional_env = dict(env, PUMP_LAB_OPTIONAL_NVIDIA_ICD='1')
-                        optional = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home,
-                                                  env=optional_env, capture_output=True, timeout=5)
-                        self.assertEqual(optional.returncode, 0, optional.stderr)
+                    if backend == 'cpu':
+                        self.assertIn('-DDATAPUMP_TRIAD_VULKAN=OFF', flags)
+                        self.assertNotIn('-DDATAPUMP_TRIAD_VULKAN=ON', flags)
                     else:
-                        self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
-                        self.assertEqual(json.loads(manifest.read_text())['ICD'],
-                                         {'library_path': 'libEGL_nvidia.so.0', 'api_version': '1.4.312'})
-                        self.assertEqual(vendors.stat().st_mode & 0o777, 0o700)
-                        self.assertEqual((vendors / 'nvidia.icd').read_text(), 'libnvidia-opencl.so.1\n')
-                        self.assertEqual((vendors / 'nvidia.icd').stat().st_mode & 0o777, 0o600)
-                        original = manifest.read_bytes()
-                        resumed = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
-                                                 capture_output=True, timeout=5)
-                        self.assertEqual(resumed.returncode, 0, resumed.stderr)
-                        self.assertEqual(manifest.read_bytes(), original)
-                        source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
-                                                                'api_version': '1.4.313'}}))
-                        incompatible = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
-                                                      capture_output=True, timeout=5)
-                        self.assertNotEqual(incompatible.returncode, 0)
-                        self.assertIn(b'manifest does not match', incompatible.stderr)
-                        self.assertEqual(manifest.read_bytes(), original)
-                        self.assertEqual(list(manifest.parent.glob('.icd-*')), [])
+                        self.assertIn('-DDATAPUMP_TRIAD_VULKAN=ON', flags)
+                        self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', flags)
+                        self.assertNotIn('-DDATAPUMP_TRIAD_VULKAN=OFF', flags)
+                        self.assertIn('PUMP_LAB_DEVICE=Vulkan support compiled (runtime device selection pending)', output)
+                        expected_loader = str(loader) if has_toolkit and generator_case == 'ninja' else ''
+                        self.assertIn('-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=' + expected_loader + ' ', flags)
+                        manifest = home / 'build/lab/nvidia-headless-icd.json'
+                        vendors = manifest.parent / 'nvidia-opencl-vendors'
+                        if no_nvidia_icd:
+                            self.assertFalse(manifest.exists())
+                            self.assertFalse(vendors.exists())
+                            strict = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                                                     capture_output=True, timeout=5)
+                            self.assertNotEqual(strict.returncode, 0)
+                            self.assertIn(b'Missing NVIDIA Vulkan ICD manifest', strict.stderr)
+                            optional_env = dict(env, PUMP_LAB_OPTIONAL_NVIDIA_ICD='1')
+                            optional = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home,
+                                                      env=optional_env, capture_output=True, timeout=5)
+                            self.assertEqual(optional.returncode, 0, optional.stderr)
+                        else:
+                            self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+                            self.assertEqual(json.loads(manifest.read_text())['ICD'],
+                                             {'library_path': 'libEGL_nvidia.so.0', 'api_version': '1.4.312'})
+                            self.assertEqual(vendors.stat().st_mode & 0o777, 0o700)
+                            self.assertEqual((vendors / 'nvidia.icd').read_text(), 'libnvidia-opencl.so.1\n')
+                            self.assertEqual((vendors / 'nvidia.icd').stat().st_mode & 0o777, 0o600)
+                            original = manifest.read_bytes()
+                            resumed = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                                                     capture_output=True, timeout=5)
+                            self.assertEqual(resumed.returncode, 0, resumed.stderr)
+                            self.assertEqual(manifest.read_bytes(), original)
+                            source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
+                                                                    'api_version': '1.4.313'}}))
+                            incompatible = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                                                          capture_output=True, timeout=5)
+                            self.assertNotEqual(incompatible.returncode, 0)
+                            self.assertIn(b'manifest does not match', incompatible.stderr)
+                            self.assertEqual(manifest.read_bytes(), original)
+                            self.assertEqual(list(manifest.parent.glob('.icd-*')), [])
 
     def test_runtime_cgroup_v2_hierarchical_limits(self):
         namespace = {'__name__': 'receipt_test'}
@@ -751,6 +772,41 @@ sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
         deployment.unlink()
         self.assertNotEqual(invoke().returncode, 0)
         self.assertEqual((destination / 'attempts').read_text(), 'build\n' * 4)
+
+    def test_previous_explicit_vulkan_builder_reuses_worker_and_updates_receipt(self):
+        destination = self.root / 'managed-vulkan'
+        legacy_builder = 'e1e3dd5cf08bf30ebb9375f8453b3cd5a5902f61e1b753241b4b91c49e64ad4c'
+        current_builder = 'a' * 64
+        wrapper = deploy.REMOTE_DEPLOY.replace(
+            "directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
+            'directory = ' + repr(str(destination)))
+        wrapper = wrapper.replace("'builder':hashlib.sha256(BUILD.encode()).hexdigest()",
+                                  "'builder':'" + current_builder + "'")
+        data = b'legacy Vulkan source'
+        digest = hashlib.sha256(data).hexdigest()
+        destination.mkdir(mode=0o700)
+        worker = destination / 'build/lab/datapump-worker'
+        worker.parent.mkdir(parents=True)
+        worker.write_text('#!/bin/sh\nexit 0\n')
+        worker.chmod(0o700)
+        worker_hash = hashlib.sha256(worker.read_bytes()).hexdigest()
+        old_request = {'source': digest, 'mode': 'vulkan', 'profile': 'simulation',
+                       'builder': legacy_builder}
+        (destination / '.deployment.json').write_text(json.dumps(old_request))
+        old_text = 'PUMP_LAB_MODE=vulkan'
+        (destination / '.worker-receipt.json').write_text(json.dumps({
+            'request': old_request, 'text': old_text, 'backend': 'vulkan',
+            'worker_sha256': worker_hash,
+        }))
+        code = "BUILD = ''\nRESOURCES = \"print('fresh resources')\"\n" + wrapper
+        result = subprocess.run([sys.executable, '-c', code, digest, 'vulkan', 'simulation', str(len(data))],
+                                input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(b'PUMP_LAB_STAGE=reuse', result.stdout)
+        self.assertEqual(json.loads((destination / '.deployment.json').read_text())['builder'], current_builder)
+        receipt = json.loads((destination / '.worker-receipt.json').read_text())
+        self.assertEqual(receipt['request']['builder'], current_builder)
+        self.assertEqual(receipt['backend'], 'vulkan')
 
     def test_remote_wrapper_rejects_unexpected_built_backend(self):
         destination = self.root / 'managed'

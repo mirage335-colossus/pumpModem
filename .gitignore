@@ -17,8 +17,11 @@ __pycache__/
 # Locally copied application binary; build outputs belong under build/.
 /datapump-gui
 
-# The standalone RunPod Lab key, its staging files and the migration source.
+# zLab's private credential directory and supported pre-migration paths.
+/Cloud_API_Keys/
 /runpod-api-key
 /.runpod-api-key-*
 /_zLab/runpod-api-key
 /_zLab/.runpod-api-key-*
+/linode-api-key
+/.linode-api-key-*

@@ -1,6 +1,7 @@
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from pathlib import Path
 
@@ -781,12 +782,15 @@ class Tests(unittest.TestCase):
         controller = App.__new__(App)
         controller.dropdown, controller.compute, controller.status = {}, Value(), Value()
         controller.choices, controller.cloud, controller.preferred_compute = [], Value(), None
-        controller.key = Value()
+        account = SimpleNamespace(name='RunPod', key=Value())
+        account.key.set('test-key')
+        controller.accounts = {'runpod': account}
+        controller.credentials = lambda: {'runpod': 'test-key'}
         controller.exit_after = None
-        controller.key.set('test-key')
         controller.cloud.set('SECURE')
         controller.compute.set('')
-        controller.background = lambda work, done, _failed=None: done(work(Catalog()))
+        controller.background = lambda work, done, _failed=None, **_kwargs: done(
+            work({'runpod': Catalog()}))
         controller.catalog()
         self.assertEqual(len(controller.choices), 1)
         self.assertEqual(controller.compute.value, controller.dropdown['values'][0])
@@ -810,15 +814,22 @@ class Tests(unittest.TestCase):
         controller = App.__new__(App)
         controller.list = List()
         controller.session_record = None
-        controller.key_entry = Mock()
+        controller.creating_name = None
+        controller.ending_names = set()
         controller.records = [{'name':'first'}, {'name':'selected'}]
         controller.known_hosts = Mock()
         controller.known_hosts.get.return_value = ''
-        controller.state = Records([{'name':'selected'}, {'name':'first'}])
+        state = Records([{'name':'selected'}, {'name':'first'}])
+        controller.accounts = {'runpod': SimpleNamespace(name='RunPod', state=state,
+                                                          key=Mock(), entry=Mock(),
+                                                          saved_key=None)}
+        controller.copy_ssh_button = Mock()
+        controller.restart_button = Mock()
+        controller.shell_command = ''
         controller.refresh()
         self.assertEqual(controller.list.curselection(), (0,))
         self.assertEqual(controller.records[0]['name'], 'selected')
-        controller.state.records = [{'name':'first'}]
+        state.records = [{'name':'first'}]
         controller.refresh()
         self.assertEqual(controller.list.curselection(), ())
 

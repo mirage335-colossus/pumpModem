@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -9,8 +10,17 @@ import bundle
 
 
 class BundleTest(unittest.TestCase):
+    def assert_cloud_key_directory_is_ignored(self, root):
+        result = subprocess.run(
+            ['git', 'check-ignore', '--no-index', '-q', 'Cloud_API_Keys/linode-api-key'],
+            cwd=root,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, 'Cloud_API_Keys key paths must be gitignored')
+
     def test_allowlisted_deterministic_archive_and_manifest(self):
         root = Path(__file__).resolve().parent.parent
+        self.assert_cloud_key_directory_is_ignored(root)
         with tempfile.TemporaryDirectory() as directory:
             first, second = Path(directory) / 'one.tar.gz', Path(directory) / 'two.tar.gz'
             info = bundle.create_bundle(root, first)
@@ -34,6 +44,8 @@ class BundleTest(unittest.TestCase):
                 self.assertIn('third_party/ldpc/tables.hpp', names)
                 self.assertNotIn('_zLab/runpod.py', names)
                 self.assertNotIn('_tests-RobustModem.md', names)
+                self.assertNotIn('tools/triad_manual_cases.py', names)
+                self.assertFalse(any(name.startswith('Cloud_API_Keys/') for name in names))
                 self.assertTrue(all(m.isfile() and not m.name.startswith('/')
                                     and '..' not in Path(m.name).parts for m in members))
                 manifest_bytes = archive.extractfile('BUNDLE-MANIFEST.json').read()
@@ -50,6 +62,21 @@ class BundleTest(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         with self.assertRaises(bundle.BundleError):
             bundle.create_bundle(root, root / '_zLab' / 'archive.tar.gz')
+
+    def test_cpu_calibration_tools_without_local_inputs(self):
+        root = Path(__file__).resolve().parent.parent
+        self.assert_cloud_key_directory_is_ignored(root)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'cpu.tar.gz'
+            bundle.create_bundle(root, path, cpu_research=True)
+            with tarfile.open(path) as archive:
+                names = set(archive.getnames())
+                for driver in ('triad_abbreviated', 'triad_manual_cases', 'triad_case_suite', 'triad_cpu'):
+                    self.assertIn(f'tools/{driver}.py', names)
+                for private in ('_tests-RobustModem.md', 'runpod-api-key', 'linode-api-key',
+                                '_zLab/linode.py'):
+                    self.assertNotIn(private, names)
+                self.assertFalse(any(name.startswith('Cloud_API_Keys/') for name in names))
 
 
 if __name__ == '__main__':

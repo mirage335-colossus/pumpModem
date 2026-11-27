@@ -1,13 +1,9 @@
-"""Create per-pod SSH credentials before RunPod starts its official image.
-
-The public host-key fingerprint stays in the ownership record. Its private key
-is supplied only in the HTTPS create payload, and is removed from the container
-environment before the image's startup script exports that environment.
-"""
+"""Prepare independent client and host SSH keys for managed lab instances."""
 from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -55,7 +51,20 @@ def _keypair(path):
     return b' '.join(public[:2]).decode('ascii'), wire
 
 
-def prepare_bootstrap(state_dir, name, image):
+def _linode_payload(client_public, host_public, private_host):
+    # JSON is valid YAML. Encoding it preserves OpenSSH's multiline private key.
+    # Linode installs authorized_keys for root and passes user_data to cloud-init.
+    config = {
+        'disable_root': False,
+        'ssh_pwauth': False,
+        'ssh_keys': {'ed25519_private': private_host.decode('ascii'), 'ed25519_public': host_public},
+    }
+    user_data = ('#cloud-config\n' + json.dumps(config) + '\n').encode('ascii')
+    return {'authorized_keys': [client_public],
+            'metadata': {'user_data': base64.b64encode(user_data).decode('ascii')}}
+
+
+def prepare_bootstrap(state_dir, name, image, *, provider='runpod'):
     """Return ownership fields and create fields, without retaining a host secret.
 
     Persist the returned ownership fields before sending the create request.
@@ -63,7 +72,9 @@ def prepare_bootstrap(state_dir, name, image):
     identity for uncertain requests until their provider ownership is resolved.
     """
     if not isinstance(image, str) or not image.strip():
-        raise ValueError('Enter a container image for SSH setup')
+        raise ValueError('Enter an image for SSH setup')
+    if provider not in ('runpod', 'linode'):
+        raise ValueError('Unknown lab provider for SSH setup')
     directory = Path(state_dir).absolute()
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     identity_name = _identity_name(name)
@@ -72,19 +83,22 @@ def prepare_bootstrap(state_dir, name, image):
         with tempfile.TemporaryDirectory(prefix='.bootstrap-', dir=directory) as temporary:
             work = Path(temporary)
             client_public, _ = _keypair(work / 'client')
-            _, host_wire = _keypair(work / 'host')
+            host_public, host_wire = _keypair(work / 'host')
             private_host = (work / 'host').read_bytes()
             if not 0 < len(private_host) < 8192:
                 raise ValueError('Invalid generated SSH host key')
             fingerprint = 'SHA256:' + base64.b64encode(hashlib.sha256(host_wire).digest()).decode('ascii').rstrip('=')
+            if provider == 'linode':
+                payload = _linode_payload(client_public, host_public, private_host)
+            else:
+                payload = {'entrypoint': ['/bin/bash', '-c'], 'cmd': [STARTUP],
+                           'env': {'PUBLIC_KEY': client_public,
+                                   'PUMP_LAB_HOST_KEY_B64': base64.b64encode(private_host).decode('ascii')}}
             # An existing identity means this name already belongs to an earlier
             # request. Never rotate it during an uncertain-create retry.
             os.link(work / 'client', identity_name, dst_dir_fd=fd, follow_symlinks=False)
             os.fsync(fd)
             record = {'ssh_fingerprint': fingerprint, 'ssh_identity': str(directory / identity_name)}
-            payload = {'entrypoint': ['/bin/bash', '-c'], 'cmd': [STARTUP],
-                       'env': {'PUBLIC_KEY': client_public,
-                               'PUMP_LAB_HOST_KEY_B64': base64.b64encode(private_host).decode('ascii')}}
             return record, payload
     finally:
         os.close(fd)

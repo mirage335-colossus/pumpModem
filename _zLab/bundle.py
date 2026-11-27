@@ -24,6 +24,8 @@ _native = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_native)
 BundleError = _native.BundleError
 _LOCK = threading.Lock()
+_CPU_CALIBRATION_TOOLS = ('tools/triad_manual_cases.py', 'tools/triad_case_suite.py',
+                          'tools/triad_cpu.py')
 _EXTRA_FILES = (
     "_zLab/worker_relay.py",
     "_zLab/probe_cuda_worker.cpp",
@@ -50,7 +52,7 @@ _EXTRA_FILES = (
 )
 
 
-def create_bundle(root: Path | str, destination: Path | str) -> dict[str, object]:
+def create_bundle(root: Path | str, destination: Path | str, *, cpu_research=False) -> dict[str, object]:
     """Create an exclusive private archive outside root with a content manifest.
 
     The native collector reads the extra exact entries with its descriptor-based
@@ -63,6 +65,8 @@ def create_bundle(root: Path | str, destination: Path | str) -> dict[str, object
             # and may contain local experiment inputs.
             _native._EXACT_FILES = tuple(path for path in original
                                          if path != "_tests-RobustModem.md") + _EXTRA_FILES
+            if cpu_research:
+                _native._EXACT_FILES += _CPU_CALIBRATION_TOOLS
             return _native.create_bundle(root, destination)
         finally:
             _native._EXACT_FILES = original

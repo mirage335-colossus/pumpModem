@@ -38,10 +38,10 @@ For the 2 mW and 100 mW HF alarm study, start with the
 The [editable simulation list](../_tests-RobustModem-HF-simulations-2026-11-18.md)
 gives the settings, bit durations and decisions for each case.
 
-For the incomplete standalone simulator, start with the
-[RunPod lab guide](../_zLab/README.md). It describes the current simulation
-bridge and its limitations, and maps the requested finite Live/Duplex audio path
-to the native code. The
+For managed Linode CPU and RunPod GPU simulation and development work, start
+with the [zLab guide](../_zLab/README.md). It describes the shared simulation
+bridge and its limitations, and maps the requested finite Live/Duplex audio
+path to the native code. The
 [deployment recipe](triad-performance.md#run-a-native-simulation-on-runpod)
 and [GPU operation counters](triad-gpu-optimization.md#which-arithmetic-ran-in-a-remote-simulation)
 cover the measured compute paths.

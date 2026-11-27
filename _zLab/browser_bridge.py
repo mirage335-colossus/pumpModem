@@ -479,7 +479,7 @@ class Handler(_preview.Handler):
                     # Keep the lab shell's native controls and dialogs dark,
                     # independently of the user's browser/OS preference.
                     data = data.replace('</style>', ':root { color-scheme: dark; }\n</style>', 1)
-                    data = data.replace('Native Data Pump worker', 'RunPod Robust live/duplex' if self.server.live else 'RunPod Robust simulation')
+                    data = data.replace('Native Data Pump worker', 'zLab Robust live/duplex' if self.server.live else 'zLab Robust simulation')
                     data = data.replace('Enable microphone and audio', 'Audio handled by local companion' if self.server.live else 'Live audio unavailable')
                     if self.server.live:
                         data = data.replace('<p id="status"', '<p id="lab-resources">Local audio resources: awaiting receipt</p><p id="status"')

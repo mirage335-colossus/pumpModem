@@ -361,7 +361,7 @@ class BrowserBridgeTests(unittest.TestCase):
 
     def test_loopback_ui_and_simulation_peer(self):
         self.assertTrue(self.base.startswith('http://127.0.0.1:'))
-        self.assertIn(b'RunPod Robust simulation', self.request('/'))
+        self.assertIn(b'zLab Robust simulation', self.request('/'))
         script = self.request('/tools/preview.mjs')
         self.assertIn(b'audio.disabled=true;audio.title=', script)
         worker = self.start_peer()

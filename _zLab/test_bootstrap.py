@@ -39,6 +39,37 @@ class BootstrapTests(unittest.TestCase):
         self.assertFalse(private.exists())
         self.assertTrue(Path(other_record['ssh_identity']).exists())
 
+    def test_linode_cloud_init_matches_pinned_key_and_keeps_client_identity_local(self):
+        record, payload = bootstrap.prepare_bootstrap(self.directory, self.name, 'linode/ubuntu24.04',
+                                                      provider='linode')
+        self.assertEqual(set(payload), {'authorized_keys', 'metadata'})
+        identity = Path(record['ssh_identity'])
+        self.assertEqual([identity], list(self.directory.iterdir()))
+        self.assertEqual(identity.stat().st_mode & 0o777, 0o600)
+        client_public = subprocess.check_output(['ssh-keygen', '-y', '-f', identity], text=True)
+        self.assertEqual(payload['authorized_keys'], [' '.join(client_public.split()[:2])])
+        user_data = base64.b64decode(payload['metadata']['user_data'], validate=True).decode('ascii')
+        header, config_text = user_data.split('\n', 1)
+        self.assertEqual(header, '#cloud-config')
+        config = json.loads(config_text)
+        self.assertIs(config['disable_root'], False)
+        self.assertIs(config['ssh_pwauth'], False)
+        host_keys = config['ssh_keys']
+        self.assertNotEqual(identity.read_text(), host_keys['ed25519_private'])
+        self.assertNotIn(identity.read_text(), user_data)
+        self.assertEqual(set(record), {'ssh_identity', 'ssh_fingerprint'})
+        host_path = self.directory / 'fixture-host'
+        host_path.write_text(host_keys['ed25519_private'])
+        host_path.chmod(0o600)
+        host_public = subprocess.check_output(['ssh-keygen', '-y', '-f', host_path], text=True)
+        self.assertEqual(' '.join(host_public.split()[:2]), host_keys['ed25519_public'])
+        fingerprint = subprocess.check_output(['ssh-keygen', '-lf', host_path], text=True).split()[1]
+        self.assertEqual(fingerprint, record['ssh_fingerprint'])
+        with self.assertRaises(FileExistsError):
+            bootstrap.prepare_bootstrap(self.directory, self.name, 'linode/ubuntu24.04', provider='linode')
+        bootstrap.forget_bootstrap(dict(record, name=self.name), self.directory)
+        self.assertFalse(identity.exists())
+
     def test_startup_installs_expected_key_and_removes_secret_from_environment(self):
         record, payload = self.prepare()
         root = self.directory / 'container'

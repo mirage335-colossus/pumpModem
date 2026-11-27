@@ -196,7 +196,7 @@ export async function boot(document,environment=window,frontend=createHostedFron
             try{
                 await request('/stop',empty);
                 close();
-                report(managed?'Simulation ended. The RunPod Lab is terminating the pod.':
+                report(managed?'Simulation ended. zLab is terminating the managed resource.':
                     'Worker stopped. Reload to start a fresh worker.');
             }catch(error){report(error);if(!managed)close();}
         };

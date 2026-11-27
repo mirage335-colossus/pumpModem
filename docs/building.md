@@ -289,7 +289,7 @@ job if Python is unavailable. macOS memory availability is an estimate from
 `vm_stat`; Windows uses the built-in system memory API. No oversubscription is
 assumed from idle time or compiler-cache hits.
 
-The dedicated [RunPod worker deployer](../_zLab/deploy.py) uses the same
+The dedicated [zLab worker deployer](../_zLab/deploy.py) uses the same
 CPU and memory detection with its own build budget. It can use all visible
 logical CPUs within the container's quota. It budgets 1.5 GiB per native
 CPU or Vulkan job, or 3 GiB per CUDA job, after setting aside the larger
@@ -299,6 +299,8 @@ worker build uses Ninja when installed and Unix Makefiles otherwise.
 Retries keep their existing generator. Setup shows the job count while
 compiling. The deployment receipt includes configure and build wall time,
 child CPU time, largest child RSS, and the detected compiler and launcher.
+The managed Linode route uses this CPU-only profile. The managed RunPod route
+retains its GPU-capable worker build.
 
 For direct CMake or maintenance recipe invocations, pass the selector explicitly:
 
@@ -483,8 +485,9 @@ against a matched baseline; they are not absolute capacity results. See the
 [manual capacity contract](robust-manual-capacity.md) for complete work,
 statistical gates and limits, and the [regression guide](triad-performance.md)
 for relative timing. Do not replace the bounded method with full, sustained,
-multi-day, exhaustive, or heavy-calibration campaigns. RunPod may accelerate
-the same method but does not authorize larger experiments.
+multi-day, exhaustive, or heavy-calibration campaigns. Managed Linode CPU and
+RunPod GPU instances can shorten applicable build and measurement work, while
+the same evidence and resource limits continue to apply.
 
 A shared security, codec, audio, or GUI change still needs its applicable
 component checks. Keep their contracts distinct from Robust performance

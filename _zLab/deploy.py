@@ -37,18 +37,18 @@ REMOTE_DIR = '/workspace/pump-lab'
 LIVE_REMOTE_DIR = '/workspace/pump-lab-live'
 DEFAULT_TIMEOUT = 3600
 DEFAULT_MODE = 'gpu'
-BUILD_MODES = ('cpu', 'cuda', 'vulkan', 'gpu')
+BUILD_MODES = ('cpu', 'cuda', 'vulkan', 'gpu', 'native-cpu')
 _STAGE_MESSAGES = {
-    b'upload': 'Uploading the source bundle to RunPod…',
-    b'unpack': 'Verifying and unpacking the RunPod source bundle…',
-    b'environment': 'Checking the RunPod build environment…',
-    b'dependencies': 'Preparing Vulkan dependencies on RunPod…',
+    b'upload': 'Uploading the source bundle to the compute host…',
+    b'unpack': 'Verifying and unpacking the source bundle…',
+    b'environment': 'Checking the remote build environment…',
+    b'dependencies': 'Preparing remote build dependencies…',
     b'dependency-mirror': 'Trying the Ubuntu security mirror for build dependencies…',
-    b'configure': 'Configuring the native worker on RunPod…',
+    b'configure': 'Configuring the native worker…',
     b'build-plan': 'Selecting parallel workers for the native build…',
-    b'compile': 'Compiling the native worker on RunPod…',
-    b'check': 'Checking the built worker on RunPod…',
-    b'reuse': 'Checking the existing worker on RunPod…',
+    b'compile': 'Compiling the native worker…',
+    b'check': 'Checking the built worker…',
+    b'reuse': 'Checking the existing worker…',
 }
 
 # All text interpreted by the remote shell is fixed here or constructed from a
@@ -57,7 +57,7 @@ REMOTE_BUILD = r'''set -eu
 mode=$2
 profile=$3
 unset requested_mode PUMP_LAB_OPTIONAL_NVIDIA_ICD
-case "$mode" in cuda|vulkan|gpu) ;; *) exit 2 ;; esac
+case "$mode" in cuda|vulkan|gpu|native-cpu) ;; *) exit 2 ;; esac
 case "$profile" in
   simulation) directory=/workspace/pump-lab ;;
   live) directory=/workspace/pump-lab-live ;;
@@ -88,6 +88,15 @@ if [ -f "$nvcc" ] && [ -x "$nvcc" ]; then
 elif [ "$mode" = cuda ]; then
   echo "CUDA build requires nvcc. Set CUDACXX or CUDA_HOME to the installed toolkit." >&2
   exit 78
+fi
+if [ "$mode" = native-cpu ]; then
+  requested_mode=native-cpu
+  printf 'PUMP_LAB_STAGE=dependencies\n'
+  command -v apt-get >/dev/null 2>&1 || { echo 'Native CPU builds require apt-get on Ubuntu 24.04.' >&2; exit 78; }
+  timeout -k 10 900 apt-get -o DPkg::Lock::Timeout=90 update
+  DEBIAN_FRONTEND=noninteractive timeout -k 10 900 apt-get -o DPkg::Lock::Timeout=90 install -y --no-install-recommends \
+    build-essential ccache cmake libssl-dev ninja-build python3
+  mode=cpu
 fi
 if [ "$mode" = cuda ] || [ "$mode" = gpu ]; then
   requested_mode=$mode
@@ -121,7 +130,7 @@ if [ "$mode" = cuda ]; then
   set -- "$@" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON -DDATAPUMP_TRIAD_VULKAN=OFF \
     "-DCMAKE_CUDA_COMPILER=$nvcc" "-DCUDAToolkit_ROOT=$cuda_root" "-DCUDA_TOOLKIT_ROOT_DIR=$cuda_root" \
     "-DCMAKE_PREFIX_PATH=$torch_prefix" "-DCMAKE_CUDA_ARCHITECTURES=$native_sm"
-else
+elif [ "$mode" = vulkan ] || [ "$mode" = gpu ]; then
   # Only automatic GPU mode may lack a host NVIDIA driver: the compiled
   # Vulkan backend remains optional at runtime and other GPUs may be visible.
   # Explicit Vulkan mode still requires the NVIDIA headless manifest.
@@ -137,6 +146,10 @@ else
     opencl_loader=
   fi
   set -- "$@" "-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=$opencl_loader"
+else
+  # Linode's native CPU profile avoids GPU toolkit, Vulkan package and runtime
+  # discovery on the fresh Ubuntu image.
+  set -- "$@" -DDATAPUMP_TRIAD_TENSOR=OFF -DDATAPUMP_TRIAD_VULKAN=OFF
 fi
 worker=datapump-worker
 if [ "$profile" = live ]; then
@@ -197,17 +210,30 @@ case "$build_jobs" in ''|*[!0-9]*) echo "Invalid native build parallel job count
 printf 'PUMP_LAB_BUILD_GENERATOR=%s\n' "$generator"
 printf 'PUMP_LAB_BUILD_JOBS=%s\n' "$build_jobs"
 printf 'PUMP_LAB_STAGE=build-plan\n'
-measure_stage compile cmake --build build/lab --parallel "$build_jobs" --target "$worker"
+if [ "${requested_mode:-}" = native-cpu ]; then
+  measure_stage compile cmake --build build/lab --parallel "$build_jobs" \
+    --target "$worker" triad_receiver_probe
+else
+  measure_stage compile cmake --build build/lab --parallel "$build_jobs" --target "$worker"
+fi
 "build/lab/$worker" --self-check
 printf 'PUMP_LAB_PROFILE=%s\n' "$profile"
 printf 'PUMP_LAB_MODE=%s\n' "$mode"
 if [ "$mode" = cuda ]; then
   python3 -c 'import torch; print("PUMP_LAB_DEVICE=" + str(torch.cuda.get_device_name())); print("PUMP_LAB_TORCH=" + str(torch.__version__)); print("PUMP_LAB_CUDA=" + str(torch.version.cuda))'
 else
-  printf 'PUMP_LAB_DEVICE=Vulkan support compiled (runtime device selection pending)\nPUMP_LAB_TORCH=not requested\nPUMP_LAB_CUDA=not selected\n'
+  if [ "$mode" = cpu ]; then
+    printf 'PUMP_LAB_DEVICE=CPU-only worker\nPUMP_LAB_TORCH=not requested\nPUMP_LAB_CUDA=not selected\n'
+  else
+    printf 'PUMP_LAB_DEVICE=Vulkan support compiled (runtime device selection pending)\nPUMP_LAB_TORCH=not requested\nPUMP_LAB_CUDA=not selected\n'
+  fi
 fi
 worker_hash=$(sha256sum "build/lab/$worker")
 printf 'PUMP_LAB_WORKER_SHA256=%s\n' "${worker_hash%% *}"
+if [ "${requested_mode:-}" = native-cpu ]; then
+  probe_hash=$(sha256sum build/lab/triad_receiver_probe)
+  printf 'PUMP_LAB_PROBE_SHA256=%s\n' "${probe_hash%% *}"
+fi
 '''
 
 
@@ -396,15 +422,25 @@ REMOTE_DEPLOY = r'''import fcntl, hashlib, json, os, re, stat, subprocess, sys, 
 from pathlib import Path
 
 digest, mode, profile, size_text = sys.argv[1:]
-if not re.fullmatch('[a-f0-9]{64}', digest) or mode not in ('cuda','vulkan','gpu') or profile not in ('simulation','live'):
+if not re.fullmatch('[a-f0-9]{64}', digest) or mode not in ('cuda','vulkan','gpu','native-cpu') or profile not in ('simulation','live'):
     raise SystemExit('Invalid deployment request')
-allowed_backends = ('cuda', 'vulkan') if mode == 'gpu' else (mode,)
+allowed_backends = ('cuda', 'vulkan') if mode == 'gpu' else ('cpu',) if mode == 'native-cpu' else (mode,)
 size = int(size_text)
 if not 0 < size <= 256 * 1024 * 1024:
     raise SystemExit('Source archive exceeded the deployment limit')
 directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'
+workspace = os.path.dirname(directory)
 os.umask(0o077)
 created = False
+if mode == 'native-cpu':
+    try:
+        os.mkdir(workspace, 0o755)
+    except FileExistsError:
+        pass
+    parent_info = os.lstat(workspace)
+    if (not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != os.getuid()
+            or parent_info.st_mode & 0o022):
+        raise SystemExit('The deployment parent must be a non-writable directory owned by the SSH user.')
 try:
     os.mkdir(directory, 0o700)
     created = True
@@ -445,6 +481,7 @@ def write_json(name, value):
 
 request = {'source':digest, 'mode':mode, 'profile':profile,
            'builder':hashlib.sha256(BUILD.encode()).hexdigest()}
+legacy_request = False
 if created:
     write_json('.deployment.json', request)
 else:
@@ -452,14 +489,17 @@ else:
         previous = read_json('.deployment.json')
     except FileNotFoundError:
         raise SystemExit('Existing deployment directory is unmanaged. Use a fresh pod for automatic deployment.')
-    # These builders can resume their existing modes with the same source
-    # and profile. Neither could produce an explicit Vulkan deployment.
+    # These prior builders can resume a matching source, mode and profile.
+    # The immediately prior builder also supports explicit Vulkan receipts.
     legacy_builders = (
+        'e1e3dd5cf08bf30ebb9375f8453b3cd5a5902f61e1b753241b4b91c49e64ad4c',
         '7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5',
         '200bce2484affd29702fe15275135bdbe5b196e7458830204c05604505eacdfc',
     )
-    legacy_request = (mode != 'vulkan' and previous.get('source') == digest and previous.get('mode') == mode and
-                      previous.get('profile') == profile and previous.get('builder') in legacy_builders)
+    legacy_request = (mode in ('gpu', 'cuda', 'vulkan') and
+                      previous.get('source') == digest and previous.get('mode') == mode and
+                      previous.get('profile') == profile and previous.get('builder') in legacy_builders and
+                      (mode != 'vulkan' or previous.get('builder') == legacy_builders[0]))
     if previous != request and not legacy_request:
         raise SystemExit('Existing deployment uses different source or build settings. Use a fresh pod.')
     if legacy_request:
@@ -486,15 +526,22 @@ finally:
     if os.path.exists(temporary): os.unlink(temporary)
 
 worker = Path('build/lab/datapump-lab-worker' if profile == 'live' else 'build/lab/datapump-worker')
+probe = Path('build/lab/triad_receiver_probe') if mode == 'native-cpu' else None
 try:
     receipt = read_json('.worker-receipt.json')
 except FileNotFoundError:
     receipt = None
-if (receipt and receipt.get('request') == request and receipt.get('backend') in allowed_backends and worker.is_file()
+compatible_receipt = (receipt and (receipt.get('request') == request
+                                   or (legacy_request and receipt.get('request') == previous)))
+if (compatible_receipt and receipt.get('backend') in allowed_backends and worker.is_file()
         and not worker.is_symlink()
-        and hashlib.sha256(worker.read_bytes()).hexdigest() == receipt.get('worker_sha256')):
+        and hashlib.sha256(worker.read_bytes()).hexdigest() == receipt.get('worker_sha256')
+        and (probe is None or (probe.is_file() and not probe.is_symlink()
+                              and hashlib.sha256(probe.read_bytes()).hexdigest() == receipt.get('probe_sha256')))):
     print('PUMP_LAB_STAGE=reuse', flush=True)
     subprocess.run([str(worker), '--self-check'], check=True)
+    receipt['request'] = request
+    write_json('.worker-receipt.json', receipt)
     print(receipt['text'], flush=True)
     environment = dict(os.environ, PUMP_LAB_RECEIPT_MODE=receipt['backend'])
     subprocess.run([sys.executable, '-c', RESOURCES], env=environment, check=True)
@@ -511,11 +558,12 @@ for stage, command in (
     ('compile', 'measure_stage compile cmake --build build/lab '),
     ('check', '"build/lab/$worker" --self-check\n'),
 ):
-    reported_build = reported_build.replace(command, 'echo PUMP_LAB_STAGE=' + stage + '\n' + command, 1)
+    reported_build = reported_build.replace(command, 'echo PUMP_LAB_STAGE=' + stage + '\n' + command)
 prefixes = (b'PUMP_LAB_BUILD_JOBS=', b'PUMP_LAB_BUILD_GENERATOR=',
             b'PUMP_LAB_MEASURE=configure ', b'PUMP_LAB_MEASURE=compile ',
             b'PUMP_LAB_PROFILE=', b'PUMP_LAB_MODE=', b'PUMP_LAB_DEVICE=', b'PUMP_LAB_TORCH=',
             b'PUMP_LAB_CUDA=', b'PUMP_LAB_WORKER_SHA256=', b'PUMP_LAB_CXX_COMPILER=',
+            b'PUMP_LAB_PROBE_SHA256=',
             b'PUMP_LAB_CXX_COMPILER_ID=', b'PUMP_LAB_CXX_COMPILER_VERSION=',
             b'PUMP_LAB_COMPILER_CACHE=')
 summary_lines = {}
@@ -559,10 +607,15 @@ text = '\n'.join(lines)
 for receipt_line in lines:
     print(receipt_line, flush=True)
 backend = next((line.partition('=')[2] for line in lines if line.startswith('PUMP_LAB_MODE=')), None)
-if backend not in allowed_backends or not worker.is_file():
+if (backend not in allowed_backends or not worker.is_file()
+        or (probe is not None and (not probe.is_file() or probe.is_symlink()
+                                   or summary_lines.get(b'PUMP_LAB_PROBE_SHA256=') is None))):
     raise SystemExit('Build did not return a complete deployment receipt')
-write_json('.worker-receipt.json', {'request':request, 'text':text, 'backend':backend,
-                                  'worker_sha256':hashlib.sha256(worker.read_bytes()).hexdigest()})
+receipt = {'request':request, 'text':text, 'backend':backend,
+           'worker_sha256':hashlib.sha256(worker.read_bytes()).hexdigest()}
+if probe is not None:
+    receipt['probe_sha256'] = hashlib.sha256(probe.read_bytes()).hexdigest()
+write_json('.worker-receipt.json', receipt)
 '''
 
 
@@ -764,7 +817,7 @@ def deploy(host, user, port, known_hosts, *, mode=DEFAULT_MODE, profile='simulat
     """
     host, user, options = _connection(host, user, port, known_hosts, identity)
     if mode not in BUILD_MODES:
-        raise ValueError('Build mode must be cpu, cuda, vulkan or gpu')
+        raise ValueError('Build mode must be cpu, cuda, vulkan, gpu or native-cpu')
     if mode == 'cpu':
         mode = DEFAULT_MODE
     if profile not in ('simulation', 'live'):
@@ -789,7 +842,10 @@ def deploy(host, user, port, known_hosts, *, mode=DEFAULT_MODE, profile='simulat
         on_progress('Preparing the source bundle…')
     with tempfile.TemporaryDirectory(prefix='datapump-lab-') as staging:
         archive = Path(staging) / 'source.tar.gz'
-        bundle.create_bundle(ROOT, archive)
+        if mode == 'native-cpu':
+            bundle.create_bundle(ROOT, archive, cpu_research=True)
+        else:
+            bundle.create_bundle(ROOT, archive)
         payload = archive.read_bytes()
         digest = hashlib.sha256(payload).hexdigest()
         # The command contains only our fixed wrapper, checked mode/profile,
@@ -797,7 +853,7 @@ def deploy(host, user, port, known_hosts, *, mode=DEFAULT_MODE, profile='simulat
         script = 'BUILD = ' + repr(REMOTE_BUILD) + '\nRESOURCES = ' + repr(RESOURCE_RECEIPT) + '\n' + REMOTE_DEPLOY
         command = f'python3 -c {shlex.quote(script)} {digest} {mode} {profile} {len(payload)}'
         if on_progress is not None:
-            on_progress('Connecting to RunPod for worker setup…')
+            on_progress('Connecting to the compute host for worker setup…')
         output = _run(ssh + [command], stage='Deploying the remote worker',
                       timeout=remaining(), runner=runner, input_data=payload,
                       on_progress=on_progress, cancelled=cancelled)
@@ -816,6 +872,7 @@ def main(argv=None):
     parser.add_argument('--identity', help='optional local SSH private-key path')
     parser.add_argument('--mode', choices=BUILD_MODES, default=DEFAULT_MODE,
                         help='gpu (default) and its legacy cpu alias build a GPU-capable worker. '
+                             'native-cpu installs Ubuntu build prerequisites and builds a CPU-only worker; '
                              'cuda and vulkan require their named backend')
     parser.add_argument('--profile', choices=('simulation', 'live'), default='simulation',
                         help='worker profile; live audio is experimental and separately unqualified')
@@ -828,7 +885,10 @@ def main(argv=None):
     except (ValueError, OSError, bundle.BundleError, DeployError) as exc:
         print(f'lab deploy: {exc}', file=sys.stderr)
         return 1
-    print(f'Built {path}. Confirm the actual device/backend before claiming GPU use.')
+    if args.mode == 'native-cpu':
+        print(f'Built {path} and the native CPU receiver probe.')
+    else:
+        print(f'Built {path}. Confirm the actual device/backend before claiming GPU use.')
     return 0
 
 
