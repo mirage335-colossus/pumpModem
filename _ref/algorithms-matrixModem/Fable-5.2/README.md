@@ -208,6 +208,9 @@ them are by hand and are in the same subsection of the lattice design note.
 The stated tone-rate preference and its two exceptions are in section 4.2, and the equivalence
 of phase steps and tone changes in section 4.4.
 
+The specification was reconciled a second time on 27 November after these additions. What
+changed is listed at the end of the mandatory-phase subsection of the lattice design note.
+
 ## Corrections to earlier Matrix Modem documents
 
 Found by the reviews of this pass. The first four are annotated where they occur.

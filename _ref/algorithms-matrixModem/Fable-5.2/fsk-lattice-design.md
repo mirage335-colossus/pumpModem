@@ -1182,6 +1182,19 @@ of `lattice_receiver.cpp`; the computed values are at the end of this subsection
     eighth of the phase interval, and the result is milder: at 8,400 decodes a second a
     ±20 ppm crystal passes at 1 h and fails at 5.8 h, a ±100 ppm clock fails from 1 h and ±5 Hz
     from 22 min (phase per cell, ±1 s of timing). The reference classes are my assumptions.
+- **Keyed phase where a phase change costs the same as a tone change** (user, 27 November):
+  it is still worth having, so that only a keyed receiver can add the tones coherently. Agreed;
+  it is the reason the requirement holds in the narrow-band case. Hand estimate of the gap on a
+  steady path: the coherent keyed receiver needs a total E/N₀ of about 57 for a 10-bit block
+  (section 10, "No FHSS, coherent block": 57 s at 0 dB-Hz), and the energy observer needs
+  3.61·√(positions × cells). For 4 positions and one hour (22,500 cells) that is 1,083, a gap of
+  12.8 dB, rising 5 dB per tenfold of block time. I first said "about 14 dB" in conversation;
+  12.8 dB is the corrected figure. Not computed by the program.
+- **Specification reconciled again on 27 November** after these additions: section 4.4 regrouped
+  (requirement, reasons, receiver cost, purpose of more frequent steps); "phase-continuous"
+  removed from section 3; "oscillator drift adds nothing" narrowed to the timing search; the
+  diffuse-path line of receiver item 8 aligned with section 4.2; terms for phase key and phase
+  interval added; 1 ppm at 9 kHz made 9 mHz throughout.
 - **Open.** The fourth-power statistic and the observer's best statistic against the keyed
   signal; whether 2 or 4 phases per cell are worth offering; measured reference quality below
   9 kHz.
