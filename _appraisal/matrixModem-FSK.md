@@ -22,9 +22,10 @@ choices from evidence about their performance.
   peak power throughout that interval. Hopping has ramps and quiet guards. Bandwidth, oscillator
   error, antenna response and channel nulls can independently limit reception. Use conducted,
   radiated or received power consistently in each link budget.
-- **The configured payload sizes start at 10 bits.** Section 10's presence-limited model gives
-  1.10–1.30 times the one-bit duration. A payload-error-only comparison gives up to 2.48 times
-  at the listed operating points. These are different error criteria.
+- **The configured payload sizes start at 10 bits.** At the original 10⁻⁶ false-admission
+  target, the historical presence-limited calculation gave 1.10–1.30 times the one-bit
+  duration. The comparison changes with the admission target and the required payload
+  accuracy. Section 10 gives both criteria and their limits.
 - **The transmitter assumes a diffuse path; the receiver also tries a specular one.** The
   transmitter sends FSK suited to the expected Doppler spread of its configured path class, using one tone per 160 ms cell on 6.25 Hz spacing as the reference configuration.
   Select a held-tone profile before transmission when one-cell tones miss the deadline on the
@@ -456,6 +457,10 @@ each sent on `L` tones: 32·`L` tones per block.
 - Payload bits are encrypted before coding by the AES-256 + Serpent cascade keystream. Encryption
   adds no bits.
 - Encryption is always on, with the published zero key or a loaded keyfile, as in the brief.
+- At a fixed key and block ordinal, decrypting a 10-bit winner XORs it with a fixed mask.
+  A uniform noise winner therefore displays as a uniform word. The mask permutes any
+  bias among the labels, and a one-bit error in real ciphertext changes one plaintext bit.
+  [Stream construction](../_ref/algorithms-matrixModem/Opus-5.5/09-keys-schedules-spectrum-and-stream-contract.md) · [CTR error properties, Appendix D](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf)
 - A signal under a different schedule can contribute structured energy. Include wrong-schedule
   traffic as its own false-admission case alongside quiet noise and occupied interference.
   A public schedule and a threshold supply no sender authentication.
@@ -583,12 +588,17 @@ each sent on `L` tones: 32·`L` tones per block.
      after combining decisions.
 9. **Presence.** Convert branch scores to comparable evidence under each branch's null law,
    then calibrate the maximum over all messages, offsets, spreads and coherence windows on joined
-   observations. The trial goal is 10⁻⁶ false admissions per public block. Set thresholds
-   on a training set and evaluate independent held-out blocks and outage sequences. Decoy
-   keys on one capture share noise, and their ranks alone do not establish an operational
-   tail rate. Separately report false admission in quiet and wrong-schedule traffic, missed
-   active blocks, admitted wrong payloads and false or delayed ends.
-   [Calibration and counterexamples](../_ref/algorithms-matrixModem/fsk-presence-calibration.md)
+   observations. For short messages read by an operator, use **10⁻⁴ per quiet public block**
+   as a provisional design target. If achieved on one continuously monitored calendar, it
+   gives about 0.84 raw false blocks per quiet day at 10.24 s per block, or about one every
+   76 quiet days at 655.36 s per block. Choose the operating threshold with the listening time, all monitored calendars
+   and the number of false indications the operator can tolerate in view. Ten bits give
+   the operator more context when only a few words make sense. Count every false admission,
+   including words the operator dismisses.
+   Freeze thresholds on training data and evaluate fresh quiet blocks, interference,
+   wrong-schedule traffic and outage sequences. Decoy keys on one capture share noise.
+   Report missed active blocks, admitted wrong payloads, premature or delayed ends and
+   operator-visible false messages separately. [Admission target and calibration](../_ref/algorithms-matrixModem/fsk-presence-calibration.md#how-often-an-operator-sees-a-false-word)
 10. **Precision.** After conditioning, operands are at most four bits (sample code, evidence, bin
     values, 0/1 code tables) with exact wide accumulation. Where a device has no native 4-bit path
     the values are carried in wider containers; the arithmetic is unchanged. The coefficients
@@ -605,6 +615,14 @@ on the same draws. On a path resetting phase every tone, the corresponding count
 91/120 and 105/120. Reserving a branch budget preserved the fallback but cost some of its
 sensitivity. The joint rule admitted 3/400 quiet blocks. These thresholds target a nominal
 1% family false-admission rate. [Full fixture, grids, calibration and uncertainty](algorithms-matrixModem/block-reception/README.md#coherent-branch-and-protected-per-tone-fallback)
+
+At the new **10⁻⁴ target**, a fresh calibration and 30,000 independent Gaussian-noise
+holdouts on the one-cell HF fixture produced **one false admission**. The one-sided 95%
+upper bound was **1.58 × 10⁻⁴**, above the design target. On the same fresh signal blocks,
+the 10⁻⁴ and 1% cuts recovered 50 and 93 of 120 correct words at 0.5 Hz and 18 dB.
+At 20 Hz and 18 dB the looser cut recovered only two more words and also admitted two
+wrong ones. A lower threshold can help at the edge of reception, with little benefit
+when the channel has lost most of the payload evidence. [Frozen thresholds, signal and wrong-schedule results](algorithms-matrixModem/block-reception/README.md#one-false-admission-per-ten-thousand-quiet-blocks)
 
 Properties to test:
 
@@ -674,18 +692,29 @@ Properties to test:
 
 ## 10. Sizing and expected duration
 
-These preliminary duration estimates use an approximate presence-test model with a false-presence rate of 10⁻⁶ over all hypotheses and
+The historical duration estimates below use an approximate presence-test model with a false-presence rate of 10⁻⁶ over all hypotheses and
 messages, and a miss rate of 10⁻³. For weak tones that is a total deflection of about 100 for
 10 bits and 127 for 24 bits with 400 hypotheses, and the number of tones is that deflection
 divided by the deflection per tone. A block has at least 32 tones, and with FHSS at least 32
 hops.
 
-**Ten bits against one bit.** Transmit time against a single bit at the same confidence:
+**Ten bits against one bit.** The original calculations compared transmit time at the stated error criteria.
 
 | | 10 bits | 24 bits |
 | --- | ---: | ---: |
 | This sizing, 1 to 4,000 hypotheses, block of 1 to 1,024 tones | 1.10–1.30× | 1.25–1.73× |
 | Message error rate alone, 10⁻² / 10⁻³ / 10⁻⁴, ideal orthogonal signalling | 2.48 / 2.01 / 1.77× | – |
+
+At **10⁻⁴ per quiet block**, 400 nuisance hypotheses per word and the same 10⁻³
+true-template miss rate, the weak-tone model gives **1.275×** the unrounded one-bit airtime
+if both use the relaxed target. **If one bit keeps the original 10⁻⁶ target, ten bits at
+10⁻⁴ take only 1.059× its airtime.** Sizing the ten-bit transmission to the new target
+saves **13.3%** of its original airtime. With one nuisance hypothesis, the ten-bit/one-bit
+airtime ratio at the common 10⁻⁴ target is **1.412×**.
+On the steady-path model with 400 hypotheses, the ten-bit energy saving against the old
+target ranges from 7.4% to 12.4% for 1,024 down to one independent look. These calculations
+cover crossing the threshold on the true template. Another word can still win the search.
+The duration table below retains the original target and rounding. [Reproducible comparison](algorithms-matrixModem/fsk-lattice/results/admission_tradeoff.md)
 
 The separate codebook comparison in section 6 gives a scale for the coding cost. The
 400-hypothesis Gaussian-deflection example gives about 27% longer for 24 bits, before template
@@ -1477,7 +1506,9 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 6. **Symbols per block.** On a steady path with long held tones, 16 or 8 symbols instead of 32
    would save 0.8 or 1.4 dB, and would shorten the shortest block. Fading paths need the
    diversity of 32. Not adopted.
-7. **False-presence rate** of 10⁻⁶ per block is a placeholder that sets block length.
+7. **Attended false admissions.** Use the provisional 10⁻⁴ quiet-block target in section 8.
+   Establish the achieved rate and useful-word recovery on each intended channel, and measure
+   how many distinct false messages reach the operator during the expected listening time.
 8. **Overload limit** of 2 dB on what the scheduler may trade is a placeholder.
 9. **Without FHSS.** Whether scoring with one phase per position is on by default, and the
    coherence window a sub-9 kHz block is sized for. The ladder itself is settled below 9 kHz:

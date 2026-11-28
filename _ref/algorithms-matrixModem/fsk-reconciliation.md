@@ -8,6 +8,7 @@ The original brief asks for a one-way modem that can keep up when reception is d
 | Specify the search in physical frequency and drift units. Check a transmitter trajectory derived independently of receiver templates and include off-grid boundaries. | [Search geometry and benchmark corrections](fsk-search-validity.md) |
 | Count distinct received codewords after placement and erasures. A minimum number of tone slots is a length constraint. The arrangement of symbols across lost hops matters. | [Finite code and burst losses](fsk-code-identifiability.md) |
 | Calibrate each branch into comparable evidence, then calibrate the selected maximum and measure false completion on sequences. | [Presence and quiet decisions](fsk-presence-calibration.md) · [native block experiment](../../_appraisal/algorithms-matrixModem/block-reception/README.md) |
+| For operator-read short words, size initially to 10⁻⁴ raw false admissions per quiet block. Express the achieved rate per listening day and measure wrong active words separately. | [Listening exposure and interpretation of decrypted words](fsk-presence-calibration.md#how-often-an-operator-sees-a-false-word) · [one-bit and ten-bit sizing](../../_appraisal/algorithms-matrixModem/fsk-lattice/results/admission_tradeoff.md) |
 
 ## Receiver evidence
 

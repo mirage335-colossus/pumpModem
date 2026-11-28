@@ -36,6 +36,7 @@
 //   14 one-cell tones with keyed hopping: observer margin against hop length and channels; run with "E"
 //   15 ten bits against one bit under the presence-test sizing; run with "F"
 //   16 hops a block has to span to survive losing a fraction of them; run with "G"
+//   19 selectable null-block budget for the one-bit and ten-bit presence calculation; run with "J"
 //
 // Method notes. For a metric L = sum_k q_k |Y_k|^2 over orthonormal analysis functions with
 // independent CN(0,1) noise, the large-alphabet GMI is sup_s sum_k [s q_k (1+lam_k) + ln(1 - s q_k)]
@@ -46,6 +47,7 @@
 // Build: g++ -O3 -march=native -std=c++20 -fopenmp lattice_receiver.cpp -o lattice_receiver
 // Run:   ./lattice_receiver [mc_trials] [sections, default 1234567] > results/lattice_receiver.md
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -1294,6 +1296,13 @@ static void section14() {
 }
 
 // ---------- Section 15 ----------
+// Required weak-tone Gaussian deflection, then steady-path total E/N0 for 1, 32 and 1024 looks.
+static std::array<double, 4> presence_requirements(double per_template_false, double miss) {
+    const double z = qinv(per_template_false) + qinv(miss);
+    return {z * z, energy_needed(1, per_template_false, miss),
+            energy_needed(32, per_template_false, miss), energy_needed(1024, per_template_false, miss)};
+}
+
 static void section15() {
     printf("## 15. Ten bits against one bit at the same confidence\n\n");
     printf("A block of k bits is sized by its presence test: false-presence rate 1e-6 over A 2^k tests, miss rate\n");
@@ -1302,12 +1311,12 @@ static void section15() {
     printf("energies. Ratios are against k = 1 in the same row group; at fixed power they are ratios of transmit time.\n\n");
     printf("| A | k | S | S ratio | E, n = 1 (dB) | ratio | E, n = 32 (dB) | ratio | E, n = 1024 (dB) | ratio |\n|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for (double A : {1.0, 400.0, 4000.0}) {
-        double s1 = 0, e1[3] = {0, 0, 0};
+        std::array<double, 4> one_bit{};
         for (int k : {1, 10, 16, 24}) {
-            double pfa = 1e-6 / (A * std::pow(2.0, k)), z = qinv(pfa) + qinv(1e-3), S = z * z;
-            if (k == 1) s1 = S;
-            printf("| %.0f | %d | %.1f | %.2f |", A, k, S, S / s1);
-            int i = 0; for (long n : {1L, 32L, 1024L}) { double e = energy_needed(n, pfa, 1e-3); if (k == 1) e1[i] = e; printf(" %.2f | %.2f |", db(e), e / e1[i]); ++i; }
+            const auto need = presence_requirements(1e-6 / (A * std::pow(2.0, k)), 1e-3);
+            if (k == 1) one_bit = need;
+            printf("| %.0f | %d | %.1f | %.2f |", A, k, need[0], need[0] / one_bit[0]);
+            for (size_t i = 1; i < need.size(); ++i) printf(" %.2f | %.2f |", db(need[i]), need[i] / one_bit[i]);
             printf("\n");
         }
     }
@@ -1490,6 +1499,54 @@ static void section18() {
     }
 }
 
+static void admission_tradeoff() {
+    printf("## 19. Ten-bit and one-bit presence at selectable null-block budgets\n\n");
+    printf("One public block has A nuisance hypotheses per payload. Each template receives the same\n");
+    printf("null budget alpha / (A × 2^k). The union bound allows dependent templates with valid marginal\n");
+    printf("tails. The required miss probability on the true template stays at 0.001.\n\n");
+    printf("S is the weak-tone Gaussian deflection. E1, E32 and E1024 are steady-path E/N0 from the\n");
+    printf("chi-square model for the indicated count of independent, equal-noise complex looks. Each\n");
+    printf("ratio divides the ten-bit requirement by the one-bit requirement at the same alpha.\n");
+    printf("Each saving compares ten bits at the listed alpha with ten bits at 1e-6.\n\n");
+    printf("| A | alpha | S ratio | E1 ratio | E32 ratio | E1024 ratio | S saving | E1 saving | E32 saving | E1024 saving |\n");
+    printf("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    for (int hypotheses : {1, 400, 4000}) {
+        const auto reference = presence_requirements(1e-6 / (1024 * hypotheses), 1e-3);
+        for (double alpha : {1e-6, 1e-4, 1e-3, 1e-2}) {
+            const auto one = presence_requirements(alpha / (2 * hypotheses), 1e-3);
+            const auto ten = presence_requirements(alpha / (1024 * hypotheses), 1e-3);
+            printf("| %d | %.0e |", hypotheses, alpha);
+            for (size_t i = 0; i < ten.size(); ++i) printf(" %.3f |", ten[i] / one[i]);
+            for (size_t i = 0; i < ten.size(); ++i) printf(" %.1f%% |", 100 * (1 - ten[i] / reference[i]));
+            printf("\n");
+        }
+    }
+    printf("\n### Ten bits at a relaxed budget against one bit at 1e-6\n\n");
+    printf("Ratios divide the ten-bit requirement at the listed alpha by the original one-bit requirement\n");
+    printf("at 1e-6. Both modes search the same A and keep the true-template miss probability at 0.001.\n\n");
+    printf("| A | ten-bit alpha | S ratio | E1 ratio | E32 ratio | E1024 ratio |\n");
+    printf("|---:|---:|---:|---:|---:|---:|\n");
+    for (int hypotheses : {1, 400, 4000}) {
+        const auto strict_one = presence_requirements(1e-6 / (2 * hypotheses), 1e-3);
+        for (double alpha : {1e-4, 1e-3}) {
+            const auto ten = presence_requirements(alpha / (1024 * hypotheses), 1e-3);
+            printf("| %d | %.0e |", hypotheses, alpha);
+            for (size_t i = 0; i < ten.size(); ++i) printf(" %.3f |", ten[i] / strict_one[i]);
+            printf("\n");
+        }
+    }
+    printf("\nAll four ratios equal 1 at ten-bit alpha = (1024/2) × 1e-6 = 5.12e-4.\n");
+    printf("At that budget the two modes allocate exactly the same null probability to each template.\n");
+    printf("Above it the ten-bit presence test needs less signal under these assumptions.\n");
+    printf("\nAt fixed received power and duty factor, a ratio of E gives the active-time and wall-time ratio\n");
+    printf("if the same count of steady looks can scale in duration. At fixed duration and look count, its\n");
+    printf("power saving in dB is 10 log10(E_old/E_new). At fixed per-look weak signal and geometry, S\n");
+    printf("scales with the number of looks and unrounded duration. At fixed duration, weak-tone deflection\n");
+    printf("scales with squared power, giving a power saving of 5 log10(S_old/S_new). A fixed transmitted\n");
+    printf("block keeps its scheduled duration when a receiver alone changes its threshold. Discrete dwell\n");
+    printf("floors, fading, wrong active-payload winners and operator recognition require separate checks.\n");
+}
+
 int main(int argc, char** argv) {
     int trials = argc > 1 ? std::atoi(argv[1]) : 20000;
     std::vector<NamedChan> chans = {
@@ -1529,5 +1586,6 @@ int main(int argc, char** argv) {
     if (on('G')) section16();
     if (on('H')) section17(trials);
     if (on('I')) section18();
+    if (on('J')) admission_tradeoff();
     return 0;
 }

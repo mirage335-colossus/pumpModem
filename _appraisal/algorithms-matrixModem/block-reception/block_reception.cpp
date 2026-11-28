@@ -11,6 +11,7 @@
 #include <numeric>
 #include <span>
 #include <string_view>
+#include <thread>
 
 namespace {
 using Sample = std::complex<float>;
@@ -607,8 +608,12 @@ int main(int argc, char** argv) {
         fixtures.emplace_back(ordinal, 0xaa6218f2);
         other.emplace_back(ordinal, 0xd3d65011);
     }
-    if (argc == 2 && std::string_view(argv[1]) == "--held") {
-        compare_held_tones(plan, fixtures);
+    if (argc == 2 && std::string_view(argv[1]) == "--rare") {
+        check_rare_admission(plan, fixtures, other);
+        return 0;
+    }
+    if (argc == 2 && (std::string_view(argv[1]) == "--held" || std::string_view(argv[1]) == "--thresholds")) {
+        compare_held_tones(plan, fixtures, std::string_view(argv[1]) == "--thresholds");
         return 0;
     }
     if (argc == 2 && std::string_view(argv[1]) == "--coherent")

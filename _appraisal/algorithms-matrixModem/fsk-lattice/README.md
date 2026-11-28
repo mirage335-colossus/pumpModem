@@ -40,12 +40,27 @@ It extends the method of [`../coherence-limits/`](../coherence-limits/README.md)
 | 16 | Hops a block has to span to survive losing a quarter, half or three quarters of them, against the margin, exact binomial. Run with `G`; under a second. Output: `results/lattice_receiver_section16.md` |
 | 17 | Tones without a keyed phase: the cell-rate pulse an observer can add coherently without knowing the positions. (a) Energy per tone needed against observation time, exact, with the carrier frequency known and with 10,000 frequency bins, against the energy observer of section 14. (b) Observer margin over one block. (c) Time-domain Monte Carlo of the pulse and squared-pulse statistics with no key, a two-phase key and a four-phase key. Run with `600 H`; 35 s. Output: `results/lattice_receiver_section17.md` |
 | 18 | Below 9 kHz: frequency-bin and drift-rate spacing rules, bins per coherent window for six assumed reference classes, and decodes needed per second against the measured decode rates. Run with `I`; under a second. Output: `results/lattice_receiver_section18.md` |
+| 19 | [One-bit and ten-bit presence at selectable null-block budgets](results/admission_tradeoff.md). Compares common budgets and a policy that keeps one-bit admission at 10⁻⁶ while relaxing ten-bit admission. Run with `1 J`. |
 
 ```bash
 cd _appraisal/algorithms-matrixModem/fsk-lattice
 g++ -O3 -march=native -std=c++20 -fopenmp lattice_receiver.cpp -o /tmp/lattice_receiver
 /tmp/lattice_receiver 20000 > results/lattice_receiver.md
 ```
+
+Regenerate the selectable-budget table with `/tmp/lattice_receiver 1 J > results/admission_tradeoff.md`.
+It uses the section 15 Gaussian weak-tone and steady-path chi-square calculations. The denominator
+of the false-admission target is one completely searched null block. Any additional public
+searches must be included in its hypothesis count. A true-template miss of 10⁻³ sizes the
+presence threshold. Successful recovery of the transmitted value also depends on competitors'
+scores. The table gives idealized energy and duration ratios before dwell floors or rounding to the
+agreed transmit schedule.
+
+With 400 public nuisance hypotheses per payload, the ten-bit threshold at 10⁻⁴ calls for
+3.1–5.4% more energy than one bit at 10⁻⁶ on a steady path, depending on the look count.
+The weak-tone model gives 5.9% more unrounded airtime. Equal per-template tail allowances
+occur at a ten-bit target of 5.12 × 10⁻⁴ because the ten-bit search has 512 times as many
+payloads. At 10⁻³ the ordering reverses for all three hypothesis counts examined.
 
 A second argument selects sections, for example `/tmp/lattice_receiver 20000 67`. The stored
 output took 4 min 44 s on the 12-thread Ryzen 5 PRO 5650U while other jobs were running. Sections

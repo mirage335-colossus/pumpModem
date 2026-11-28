@@ -20,13 +20,15 @@ The primary 18 dB holdout exposed a large loss with the delayed, +2-bin ray. Bef
 From the repository root with a C++20 compiler, build the two-source experimental binary and run each fixed experiment.
 
 ```sh
-g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -Isrc -Iinclude \
+g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -pthread -Isrc -Iinclude \
   _appraisal/algorithms-matrixModem/block-reception/block_reception.cpp \
   src/search_fft.cpp -o /tmp/matrix-block-reception
 /tmp/matrix-block-reception
 /tmp/matrix-block-reception --apertures
 /tmp/matrix-block-reception --coherent
 /tmp/matrix-block-reception --held
+/tmp/matrix-block-reception --thresholds
+/tmp/matrix-block-reception --rare
 ```
 
 Tested on an AMD Ryzen 5 PRO 5650U with Debian GCC 14.2.0. Repository FFT and research RNG from revision `396b47e1`; all signal generation, FFT, scoring and decisions run natively on the CPU. The FFT uses floating-point coefficients and results. The 4-bit restrictions tested here apply to the input and evidence codes. [Native experiment](block_reception.cpp)
@@ -103,8 +105,63 @@ The primary exact two-sided paired test gave *p* = 0.00333. At 0.5 Hz and 18 dB,
 | 20 Hz, 18 dB | 0 / 2 / 118 | 3 / 4 / 113 | 0 / 4 / 116 | 3 / 2 / 115 | 3 / 0 |
 | 20 Hz, 22 dB | 82 / 2 / 36 | 89 / 0 / 31 | 81 / 1 / 38 | 85 / 0 / 35 | 20 / 16 |
 
-C/W/M counts correct admissions, wrong admissions and misses. Primary slow-path per-tone 95% Wilson intervals are 58.7–75.2% for one cell and 73.8–87.6% for two. The full per-tone and joint branches used distinct calibrations for each format. The per-tone-only, reserved per-tone and reserved coherent thresholds were 5.34598, 5.38788 and 12.6951 for one cell, and 5.43116, 5.62931 and 12.6664 for two. On the common 400 null holdouts, false admissions for the two durations were 4 and 8 with per-tone alone, and 7 and 4 with the joint detector. The tests compare equal nominal predictive budgets; fixed-threshold false rates still have sampling uncertainty. All 120 received gain histories are shared across levels and formats and each has at most 32 independent complex fading coefficients. That finite-rank approximation matters especially at 20 Hz. The wider apertures span the same bin-center interval but their rectangular spectral responses differ.
+C/W/M counts correct admissions, wrong admissions and misses. Primary slow-path per-tone 95% Wilson intervals are 58.7–75.2% for one cell and 73.8–87.6% for two. The full per-tone and joint branches used distinct calibrations for each format. The per-tone-only, reserved per-tone and reserved coherent thresholds were 5.34598, 5.38788 and 12.6951 for one cell, and 5.43116, 5.62931 and 12.6664 for two. On the common 400 null holdouts, false admissions for the two durations were 4 and 8 with per-tone alone, and 7 and 4 with the joint detector. The tests compare equal nominal predictive budgets; fixed-threshold false rates still have sampling uncertainty. All 120 received gain histories are shared across levels and formats and each has at most 32 independent complex fading coefficients. With block energy diversity defined as reciprocal variance of the unit-mean block-average received power, the finite fixture gives 9.30 at 0.5 Hz versus 9.40 for the continuous Gaussian spectrum. At 20 Hz it gives 31.96 versus 363.32. The implementation computes the finite variance from the average of sinc²((fᵢ−fⱼ)T) over the 32² frequency pairs and the continuous variance by integrating the squared Gaussian covariance over the block. Fast-path counts therefore describe a finite channel with much more block-to-block energy variation than the continuous reference. The wider apertures span the same bin-center interval but their rectangular spectral responses differ.
 
 ITU-R F.1487 Annex 3 specifies a 2σ spread, with 0.5 Hz and two independently fading paths separated by 1 ms for its moderate mid-latitude case. The single-tap fixture here isolates Doppler and omits that delay diversity. Twenty hertz probes fast fading and is within the comparative test grid of Annex 2. Additional delay spread, finer spectral models, a weaker power or a different detector can change the ranking. [ITU-R F.1487, Annexes 2–3](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I%21%21PDF-E.pdf)
 
 The joint receiver for both formats forms 192 FFTs of 512 samples, gathers 327,680 complex tone-cell values and scores all six coherent physical window lengths. The held format adds 96 FFTs of 1,024 samples for its full-resolution per-tone pass. Per-tone lookup/additions across the 6,144 candidate scores fall from 393,216 to 196,608. On one local instrumented rerun, 1,279 scorer calls per format took 10.44 s for one cell and 10.26 s for two. The whole comparison took 22.37 s. Per-format timings include sample coding, FFTs and both search branches on one CPU thread, with templates and schedule prepared. The timing difference is too small to establish an advantage. The three earlier probes retained their counts. [Comparison implementation](held_tones.hpp)
+
+## False-admission budgets for a human-read word
+
+Prespecify aggregate predictive budgets of 0.5%, 1% and 2% per 10.24 s public block. Reserve half for each of the two searched families and retain per-tone priority when both admit a word. Use per-family order statistics 399, 398 and 396 of the same 399 calibration maxima, with strict exceedance. Re-evaluate the existing 400 quiet holdouts and all four matched 120-word signal strata from the held-tone comparison. Make each decision from the same two scores and winning words. This comparison reuses data that was already inspected; it supplies paired descriptive differences and pointwise intervals rather than new independent confirmation. Stop after the prespecified budgets and strata. Report quiet false admissions, correct signal words, wrong signal words and misses separately. Compute illustrative listening exposure and the two-consecutive-quiet wait under an independently scored, all-quiet calendar with a constant realized per-block false rate. Those models are conditional examples, separate from the empirical calibration.
+
+The diagnostic gave the following counts, with 400 quiet blocks and 120 signal blocks in each channel/energy cell. Signal entries are **correct / wrong / missed**. The nested score thresholds allow more words through, but a lower per-tone cutoff can also change which word wins when the branches disagree.
+
+| Tone cells | Aggregate budget | Quiet false | 0.5 Hz, 18 dB | 0.5 Hz, 22 dB | 20 Hz, 18 dB | 20 Hz, 22 dB |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.5% | 4 | 87 / 2 / 31 | 120 / 0 / 0 | 0 / 3 / 117 | 75 / 1 / 44 |
+| 1 | 1% | 7 | 90 / 2 / 28 | 120 / 0 / 0 | 0 / 4 / 116 | 81 / 1 / 38 |
+| 1 | 2% | 9 | 90 / 2 / 28 | 120 / 0 / 0 | 0 / 4 / 116 | 82 / 2 / 36 |
+| 2 | 0.5% | 4 | 101 / 0 / 19 | 120 / 0 / 0 | 3 / 2 / 115 | 85 / 0 / 35 |
+| 2 | 1% | 4 | 101 / 0 / 19 | 120 / 0 / 0 | 3 / 2 / 115 | 85 / 0 / 35 |
+| 2 | 2% | 13 | 103 / 0 / 17 | 120 / 0 / 0 | 3 / 6 / 111 | 89 / 0 / 31 |
+
+For example, at the 2% budget the one- and two-cell quiet false proportions were 2.25% (95% Wilson 1.19–4.22%) and 3.25% (1.91–5.48%). Tightening the held-tone cut from 2% to 1% on the difficult 20 Hz, 18 dB fixture removed four wrong words and retained its three correct words. At 22 dB, relaxing the cut admitted four more correct words. All durations and search counts remained fixed. This comparison measures admission and substitution at fixed energy and time. It cannot quantify an airtime reduction from an operator's willingness to inspect candidates.
+
+For a human who listens continuously, the opportunity count matters. At realized false rate *p*, 351 fully observed silent blocks (just under one hour here) contribute 351*p* expected false block admissions regardless of dependence if each block has the same marginal rate. If independent, the probability of at least one is 1−(1−*p*)³⁵¹. From the start of trailing quiet, the two-quiet rule closes on schedule with probability (1−*p*)² and takes (2−*p*)/(1−*p*)² scored periods on average under this same independent model.
+
+| Assumed realized quiet error *p* | Expected false blocks in 351 | At least one false | Closure delayed beyond two slots | Mean excess closure time |
+|---:|---:|---:|---:|---:|
+| 0.5% | 1.76 | 82.79% | 1.00% | 0.15 s |
+| 1% | 3.51 | 97.06% | 1.99% | 0.31 s |
+| 2% | 7.02 | 99.92% | 3.96% | 0.63 s |
+
+A user expecting a single scheduled word faces one opportunity. A silent receiver left running all day faces thousands. False block counts and displayed message counts can differ when adjacent admissions are grouped. Interference that persists across slots changes the wait distribution, and two adjacent missed active blocks can close a message prematurely. The two-quiet rule and unavailable-input handling stay fixed for all thresholds.
+
+## One false admission per ten thousand quiet blocks
+
+Preregister a fresh train/holdout comparison for the full 10.24 s one-cell joint score. Freeze the earlier eight schedule fixtures, letter probabilities and branch priority. Compute 19,999 independent calibration block maxima per family under the earlier Gaussian quiet model; set each threshold to its own training maximum. Strict exceedance gives a marginal predictive bound of 1/20,000 per family averaged over training, or at most 10⁻⁴ in the union. Also compute the earlier diagnostic nominal 1% union from the 19,900th of 19,999 per family. For fixed thresholds, count per-family and joint false admissions on 30,000 fresh Gaussian quiet blocks. Use an exact one-sided 95% binomial upper confidence bound for each reported joint rate. For the single designated 10⁻⁴ target a fixed-threshold upper bound ≤10⁻⁴ requires zero false admissions. Stop after these 30,000 blocks regardless of result and preserve any failure. No inference at 10⁻⁶ from this run.
+
+Prespecify 120 fresh, paired signal blocks for each of the four existing 0.5 Hz/20 Hz by 18 dB/22 dB strata, with shared noise and channel between threshold choices. Report correct, wrong and missed words for both cuts. These small present counts characterize the trade-off; the primary endpoint is the 30,000-block null holdout. Use six native trial workers with independent per-index seeds and the same searched receiver. Do not pool the previous calibration or noise holdouts.
+
+Separately freeze 160 new wrong-schedule single-path blocks at each of 24 and 36 dB. Use the original wrong-schedule key fixture and trial-indexed new data/noise, common across both levels and both cuts, with zero common carrier offset and ±32-sample starts. Every accepted word is false for the receiver, even if its bits happen to equal the other transmitter's bits. Keep these rows apart from Gaussian quiet and from wrong substitutions on the intended signal. No recalibration and no pooling with the 30,000 quiet blocks.
+
+**The 10⁻⁴ fixed-threshold confidence endpoint was not met.** One of 30,000 independent quiet blocks was admitted. The point estimate is 3.33 × 10⁻⁵, and the exact one-sided 95% binomial upper bound is 1.58119 × 10⁻⁴. The calibration and thresholds remained frozen. In the looser comparison, 287 of the same 30,000 blocks were admitted. The observations constrain false admissions in the Gaussian fixture with the specified public-schedule mixture and searched geometry.
+
+| Nominal aggregate target | Per-tone / coherent cutoffs | Per-tone false | Coherent false | Joint false / 30,000 | Joint exact upper 95% |
+|---:|---:|---:|---:|---:|---:|
+| 10⁻⁴ | 6.63583 / 17.9827 | 1 | 0 | 1 (0.00333%) | 0.01581% |
+| 1% | 5.41397 / 12.9452 | 152 | 136 | 287 (0.9567%) | 1.0544% |
+
+| Intended signal, 120 blocks per row | 10⁻⁴ correct / wrong / missed | 1% correct / wrong / missed |
+|---|---:|---:|
+| 0.5 Hz, 18 dB | 50 / 0 / 70 | 93 / 0 / 27 |
+| 0.5 Hz, 22 dB | 115 / 0 / 5 | 117 / 0 / 3 |
+| 20 Hz, 18 dB | 0 / 0 / 120 | 2 / 2 / 116 |
+| 20 Hz, 22 dB | 46 / 0 / 74 | 94 / 0 / 26 |
+
+On the slow 18 dB fixture, relaxing from 10⁻⁴ to 1% yielded **43 additional correct admissions in 120 transmitted words**. On the fast 22 dB fixture the corresponding difference was 48. In the weak fast case it yielded two correct and two wrong admissions. The 10.24 s transmitted duration and the searched work stayed constant in these comparisons.
+
+The strong wrong-schedule signal produced 0/160 and 1/160 false admissions at 24 dB for the 10⁻⁴ and 1% cuts respectively. At 36 dB the counts were 0/160 and 6/160. A zero count in 160 still gives a pointwise two-sided 95% Wilson upper limit of 2.34%; the 6/160 interval is 1.73–7.94%. Quiet-noise calibration alone therefore gives insufficient evidence about strong overlapping transmissions. Both levels used identical noise, word and other-schedule draws. The wrong-schedule extension was requested mid-run after calibration had started. Its decisions were checked against all four corners of a ±0.0001 interval around both displayed thresholds, containing every original full-precision cutoff; the winning words agreed throughout. A final integrated `--rare` run used the full-precision thresholds directly. It reproduced all calibration cutoffs, quiet counts, intended-signal counts and wrong-schedule counts on the identical seeds in 117.7 s, including both wrong-schedule levels. This repetition uses the same observations.
+
+For scale, at a realized rate of 10⁻⁴ and 10.24 s per block, continuous silence gives about 0.84 false block admissions in a day on average. At 10⁻⁶ the corresponding model gives about 0.0084 per day. With zero observed false admissions, demonstrating a one-sided 95% upper bound of 10⁻⁶ needs 2,995,731 independent quiet holdouts. This historical reference is theoretical. The present trial did not measure a 10⁻⁶ threshold, its signal performance, or a duration reduction against it. The six-worker local run took 118.5 s for calibration, quiet holdout and the 480 intended-signal blocks. Independent trial workers shortened experimental turnaround. [Calibration and exposure models](../../../_ref/algorithms-matrixModem/fsk-presence-calibration.md)
