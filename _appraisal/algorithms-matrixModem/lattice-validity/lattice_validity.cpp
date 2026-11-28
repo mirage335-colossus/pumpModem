@@ -112,6 +112,53 @@ void ray_case(const std::string& label, std::array<int, 2> bins, double signed_e
     std::cout << label << "  " << db(received) << "  " << db(projected) << '\n';
 }
 
+void held_tone_cancellation()
+{
+    constexpr std::array positions{0, 64, 128, 192};
+    constexpr std::array quarter_turns{0, 2, 1, 3};
+    constexpr int tone_length = 2 * samples, first_delay = 2, last_delay = 6;
+    constexpr int signal_length = positions.size() * tone_length;
+    const Complex first_gain{0.5, 0.5}, last_gain{0.5, -0.5};
+    std::array<Complex, signal_length + last_delay> tx{}, rx{};
+    // Zero prehistory. Scatter both rays through the end of the delayed tail.
+    for (int n = 0; n < signal_length; ++n) {
+        const int t = n / tone_length;
+        tx[n] = std::polar(1.0, tau * quarter_turns[t] / 4) *
+                tone(positions[t], n % tone_length);
+        rx[n + first_delay] += first_gain * tx[n];
+        rx[n + last_delay] += last_gain * tx[n];
+    }
+    close_to(std::abs(rx.back() - last_gain * tx[signal_length - 1]), 0);
+
+    const double error_bound = 2 * (first_delay * std::abs(first_gain) +
+                                    last_delay * std::abs(last_gain)) / tone_length;
+    std::cout << "Two-ray support  coherent power fraction  mean per-tone power\n";
+    for (const int start : {samples, 0}) {
+        Complex total{};
+        double power = 0;
+        for (int t = 0; t < static_cast<int>(positions.size()); ++t) {
+            Complex projection{}, direct{};
+            for (int n = t * tone_length + start; n < (t + 1) * tone_length; ++n) {
+                const Complex reference = std::conj(tx[n]);
+                projection += reference * rx[n];
+                direct += reference * tx[n];
+            }
+            const double count = tone_length - start;
+            projection /= count;
+            close_to(std::abs(direct / count - 1.0), 0);
+            const double error = std::abs(projection - (t < 2 ? 1.0 : -1.0));
+            if (start == samples) close_to(error, 0);
+            else check(error <= error_bound, "boundary error exceeds tap-delay bound");
+            total += projection;
+            power += std::norm(projection);
+        }
+        const double coherent = std::norm(total / static_cast<double>(positions.size()));
+        check(coherent <= error_bound * error_bound, "four-tone sum exceeds boundary bound");
+        std::cout << (start ? "second cell" : "full tone") << "  " << std::scientific
+                  << coherent << "  " << power / positions.size() << std::fixed << '\n';
+    }
+}
+
 // ||R0 - Rk||_F^2/(2 ||R0||_F^2), from the lag sum of the covariance matrices.
 double separation(int bin_difference, double width)
 {
@@ -144,6 +191,7 @@ int main()
     ray_case("destructive", {0, 1}, -1.0);
     ray_case("echo 3 dB down", {0, 1}, -std::pow(10.0, -3.0 / 20.0));
     ray_case("500 Hz separation, same channel", {-40, 40}, -1.0);
+    held_tone_cancellation();
     std::cout << "Doppler width  pair(1)  pair(5)  uniform(352,1)  uniform(70,5)\n";
     for (double width : {0.0, 1.0, 10.0, 30.0}) {
         close_to(separation(0, width), 0.0);

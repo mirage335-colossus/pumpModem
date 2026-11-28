@@ -24,6 +24,7 @@ constexpr int nsamples = nfft * tones, pad = 64, delay = 8, nfixtures = 8;
 constexpr int first = (nfft - positions) / 2;
 constexpr std::array offsets = {-64, 0, 64};
 constexpr double tau = 2 * mm::kPi;
+constexpr std::array<Sample, 4> inverse_quarter_turn = {{{1, 0}, {0, -1}, {-1, 0}, {0, 1}}};
 
 template <class T>
 void shuffle(std::span<T> items, mm::Rng& rng) {
@@ -198,12 +199,11 @@ void coherent_search(const ProjectionBlock& bins, const Schedule& schedule,
     std::array<Sample, positions> timing;
     for (int p = 0; p < positions; ++p)
         timing[p] = static_cast<Sample>(std::polar(1., tau * fft_bin(p) * (fine_time - coarse_time) / nfft));
-    constexpr std::array<Sample, 4> undo_phase = {{{1, 0}, {0, -1}, {-1, 0}, {0, 1}}};
     std::vector<WordRow> gathered(tones), tree(tones);
     for (int t = 0; t < tones; ++t) {
         Projection corrected{};
         for (int p = 0; p < positions; ++p)
-            corrected[p] = bins[t][p] * timing[p] * undo_phase[schedule.quarter_phase[t]];
+            corrected[p] = bins[t][p] * timing[p] * inverse_quarter_turn[schedule.quarter_phase[t]];
         for (int m = 0; m < words; ++m) gathered[t][m] = corrected[schedule.position[t][m]];
     }
     for (double cycles : {-.5, 0., .5}) {
@@ -737,6 +737,28 @@ bool compare_coherent(const FloatPlan& plan, const std::vector<Schedule>& fixtur
 #include "pointing_trial.hpp"
 
 #include "timing_experiment.hpp"
+
+// Print the four transmitted tones shown in the format guide, using the same
+// waveform and FFT as the HF experiment. An aligned flat path has one common gain.
+bool format_example(const Schedule& schedule, const FloatPlan& plan) {
+    constexpr int word = 173;
+    constexpr double energy_db = 18., common_phase = .73;
+    std::vector<Sample> samples(nsamples);
+    transmit(samples, 0, schedule, word, energy_db, false, common_phase, 0.);
+    const auto expected = std::polar(nfft * std::sqrt(mm::undb(energy_db) / nsamples), common_phase);
+    std::cout << "tone  position  phase(deg)  FFT projection  after key removal\n";
+    for (int t = 0; t < 4; ++t) {
+        std::array<Sample, nfft> spectrum;
+        std::copy_n(samples.begin() + t * nfft, nfft, spectrum.begin());
+        fft(spectrum, false, plan);
+        const int p = schedule.position[t][word], q = schedule.quarter_phase[t];
+        const Sample raw = spectrum[fft_bin(p)], corrected = raw * inverse_quarter_turn[q];
+        std::cout << t << "  " << p << "  " << 90 * q << "  " << raw << "  " << corrected << '\n';
+        if (!(std::abs(std::complex<double>(corrected) - expected) <= 1e-5 * std::abs(expected)))
+            return false;
+    }
+    return true;
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -746,6 +768,8 @@ int main(int argc, char** argv) {
         fixtures.emplace_back(ordinal, 0xaa6218f2);
         other.emplace_back(ordinal, 0xd3d65011);
     }
+    if (argc == 2 && std::string_view(argv[1]) == "--format-example")
+        return format_example(fixtures.front(), plan) ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "--timing-checks")
         return timing_checks(plan, fixtures) ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "--timing-unrelated")

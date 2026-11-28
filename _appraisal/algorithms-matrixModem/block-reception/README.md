@@ -82,6 +82,19 @@ g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -pthread -Isrc -Iinclude \
 
 Tested on an AMD Ryzen 5 PRO 5650U with Debian GCC 14.2.0. Repository FFT and research RNG from revision `396b47e1`; all signal generation, FFT, scoring and decisions run natively on the CPU. The FFT uses floating-point coefficients and results. The 4-bit restrictions tested here apply to the input and evidence codes. [Native experiment](block_reception.cpp)
 
+### Four-tone format example
+
+Run `/tmp/matrix-block-reception --format-example` after the build above to reproduce the [HF transmit diagram](../../matrixModem-FSK.md#four-tones-from-one-hf-block). It uses fixture seed `0xaa6218f2`, block ordinal 0, word 173 and a flat, noiseless path with common phase 0.73 radians. The schedule is the experiment's reproducible substitute for wire keys. The trace uses the raw FFT before quantization and checks each corrected projection against the complex amplitude of the generated tone.
+
+| Tone | Position index | Keyed phase | Raw complex projection (rounded) | After key removal (rounded) |
+| ---: | ---: | ---: | --- | --- |
+| 0 | 58 | 270° | 14.98 − 16.74i | 16.74 + 14.98i |
+| 1 | 0 | 0° | 16.74 + 14.98i | 16.74 + 14.98i |
+| 2 | 117 | 270° | 14.98 − 16.74i | 16.74 + 14.98i |
+| 3 | 231 | 270° | 14.98 − 16.74i | 16.74 + 14.98i |
+
+The experimental FFT uses a centred complex band. Position `p` is signed FFT bin `p − 176`; the HF profile labels it on the audio grid at `450 + 6.25p` Hz. Each unnormalized FFT sums 512 samples. For the chosen block amplitude its predicted bin magnitude is `512 × sqrt(10^1.8 / 32768)`. The shared residual angle explains why these four values add coherently. A separate [static two-path check](../lattice-validity/README.md#four-contiguous-held-tones) exercises the frequency-dependent case.
+
 ## Original six-hypothesis bank
 
 The 396th calibration score was 5.3561. A correct admission requires the threshold crossing and the correct word on the same block. For the two null rows every acceptance is false. The 95% intervals condition on the frozen calibration and the eight-schedule mixture. Rows at different energies or on different channels are paired, and margins are pointwise.

@@ -48,6 +48,35 @@ The two-position waveform can consequently have *very little incident signal ene
 
 Measurements are consistent with differential delays on this scale. Dear et al. distinguish individual arrivals up to 1.654 ms after the first arrival in one Java NVIS sounding. Their quiet one-week campaign does not measure an equal-ray notch maintained over a message. ITU-R F.1487 provides reproducible *stationary* HF test profiles with distinct differential-delay and Doppler parameters. The triple Robust review records the limited duration, frequency and geometry of the Watterson validation. More recently Fernandes et al. measured long-term carrier Doppler residuals on a 10 MHz Fort Collins–Newark link, with different daytime and night-time statistics. Those residuals concern frequency displacement over time and cannot be substituted for the instantaneous Doppler power spectrum of a signal or for a notch probability. [Dear et al., 2024, §4](https://doi.org/10.1029/2023RS007877) · [ITU-R F.1487, Annex 3](https://www.itu.int/rec/R-REC-F.1487/en) · [triple Robust primary-source audit](../highFidelity-triple_Robust_Modem/Fable-5.2/33-hf-channel-models-and-simulators.md) · [Fernandes et al., 2026](https://doi.org/10.3389/fspas.2026.1713968)
 
+## When the tones survive but their coherent sum vanishes
+
+Removing a tone's keyed phase leaves the channel's phase at that frequency. A steady single ray contributes a linear phase slope across frequency, which a matching delay correction can remove. Two steady rays can give a different phase pattern. A long coherent window can then cancel strong projections from successive tones even with correct timing, frequency and key.
+
+**Theoretical four-tone example.** Take no hopping, equal transmit amplitudes and four positions on the HF lattice, visited in the order shown. Observe an interior cell of each held tone after both paths have reached that tone. Normalize each noiseless matched projection to one for a unit-gain channel. Reference the phase to the transmit clock after removing common bulk delay. For frequency `f` relative to the first position, use a static two-ray response
+
+```text
+H(f) = (1+i)/2 × exp(−2πi f × 0.000625) + (1−i)/2 × exp(−2πi f × 0.001875).
+```
+
+| Tone in time order | 1 | 2 | 3 | 4 |
+| --- | ---: | ---: | ---: | ---: |
+| HF position index | 0 | 64 | 128 | 192 |
+| Frequency above first position (Hz) | 0 | 400 | 800 | 1,200 |
+| Complex projection after key removal | +1 | +1 | −1 | −1 |
+| Individual projection energy | 1 | 1 | 1 | 1 |
+
+The four-tone sum is zero at the stated alignment. Two successive pairs give `|1+1|² + |−1−1|² = 8`. Reorder the same tones to alternate signs and those pairs also cancel. The per-tone energy sum stays four in either order. These are raw signal terms. Changing window length also changes noise and the searched cutoff, so the numbers alone cannot rank word sensitivity.
+
+The finite-waveform check sends four contiguous two-cell tones with keyed offsets 0°, 180°, 90° and 270°. It lets the old tone arrive through both paths at each boundary. Over those full tone intervals, the mean per-tone projection power was **0.991033** of the unit flat-channel control. At the same nominal alignment the long coherent sum retained **4.07006 × 10⁻⁷** of the control's squared magnitude. Thus the cancellation also occurs to high accuracy when the calculation includes the actual transitions. The experiment gives the normalization, delay-tail treatment and analytic boundary bound. [Native finite-tone calculation](../../_appraisal/algorithms-matrixModem/lattice-validity/README.md#four-contiguous-held-tones)
+
+A common delay adjustment multiplies the four entries by `1, u, u², u³` for unit-magnitude `u`. Even the best such slope on these fixed projections retains only `16/27` of the squared magnitude possible with all four phases aligned. To reproduce the bound, factor `1+u−u²−u³ = (1+u)²(1−u)`, put `x = cos²(arg(u)/2)`, and maximize `64x²(1−x)/16` at `x = 2/3`. Finite tone boundaries, the other timing and oscillator hypotheses, four-bit scoring and competing words all enter an actual block decision. A physical fade at every used position removes energy before either branch can combine it. [Finite-cell fade calculation](#a-narrow-band-inside-a-two-ray-fade)
+
+This bound depends on the allowed correction. For example, at four equally spaced tone centres indexed by `t = 0,1,2,3`, the quadratic phase factor `exp(iπt(t−1)/2)` supplies exactly the signs +,+,−,−. Applied to the four settled projections it aligns all four. A physical drift hypothesis rotates samples *within* each tone as well. Its usable range, within-tone loss and effect on competing words require the configured search. The four-point calculation alone cannot establish a worst-case loss for that search.
+
+The native ten-bit experiment gives a complementary result. On its delayed, Doppler-shifted echo fixture, the joint rule recovered 115/120 words at 18 dB versus 15/120 for the original per-tone rule. On its independent phase-reset fixture at the same energy, the tighter per-tone cutoff in the joint rule reduced correct admissions from 105/120 to 91/120. Retain both branches and qualify their searched cutoffs on the weakest required channel. [Paired native trials and calibration](../../_appraisal/algorithms-matrixModem/block-reception/README.md#coherent-branch-and-protected-per-tone-fallback)
+
+There is field evidence for resolvable echoes and for the possibility of tracking them. The Java HF sounding above measured arrivals on the scale of this example's 1.25 ms excess delay. Ji and Wu reported three tracked paths on a 12.36 MHz Xi'an–Ürümqi link using a repeated 9.6 kHz-wide 8PSK signal at 43 dB in-band SNR after filtering. The true field delays were unknown. Separately estimating the paths deserves reconsideration when repeated observations support it. A weak FSK receiver would still have to establish the gain after estimation, false admissions and the complete search cost. Neither campaign measures the probability of the four phases in this example. [Dear et al., 2024, Fig. 10](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2023RS007877) · [Ji and Wu, 2026, §4.2](https://www.mdpi.com/1424-8220/26/5/1640) · [Triple Robust review of the Java sounding](../highFidelity-triple_Robust_Modem/Fable-5.2/32-skywave-dispersion-highlatitude-equatorial.md#java-nvis-public-received-iq-with-bounded-usability-checks)
+
 ## Adjacent tones under diffuse Doppler
 
 The earlier lattice work compared average achievable metrics with a keyed placement, primarily for two- and 24-cell tones. The following calculation resolves a narrower question for the previously omitted one-cell duration. Model one proper complex zero-mean Gaussian fading gain with Gaussian Doppler power spectrum (standard deviation `s`), white receiver noise, and known symbol boundaries and centre. The normalized signal covariance for tone `k` is
