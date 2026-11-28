@@ -15,7 +15,9 @@ search_ceiling.py for the adopted configuration: 512 tones of 10.24 s, sixteen p
 Measured inputs are read from the result files. Everything beyond the measured case of 174
 frequency bins, 4 drift hypotheses and 20 timing offsets is scaled by the stated rules and is an
 estimate, not a measurement:
-  - laptop: time per message = gather + drift hypotheses x (rung 0 transform) + lower rungs;
+  - laptop: time per message = gather + timing offsets x (drift hypotheses x rung 0 transform +
+    lower rungs), from the parts of the one-offset run; the measured case is the run that executed
+    its 20 offsets;
   - GPU: gather time plus a time in proportion to the rows of the matrix operand (drift
     hypotheses x bins on the whole block, plus the bins each lower rung needs in each of its
     windows), at the per-row cost of the 174-bin run up to its 2,294 rows, interpolated towards
@@ -47,9 +49,11 @@ def grab(path, pattern, group=1, which=0):
 
 
 # measured: laptop, FFTW, 12 threads (first section of the file)
-t_gather = grab("results/search_bench.md", r"Gather of 512 tone values \| ([0-9.]+) us") * 1e-6
-t_rung0 = grab("results/search_bench.md", r"Rung 0, per drift hypothesis[^|]*\| ([0-9.]+) us") * 1e-6
-t_rest = grab("results/search_bench.md", r"Rungs 1 to 8 together \| ([0-9.]+) us") * 1e-6
+t_gather = grab("results/search_bench.md", r"Gather of 512 tone values and positions, once per message \| ([0-9.]+) us") * 1e-6
+t_rung0 = grab("results/search_bench.md", r"Rung 0, per drift hypothesis and timing offset[^|]*\| ([0-9.]+) us") * 1e-6
+t_rest = grab("results/search_bench.md", r"All other rungs, per timing offset \| ([0-9.]+) us") * 1e-6
+# measured with the 20 timing offsets executed and one gather per message (first such section)
+t_cpu20 = grab("results/search_bench.md", r"\| 24 bits \| ([0-9.e+]+) s \| [0-9.e+]+ \|\n")
 # measured: GPU
 g_rows_a = grab("results/gpu/search_gpu.out", r"rungs 0 to 8 in the product \((\d+) complex rows")
 g_ns_a = grab("results/gpu/search_gpu.out", r"gather \+ product \+ epilogue\s+([0-9.]+) ns per message") * 1e-9
@@ -75,8 +79,8 @@ def bands(f):
     return 1 if f <= 1024 else math.ceil(f / 512)
 
 
-def cpu_transform(f, nd):
-    return (t_gather + nd * t_rung0 + t_rest) * bands(f)
+def cpu_transform(f, nd, nt):   # per message: one gather per band, then every timing offset
+    return (t_gather + nt * (nd * t_rung0 + t_rest)) * bands(f)
 
 
 def gpu_rows(f, nd):
@@ -121,7 +125,7 @@ print("| Route | Search time | Block duration / search time |\n| --- | ---: | --
 M = 2.0 ** 24
 rows = [
     ("Laptop, a full decode per hypothesis (13,920 decodes)", 13920 * d_cpu),
-    ("Laptop, FFT across tone sums (FFTW, 12 threads)", cpu_transform(174, 4) * M * 20),
+    ("Laptop, FFT across tone sums (FFTW, 12 threads), 20 offsets executed", t_cpu20),
     ("GPU, a full decode per hypothesis (13,920 decodes)", 13920 * d_gpu),
     ("GPU, cuFFT across tone sums", g_fft * M * 20),
     ("GPU, FP16 matrix product across tone sums (Tensor Cores)", g_ns_a * M * 20),
@@ -139,7 +143,7 @@ for k in (24, 16, 10):
     for name, f, nd, nt in CLASSES:
         hyp = f * nd * nt
         old_c, old_g = hyp * d_cpu * scale, hyp * d_gpu * scale
-        new_c = old_c if hyp == 1 else min(old_c, cpu_transform(f, nd) * M * nt * scale)
+        new_c = old_c if hyp == 1 else min(old_c, cpu_transform(f, nd, nt) * M * scale)
         new_g = old_g if hyp == 1 else min(old_g, gpu_transform(f, nd) * M * nt * scale)
         print(f"| {name} | {hyp:,} | {fmt(BLOCK/old_c)} | {fmt(BLOCK/new_c)} | {fmt(BLOCK/old_g)} | {fmt(BLOCK/new_g)} |")
     print()

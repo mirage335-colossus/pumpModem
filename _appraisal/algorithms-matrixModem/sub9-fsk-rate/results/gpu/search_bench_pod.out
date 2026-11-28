@@ -1,27 +1,112 @@
 # Hypothesis search by a transform across tone sums, CPU
 
-threads 27, tones 512, frequency bins on the whole block 174, drift hypotheses 4, rungs 9 (windows of 512 to 2 tones)
+threads 27, tones 512, frequency bins on the whole block 174, drift hypotheses 4, timing offsets 1, rungs 9
 transform: plain radix-2 transform of this program
 timed on 512 blocks of 4096 messages (2097152 messages), all threads busy
 
-planted message 7f3a79, frequency bin -21, drift hypothesis 2; found 7f3a79, bin -21, drift 2: correct
+planted message 7f3a79, frequency bin -21, drift hypothesis 2, timing offset 0; found 7f3a79, bin -21, drift 2, offset 0: correct
 
-| Part, per message and timing hypothesis | Time | Rate |
+| Part | Time | Rate |
 | --- | ---: | ---: |
-| Gather of 512 tone values | 0.027 us | 1.91e+10 tone lookups/s |
-| Rung 0, per drift hypothesis: de-chirp, transform of 1024 points, 174 bin energies | 0.273 us | 3.66e+06 transforms/s |
-| Rungs 1 to 8 together | 1.469 us | |
-| All of it with 4 drift hypotheses | 2.588 us | 3.86e+05 messages/s |
+| Gather of 512 tone values and positions, once per message | 0.050 us | 1.03e+10 tone lookups/s |
+| Rung 0, per drift hypothesis and timing offset: de-chirp, transform of 1024 points, 174 bin energies | 0.289 us | 3.46e+06 transforms/s |
+| All other rungs, per timing offset | 1.418 us | |
+| All of it, per message, with 4 drift hypotheses and 1 timing offset | 2.624 us | 3.81e+05 messages/s |
 
-frequency and drift hypotheses evaluated per message and timing: 174 x 4 on the whole block, 872 with the shorter rungs
+One timing offset over all messages, and 20 timing offsets as 20 times that, against a block of 5243 s:
 
-One timing hypothesis over all messages, and the whole search with 20 timing offsets, against a block of 5243 s:
-
-| Block | One timing hypothesis | 20 timing offsets | Block duration / search time |
+| Block | One timing offset | 20 timing offsets | Block duration / search time |
 | --- | ---: | ---: | ---: |
-| 24 bits | 43.41 s | 868.3 s | 6.038 |
-| 16 bits | 0.1696 s | 3.392 s | 1546 |
-| 10 bits | 0.00265 s | 0.053 s | 9.893e+04 |
+| 24 bits | 44.03 s | 880.6 s | 5.954 |
+| 16 bits | 0.172 s | 3.44 s | 1524 |
+| 10 bits | 0.002687 s | 0.05375 s | 9.755e+04 |
+
+The 16-bit and 10-bit rows are the 24-bit time divided by 2^8 and 2^14, not separate timings.
+
+best energy per rung: 1.488e+06 7.179e+05 3.7e+05 1.567e+05 9.364e+04 4.552e+04 2.677e+04 1.621e+04 1.044e+04
+
+---
+
+# Hypothesis search by a transform across tone sums, CPU
+
+threads 27, tones 512, frequency bins on the whole block 174, drift hypotheses 4, timing offsets 20, rungs 9
+transform: plain radix-2 transform of this program
+timed on 256 blocks of 4096 messages (1048576 messages), all threads busy
+
+planted message 7f3a79, frequency bin -21, drift hypothesis 2, timing offset 1; found 7f3a79, bin -21, drift 2, offset 1: correct
+
+| Part | Time | Rate |
+| --- | ---: | ---: |
+| Gather of 512 tone values and positions, once per message | 0.050 us | 1.02e+10 tone lookups/s |
+| Rung 0, per drift hypothesis and timing offset: share of turn and summing, de-chirp, transform of 1024 points, 174 bin energies | 0.297 us | 3.37e+06 transforms/s |
+| All other rungs, per timing offset | 1.433 us | |
+| All of it, per message, with 4 drift hypotheses and 20 timing offsets | 52.479 us | 1.91e+04 messages/s |
+
+The whole search with its 20 timing offsets executed, against a block of 5243 s:
+
+| Block | Search time | Block duration / search time |
+| --- | ---: | ---: |
+| 24 bits | 880.4 s | 5.955 |
+| 16 bits | 3.439 s | 1524 |
+| 10 bits | 0.05374 s | 9.756e+04 |
+
+The 16-bit and 10-bit rows are the 24-bit time divided by 2^8 and 2^14, not separate timings.
+
+best energy per rung: 1.48e+06 7.101e+05 3.703e+05 1.662e+05 9.114e+04 4.816e+04 2.515e+04 1.573e+04 1.043e+04
+
+---
+
+# Hypothesis search by a transform across tone sums, CPU
+
+threads 27, tones 2048 summed into 512 sub-blocks of 4, frequency bins on the whole block 174, drift hypotheses 4, timing offsets 20, rungs 11
+transform: plain radix-2 transform of this program
+timed on 128 blocks of 4096 messages (524288 messages), all threads busy
+
+planted message 131c1b, frequency bin -36, drift hypothesis 2, timing offset 0; found 131c1b, bin -36, drift 2, offset 0: correct
+
+| Part | Time | Rate |
+| --- | ---: | ---: |
+| Gather of 2048 tone values and positions, once per message | 0.253 us | 8.08e+09 tone lookups/s |
+| Rung 0, per drift hypothesis and timing offset: share of turn and summing, de-chirp, transform of 1024 points, 174 bin energies | 0.324 us | 3.09e+06 transforms/s |
+| All other rungs, per timing offset | 1.507 us | |
+| All of it, per message, with 4 drift hypotheses and 20 timing offsets | 56.322 us | 1.78e+04 messages/s |
+
+The whole search with its 20 timing offsets executed, against a block of 5243 s:
+
+| Block | Search time | Block duration / search time |
+| --- | ---: | ---: |
+| 24 bits | 944.9 s | 5.548 |
+| 16 bits | 3.691 s | 1420 |
+| 10 bits | 0.05767 s | 9.091e+04 |
+
+The 16-bit and 10-bit rows are the 24-bit time divided by 2^8 and 2^14, not separate timings.
+
+best energy per rung: 2.434e+07 9.564e+06 5.663e+06 2.662e+06 1.488e+06 7.78e+05 3.457e+05 2.016e+05 1.143e+05 6.776e+04 4.413e+04
+
+---
+
+# Hypothesis search by a transform across tone sums, CPU
+
+threads 27, tones 512, frequency bins on the whole block 174, drift hypotheses 4, timing offsets 1, rungs 9
+transform: plain radix-2 transform of this program
+timed on 256 blocks of 4096 messages (1048576 messages), all threads busy
+
+planted message 7f3a79, frequency bin -21, drift hypothesis 2, timing offset 0; found 7f3a79, bin -21, drift 2, offset 0: correct
+
+| Part | Time | Rate |
+| --- | ---: | ---: |
+| Gather of 512 tone values and positions, once per message | 0.052 us | 9.92e+09 tone lookups/s |
+| Rung 0, per drift hypothesis and timing offset: de-chirp, transform of 1024 points, 174 bin energies | 0.295 us | 3.39e+06 transforms/s |
+| All other rungs, per timing offset | 1.444 us | |
+| All of it, per message, with 4 drift hypotheses and 1 timing offset | 2.674 us | 3.74e+05 messages/s |
+
+One timing offset over all messages, and 20 timing offsets as 20 times that, against a block of 5243 s:
+
+| Block | One timing offset | 20 timing offsets | Block duration / search time |
+| --- | ---: | ---: | ---: |
+| 24 bits | 44.86 s | 897.2 s | 5.843 |
+| 16 bits | 0.1752 s | 3.505 s | 1496 |
+| 10 bits | 0.002738 s | 0.05476 s | 9.574e+04 |
 
 The 16-bit and 10-bit rows are the 24-bit time divided by 2^8 and 2^14, not separate timings.
 

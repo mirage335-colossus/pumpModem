@@ -1,6 +1,6 @@
 # Matrix Modem FSK research pass (Fable-5.2)
 
-26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: a stated form for every hypothesis dimension
+26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: measured simulation speed, and an audited specification
 
 This pass supports the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md). It
 builds on the [Sol-6.2](../Sol-6.2/README.md) and [Opus-5.5](../Opus-5.5/README.md) passes and
@@ -320,7 +320,7 @@ A cross-check of the repository's own earlier research, not a literature review:
     and every drift a de-chirp, and each rung of the ladder is searched only on the bins its
     length resolves. Measured for 24 bits, 512 tones and 13,920 hypotheses on the whole block
     (±1 ppm, ±0.1 s), against a block of 5,243 s: 35,300 s as a decode per hypothesis and
-    1,624 s by FFTW on the 12-thread laptop CPU; 980 s per hypothesis, 83 s by cuFFT and 11.4 s
+    1,643 s by FFTW on the 12-thread laptop CPU; 980 s per hypothesis, 83 s by cuFFT and 11.4 s
     as one FP16 matrix product on the GPU (404 nominal TFLOP/s, 60% Tensor Core activity over
     the whole pipeline; 8-bit integer operands 18.9 s). The laptop keeps up by 3.2 and the GPU
     by 461. Scaled, not measured: a free-running crystal with 24 bits is about twice too slow on
@@ -345,15 +345,39 @@ A cross-check of the repository's own earlier research, not a literature review:
     for the live receiver only, the no-repetition rule covered frequency and drift only while
     the text itself described repeated decodes for the spread bank and the wide-band fine
     timing steps, and simulation speed was not required at all.
-43. **Every hypothesis dimension now has a stated form, and none is a loop of decodes.**
-    Frequency and drift: a transform across tone sums (finding 40). Hypotheses with their own
-    evidence (spread bank, timing offsets of per-tone reception, wide-band fine timing steps):
-    one pass over the messages with vector table entries, measured on the laptop at 1.6, 6.0
-    and 6.7 times faster than the best pass per hypothesis for 7, 56 and 350 hypotheses (1.4,
-    3.9 and 4.5 with complex entries). Timing offsets of coherent attempts: one operand per
-    offset with the positions looked up once; a transform across positions as well is estimated
-    to gain about two on a CPU at 200 offsets and to lose on the matrix-product route, and is
-    not specified. The 32 additions per message and hypothesis remain where evidence differs.
+43. **Hypotheses that share work are an inner dimension of it; for the others the loop order
+    has to be measured on each machine.** Frequency and drift share the gather and the ladder
+    and are a transform across tone sums (finding 40). Hypotheses with their own evidence
+    (spread bank, timing offsets of per-tone reception, wide-band fine timing steps) share only
+    the enumeration of the messages. One pass with vector table entries against the best pass
+    per hypothesis, for 7, 56 and 350 hypotheses: 1.6, 6.0 and 6.7 times faster on the laptop,
+    0.7, 4.2 and 11.8 on 27 threads of an EPYC 9554, and 1.7, 8 and 10 times slower on the RTX
+    PRO 6000, where a pass per hypothesis keeps its table in shared memory. An earlier form of
+    this finding and of the specification made the one pass a rule; the GPU result withdrew
+    that. Timing offsets of coherent attempts are one operand per offset with the positions
+    looked up once (measured: 1,643 s with 20 offsets executed). The 32 additions per message
+    and hypothesis remain where evidence differs.
+44. **Short tones are summed into sub-blocks before the transform, and the ceiling then falls
+    far less steeply with the tone rate.** Measured on the laptop for the ±1 ppm, 24-bit
+    search, block duration ÷ search time: 8.9 with 41 s tones, 3.2 with 10.24 s, 2.4 with
+    2.56 s, 1.1 with 0.64 s, 0.22 with 0.16 s. The decode-per-hypothesis count had 0.6, 0.15,
+    0.04 and 0.002 for 41, 10.24, 2.56 and 0.16 s.
+45. **Simulation speed on the 32-CPU RTX PRO 6000 class is measured for a 10-bit block Monte
+    Carlo:** 34,900 trials a second with generation, gather, the product over every rung and
+    the epilogue on the GPU (1.8 × 10⁸ times real time; 72% Tensor Core activity), 81,000 with
+    the whole-block window only. The pod's 27 CPU threads run the earlier CPU Monte Carlo at
+    613 block rows a second, the laptop at 67. Nothing was run on a 256-CPU machine.
+46. **Searching costs sensitivity as well as work.** For a 10-bit block, taking the best of the
+    696 frequency and drift hypotheses of the ±1 ppm class moves the 1% point from 13.0 dB to
+    about 14.6 dB (simulated on the GPU, 204,800 trials per level, offsets on the grid, steady
+    path). With frequency and drift known the simulation reproduces theory (12.87 dB for
+    exactly orthogonal messages).
+47. **An independent audit of the specification found it contradicting itself in nine places**
+    after three rounds of additions, among them "each hypothesis is a block decode" beside
+    "never", fixed transform routes beside "no fixed assignment", two tables of 13.1
+    disagreeing on when the gather is done, and an open decision that a settled row already
+    decided. All nine were corrected, with the smaller number slips it found (21.8 for 21.7 dB;
+    a leftover "about 65 decodes"; per-pair costs quoted without their hypothesis count).
 
 ## State of the specification
 
@@ -470,6 +494,24 @@ what that form rests on (finding 43), the one pass with vector entries was built
 and 13.2, item 7 and item 8 of section 8, open decisions 12 and 22 and the weaknesses were
 brought into line.
 
+On a third request to update the specification, three things were done (findings 43 to 47).
+The forms still marked "derived, not built" were built and measured: timing offsets executed
+with one gather, and short tones summed into sub-blocks. Simulation speed was measured on the
+32-CPU RTX PRO 6000 class with a GPU Monte Carlo, which also gave the sensitivity cost of
+searching. An independent read-only audit compared the specification with the research
+documents and with itself. In the specification: rule 2 of 13.1 now says that hypotheses
+sharing work are an inner dimension of it and that the loop order is otherwise a measured
+route, with a "Precedence" bullet; the work table was corrected (gather per message, alignment
+and band; a timing offset inside an eighth of the tone is a phase slope) and given counts for
+the tests of section 8; the dimension table gained the cases the audit found missing (bands
+beyond 1,024 bins, tilted bin paths, clock rate, hop frequency, held-tone centre, delay
+rate); rule 1 gained the definition of the best fixed assignment, the two extreme
+configurations and the worker count; 13.2 and 13.5 carry the simulation measurements; 12.2
+carries the items the audit found only in the note (antenna and path delay against a timing
+step, the 1.28 s tone's floor, echoes and the spacing rule, the assumption behind the
+bandwidth formula); open decision 23 (precision of the transforms) is new; and the nine
+contradictions are resolved.
+
 ## Corrections to earlier Matrix Modem documents
 
 Found by the reviews of this pass. The first four are annotated where they occur.
@@ -487,6 +529,7 @@ Found by the reviews of this pass. The first four are annotated where they occur
 | [Lattice design note](fsk-lattice-design.md), "Without FHSS" | "The lattice scale is worth at most 1.6 dB, and only for an antenna narrower than about 50 Hz" | Holds for antenna loss alone at 4 to 16 positions. The scale is also what lets sixteen positions fit the mains slot and a 10 s tone keep a wide spacing ([sub-9 kHz note](sub9khz-fsk-rate-and-spacing.md)) |
 | [Sub-9 kHz note](sub9khz-fsk-rate-and-spacing.md), first version, and specification 12.2 of 28 November | With a ±1 ppm reference the laptop is seven times too slow for 24 bits at 10.24 s tones; a 24-bit block with a free-running crystal is out of reach at any rate; Tensor Cores do not help the ladder | Those figures loop a full decode over every hypothesis. As a transform across tone sums the laptop keeps up by 3.2 and the GPU by 461 (measured); a crystal with 24 bits is about twice too slow on one GPU (scaled). The matrix product that was slow was the search over messages; the search over frequency and drift runs at 404 nominal TFLOP/s |
 | Specification 13.1 and the sub-9 kHz note, 28 November, before the last revision | Splitting tone values by position "pays whenever the timing offsets outnumber the positions" and would be "12 times cheaper" at 200 offsets | That count left out the transform across positions. Costed from measured transform times the gain is about two on a CPU at 200 offsets, and on the matrix-product route it is a loss |
+| Specification 13.1 and finding 43, before the last revision | Hypotheses with their own evidence are scored in "one pass with vector entries"; hypotheses "are never a loop around the decode" | Measured on three machines the one pass wins on CPUs for many hypotheses and loses on the GPU by 1.7 to 10. The loop order there is a route for the scheduler; only work the hypotheses share must not be repeated |
 | Specification section 13 and finding 10 above | "About 65" coherent-ladder decodes a second, by extrapolation from 8,400 | Measured 36.9 for 64 windows and the specification's block shape; the per-tone decode measures 5,900, the 8,400 was for 24 symbols of 64 tones |
 ## Open questions carried forward
 
@@ -517,12 +560,11 @@ Found by the reviews of this pass. The first four are annotated where they occur
     tolerance of the 80 ms phase ramp; mains and railway harmonic amplitudes near 8 kHz at a
     receiving site, and the carrier to use where no slot is clear; the night mode cut-offs near
     5.17 and 8.27 kHz; a measured phase spectrum of a sub-9 kHz carrier; the transform search
-    inside a receiver (bin values per timing offset, tilted bin paths, short tones summed into
-    sub-blocks, a fused epilogue, batched small transforms on the CPU, the 4-bit and FP8/FP4
-    Tensor paths); one pass with vector table entries for the spread bank and for the fine
-    timing steps of the wide-band specular search; the split by position for timing
-    uncertainty of ±1 s and more; tiered screening; a simulator of the complete format and its
-    speed on a 256-CPU machine and on a 32-CPU machine with an RTX PRO 6000.
+    inside a receiver (bin values per alignment and band, tilted bin paths, a fused epilogue,
+    batched small transforms on the CPU, the 4-bit and FP8/FP4 Tensor paths); a better GPU
+    kernel for hypotheses with their own evidence; the split by position for timing
+    uncertainty of ±1 s and more; tiered screening; a simulator of the complete format; and
+    simulation speed on a 256-CPU machine, which needs the hourly-billed Linode route.
 
 ## Cost and provenance of the GPU run
 
@@ -533,7 +575,8 @@ type for 0.076 h and 0.095 h, about 0.46 USD together, both verified removed. Th
 the timings after an independent check found that the first CPU benchmark had left threads idle.
 The adoption work of 28 November (phase-ramp calculation, DOI checks, storing the reviews) used
 no remote compute. The search benchmark that followed used a third pod of the same type for
-0.116 h, about 0.31 USD, verified removed. The text of 47 CFR 15.247 was read once through a delegated web fetch (Cornell LII
+0.116 h, about 0.31 USD, and the simulation benchmark a fourth for 0.220 h, about 0.59 USD,
+both verified removed. No Linode instance was used in this pass. The text of 47 CFR 15.247 was read once through a delegated web fetch (Cornell LII
 and the GovInfo 2023 annual edition). Device, software, hashes and method are in the
 [computation note](computation-and-simulation-speed.md#the-run). All other calculations ran on the
 local 12-thread Ryzen 5 PRO 5650U.

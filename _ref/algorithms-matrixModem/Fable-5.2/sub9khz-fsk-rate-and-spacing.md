@@ -56,7 +56,7 @@ measured. Nothing here is a qualified receiver.
    **With a lesser reference the search must not repeat the decode for every hypothesis.** A
    ±1 ppm reference with ±0.1 s of timing needs 13,920 hypotheses on the whole block. Done as
    13,920 decodes, a 24-bit block takes 35,300 s on the laptop and 980 s on the GPU, against a
-   block of 5,243 s. Done as a transform across each message's tone sums it takes 1,624 s on
+   block of 5,243 s. Done as a transform across each message's tone sums it takes 1,643 s on
    the laptop (an FFT) and 11 s on the GPU (one FP16 matrix product on Tensor Cores at 404
    nominal TFLOP/s), both measured (section 6.4). The first version of this note reported only
    the first way and concluded that the laptop was seven times too slow and that Tensor Cores
@@ -642,9 +642,9 @@ bins, 4 drift hypotheses and 20 timing offsets on the whole block, every rung of
 | Route | Search time | Block duration ÷ search time |
 | --- | ---: | ---: |
 | Laptop, one full decode per hypothesis (13,920 decodes; section 6.2) | 35,300 s | 0.15 |
-| Laptop, FFT across tone sums, FFTW, 12 threads | 1,624 s | 3.2 |
-| Laptop, the same with a plain radix-2 transform | 7,046 s | 0.74 |
-| EPYC 9554, 27 threads, plain radix-2 transform | 868 s | 6.0 |
+| Laptop, FFT across tone sums, FFTW, 12 threads, its 20 timing offsets executed | 1,643 s | 3.2 |
+| Laptop, the same with a plain radix-2 transform (one offset timed, times 20) | 6,917 s | 0.76 |
+| EPYC 9554, 27 threads, plain radix-2 transform, 20 offsets executed | 880 s | 6.0 |
 | GPU, one full decode per hypothesis | 980 s | 5.4 |
 | GPU, cuFFT across tone sums | 83 s | 63 |
 | GPU, FP16 matrix product across tone sums, Tensor Cores | 11.4 s | 461 |
@@ -663,10 +663,25 @@ bins, 4 drift hypotheses and 20 timing offsets on the whole block, every rung of
 - **The library transform matters on the CPU**: FFTW was 4.3 times faster than the plain
   radix-2 loop, and more than half of the laptop's time went into the many small transforms of
   the shorter rungs, which are called one at a time here.
-- With 41 s tones (128 per block) the laptop needs 570 s; with 2.56 s tones (2,048) and no
-  summing into sub-blocks 7,412 s. Shorter tones should be summed into about 512 sub-blocks
-  before the transform, which leaves the gather as the part that grows with the tone rate; that
-  was not built.
+- **Timing offsets are executed, with one gather.** The first run timed one offset and
+  multiplied by 20 (1,624 s). The program now looks the positions up once per message and
+  turns the gathered values by each offset's phase slope: 1,643 s with the 20 offsets
+  executed, the planted offset found, the gather under 1% of the time.
+- **Shorter tones are summed into 512 sub-blocks before the transform** (built and measured on
+  the laptop, same search, 20 offsets executed):
+
+  | Tone | Tones per block | Search time | Block duration ÷ search time |
+  | --- | ---: | ---: | ---: |
+  | 41 s (one offset timed, times 20) | 128 | 588 s | 8.9 |
+  | 10.24 s | 512 | 1,643 s | 3.2 |
+  | 2.56 s, summed by 4 | 2,048 | 2,148 s | 2.4 |
+  | 2.56 s, not summed (one offset, times 20) | 2,048 | 7,956 s | 0.66 |
+  | 0.64 s, summed by 16 | 8,192 | 4,667 s | 1.1 |
+  | 0.16 s, summed by 64 | 32,768 | 24,200 s | 0.22 |
+
+  The ceiling still follows the tone rate, through the gather and the turn per offset, but far
+  less steeply than the per-hypothesis loop suggested: 4.6 times too slow at 0.16 s tones,
+  where section 6.2 had 430.
 - **One hypothesis is still one plain decode.** With logged GPS references the full-ladder
   kernel (2.5 s on the laptop, 0.07 s on the GPU) is the cheaper route; the transform pays from
   some tens of hypotheses on the laptop and from about ten on the GPU. Choosing between them is
@@ -679,10 +694,10 @@ passes as `search_margins` states):
 | Reference at each end | Laptop, 24 bits | GPU, 24 bits | Laptop, 16 bits | GPU, 16 bits | Laptop, 10 bits |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | GPS-locked, corrections logged | 2,067 | 74,483 | 529,000 | 19 million | 34 million |
-| Slewed unseen at 1 ppm | 18 | 1,900 | 4,550 | 488,000 | 291,000 |
-| TCXO, ±1 ppm, ±0.1 s | 3.2 | 461 | 827 | 118,000 | 52,900 |
-| Crystal, ±20 ppm, ±1 s | 0.013 | 0.47 | 3.3 | 119 | 208 |
-| Sound-card clock, ±100 ppm, ±1 s | 0.0006 | 0.02 | 0.16 | 5.9 | 10 |
+| Slewed unseen at 1 ppm | 16 | 1,900 | 4,190 | 488,000 | 268,000 |
+| TCXO, ±1 ppm, ±0.1 s | 3.2 | 461 | 836 | 118,000 | 53,500 |
+| Crystal, ±20 ppm, ±1 s | 0.012 | 0.47 | 3.1 | 119 | 196 |
+| Sound-card clock, ±100 ppm, ±1 s | 0.0006 | 0.02 | 0.15 | 5.9 | 9.3 |
 
 - **What stays out of reach is narrower than first reported.** A 24-bit block with a
   free-running crystal is about twice too slow on one GPU and 80 times on the laptop, where the
@@ -699,8 +714,9 @@ timed. The kernels are stock: the library's general matrix product and a plain e
 
 ### 6.5 Hypotheses that are not a transform
 
-[Measured; `hypothesis_pass_bench` on the laptop, 12 threads, all 2²⁴ messages in every timed
-pass, synthetic tables with a planted message that won for every hypothesis.]
+[Measured; `hypothesis_pass_bench` on the laptop (12 threads) and on 27 threads of an EPYC 9554,
+and the same comparison in `sim_gpu` on an RTX PRO 6000 Blackwell; all 2²⁴ messages in every
+timed pass, synthetic tables with a planted message that won for every hypothesis.]
 
 Spread hypotheses, the timing offsets of per-tone reception and the fine timing steps of a
 wide-band coherent attempt each have their own evidence, so no transform yields them. What can
@@ -722,7 +738,64 @@ message are vector additions.
   complex ones. This does not bear on the sub-9 kHz configuration with locked references, which
   has one timing offset and no spread bank in its coherent attempts; it is here because the
   specification's rule against repeated work needed it.
-- Not run on a GPU.
+- **The result does not carry over between machines.** One pass against a pass per hypothesis,
+  for 7, 56 and 350 hypotheses with real entries:
+
+  | Machine | 7 | 56 | 350 |
+  | --- | ---: | ---: | ---: |
+  | Laptop, 12 threads | 1.6 times faster | 6.0 | 6.7 |
+  | EPYC 9554, 27 threads (0.012 s per hypothesis as the baseline) | 0.7 | 4.2 | 11.8 |
+  | RTX PRO 6000 Blackwell (0.19 ms per hypothesis as the baseline) | 0.59 | 0.12 | 0.10 |
+
+  On the GPU a pass per hypothesis keeps its 16 kB table in shared memory, and a GPU thread
+  has no vector instructions for the entries stored together, so the single pass is up to ten
+  times slower there. On the EPYC it loses for the seven hypotheses of the spread bank alone.
+  The loop order for these hypotheses is therefore a route to be measured on each machine, not
+  a rule; the specification was corrected accordingly (its 13.1, "Precedence").
+
+### 6.6 Simulation speed on the 32-CPU RTX PRO 6000 class
+
+[Measured; `sim_gpu` on a pod with one RTX PRO 6000 Blackwell and 27 threads of an EPYC 9554;
+`coherent_block_mc` timed on the same pod's CPU share and on the laptop.]
+
+A cell-mode Monte Carlo of the keyed 10-bit block of the adopted configuration, built on the
+search of section 6.4. A trial is one block with its own noise, planted message, frequency bin
+and drift. Trials are batched 128 at a time as rows of the matrix operand, exactly as the
+receiver batches messages. Everything that does not depend on the noise is built once.
+
+| Simulation | Trials a second | Times real time |
+| --- | ---: | ---: |
+| GPU: generation, gather, product over every rung, epilogue | 34,900 | 1.8 × 10⁸ |
+| GPU: the same with the whole-block window only | 81,000 | 4.3 × 10⁸ |
+| 27 threads of the EPYC: `coherent_block_mc`, every window, four channels, frequency known | 613 | 3.2 × 10⁶ |
+| Laptop, 12 threads: the same program | 67 | 3.5 × 10⁵ |
+
+Wrong blocks out of 204,800 per level:
+
+| Block `E/N₀` | Frequency and drift known | Searched over 696 hypotheses |
+| ---: | ---: | ---: |
+| 11 dB | 12.8% | 54.7% |
+| 12 dB | 4.5% | 32.4% |
+| 13 dB | 1.02% | 13.6% |
+| 14 dB | 0.13% | 3.3% |
+| 15 dB | 0.01% | 0.42% |
+| 16 dB | none | 0.02% |
+
+- **It reproduces theory.** With frequency and drift known the 1% point is at 13.0 dB; exactly
+  orthogonal messages need 12.87 dB, and the keyed code and the 4-bit bin values account for
+  the rest.
+- **Searching costs sensitivity as well as work.** Taking the best of the 696 frequency and
+  drift hypotheses moves the 1% point to about 14.6 dB, 1.6 dB more, for a 10-bit block. A
+  short block is hurt more by a search than a long one, because the hypotheses add to a small
+  set of messages. Locked references save this as well.
+- The GPU kept 98% activity and 72% Tensor Core activity at 583 W; the product is 82% of a
+  batch, the gather 9%, the epilogue and read-back 8%, the generation 1%. Six levels of
+  204,800 trials took 35 s.
+- The two programs do not simulate the same thing (the CPU one has wander channels and every
+  window, and no frequency search), so their rates do not compare CPU with GPU.
+- Limits: 10 bits; offsets on the grid; a steady path; a decision on the whole block only; no
+  presence test; one timing offset. Nothing was run on a 256-CPU machine, which needs the
+  hourly-billed Linode route with its own approval step.
 
 ## 7. Positions and a value-dependent phase
 
@@ -1059,6 +1132,10 @@ report is not kept; what it found and what was done:
 - The search benchmark on the GPU: a third on-demand pod of the same type on 28 November, 0.116 h,
   about 0.31 USD, verified removed, no persistent volume; identity and hashes in
   [`results/gpu/identity_search.out`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/results/gpu/identity_search.out).
+- The simulation benchmark and the CPU reruns on the pod: a fourth pod of the same type on
+  28 November, 0.220 h, about 0.59 USD, verified removed; identity and hashes in
+  [`results/gpu/identity_sim.out`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/results/gpu/identity_sim.out).
+  The four pods of this note cost about 1.36 USD together.
 - GPU and second CPU timings: two on-demand RTX PRO 6000 Blackwell Server Edition pods, 0.076 h
   and 0.095 h, about 0.46 USD together, both verified removed, no persistent volume. The second
   reran both programs after the CPU benchmark was corrected; its outputs are the stored ones.

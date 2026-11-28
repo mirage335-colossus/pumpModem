@@ -41,9 +41,13 @@ indexed in
 - **Below 9 kHz not hitting the computational ceiling has priority, and concealment is kept only
   where it costs no computation.** The band is widely regarded as useless and is shared with
   every electronic device, so an emission there is unlikely to draw complaint. The keyed phase
-  per tone stays because it is free; nothing that adds search work for concealment is offered
-  there. This case is also the extreme one that fixes how the receiver's search is built
-  ([section 8](#8-receiver-requirements), item 7).
+  per tone stays because it is free. Nothing that adds search work for concealment is offered
+  there: no phase steps inside a tone, no more than one phase per cell, no hopping. This case
+  is also one of the two extremes the receiver's computation is specified for. At HF the first
+  transform is the bulk of the work; below 9 kHz the hypothesis search is. The same measured
+  scheduling has to finish the whole job soonest in both
+  ([13.1](#131-rules-that-bind-every-implementation), rule 1; [section 8](#8-receiver-requirements),
+  item 7).
 - **Every tone carries a keyed phase.** At least one keyed phase change per tone is mandatory in
   every configuration, so that no observer on a steadier path than the intended receiver's can
   add the signal coherently without the key ([4.4](#44-phase-key)).
@@ -94,7 +98,9 @@ indexed in
 | Total FSK bandwidth | Configurable, a whole number of positions. Default 2.2 kHz (450–2,650 Hz audio) = 352 positions; up to 2.8 kHz = 448; down to 12.5 Hz = 2 positions | 12.5 Hz = 16 positions, for example from 8,259.375 Hz |
 | Tone rate | 6.25 tones per second by default (one cell per tone) | 0.098 tones per second (8 cells = 10.24 s per tone) |
 
-- Every tone length and hop length is a whole number of cells. Every tone is on a position. A
+- Every tone length is a whole number of cells, and so is the flat part of every hop; a hop is
+  a whole number of cells too, except the 0.4 s hop of 2.5 cells ([4.3](#43-hop)). Every tone
+  is on a position. A
   tone is unshaped and completes whole cycles in every cell. Its phase changes only by the keyed
   quarter turns of the phase key ([4.4](#44-phase-key)); below 9 kHz each change is spread over
   an 80 ms ramp.
@@ -446,8 +452,9 @@ each sent on `L` tones: 32·`L` tones per block.
    sample.
 4. **Transform.** One transform per cell, rectangular window, all positions and the fine bins
    around them that the widest spread hypothesis covers. For a tone longer than one cell the
-   cells are combined over the tone after the phase key has been undone. A CPU FFT serves live
-   reception; on a GPU a matrix-product DFT serves when only the positions are wanted.
+   cells are combined over the tone after the phase key has been undone. Its routes (CPU FFT,
+   GPU FFT, a matrix-product DFT on Tensor Cores) are chosen by measurement
+   ([13.4](#134-routes-and-scheduling-rule)).
 5. **Evidence.** For each position, a spread-weighted sum of bin energies for each hypothesis of
    a small bank (one bin, 10, 30, 60, 120, 250 and 500 Hz). The spread hypothesis is chosen per
    block, never per tone.
@@ -461,12 +468,14 @@ each sent on `L` tones: 32·`L` tones per block.
    - Quantize to four bits with the top level as a clip at 4 to 8 times the noise mean.
 6. **Accumulation.** One table of 256 integer sums per code symbol and hypothesis.
 7. **Search and decode.** Every timing, frequency-offset, drift and spread hypothesis is scored
-   against every message. **The hypotheses are not an outer loop around the decode.**
-   - *Per-tone reception:* one pass over the messages for all timing and spread hypotheses.
-     The evidence of all hypotheses for a symbol value is stored together, so that the
-     messages are enumerated once ([section 13](#131-rules-that-bind-every-implementation),
-     rule 2). On a laptop CPU that was 1.6 times faster than a pass per hypothesis for the
-     7 spread hypotheses and 6.0 times for 56 hypotheses.
+   against every message. **Hypotheses that share work are not an outer loop around it.**
+   - *Per-tone reception:* every timing and spread hypothesis has its own evidence, so only the
+     enumeration of the messages is shared. Two routes: one pass with the evidence of all
+     hypotheses for a symbol value stored together, or a pass per hypothesis with its table in
+     fast memory. Measured for 7, 56 and 350 hypotheses, the first is faster on CPUs once the
+     hypotheses are many (laptop 1.6, 6.0 and 6.7 times; 27 threads of an EPYC 9554 0.7, 4.2
+     and 11.8) and the second is faster on the GPU (by 1.7, 8 and 10). The scheduler chooses
+     ([13.1](#131-rules-that-bind-every-implementation)).
    - *Coherent attempts with a single frequency hypothesis* (references locked and logged): one
      decode on the window ladder.
    - *Coherent attempts with many frequency or drift hypotheses:* for each message and timing
@@ -478,12 +487,21 @@ each sent on `L` tones: 32·`L` tones per block.
    - *The transform across tone sums is a routed stage* like the first transform: a CPU FFT,
      a GPU FFT or one matrix product on Tensor Cores (messages × tones times tones ×
      hypotheses), chosen by the scheduling rule of [section 13](#13-computation-and-simulation).
-     Measured for a 24-bit block of 512 tones with 13,920 hypotheses on the whole block: 1,624 s
+     Measured for a 24-bit block of 512 tones with 13,920 hypotheses on the whole block: 1,643 s
      by CPU FFT on a 12-thread laptop and 11 s by the matrix product on an RTX PRO 6000
      Blackwell, against 35,300 s and 980 s with a decode per hypothesis
      ([12.2](#122-phase-stable-paths-below-9-khz)).
-   - Tones much shorter than the window's frequency resolution requires are first summed into
-     sub-blocks, so that the transform does not grow with the tone rate. Derived, not built.
+   - The positions a message selects are looked up once, whatever the number of timing
+     offsets; each offset turns the gathered values by the phase slope of their positions.
+   - Tones shorter than the frequency search needs are first summed into sub-blocks, so that
+     the transform does not grow with the tone rate. Measured on the laptop for the same
+     search: 2,148 s with 2.56 s tones and 4,667 s with 0.64 s tones, each summed into 512
+     sub-blocks (7,956 s for 2.56 s tones without summing); 24,200 s with 0.16 s tones, where
+     the gather and the turn per timing offset dominate.
+   - *Where the line lies.* A decode per hypothesis is the right form for one or a few
+     hypotheses and the wrong one for many. With the kernels measured the transform takes over
+     at about 30 hypotheses on the laptop and 10 on the GPU; the scheduler decides from its
+     measured costs.
 
    Timing hypotheses are an eighth of the phase interval apart, in offset and in
    clock rate: 20 ms for a one-cell tone or a phase step every cell, less in proportion for
@@ -525,8 +543,9 @@ each sent on `L` tones: 32·`L` tones per block.
      is applied to the stored bin values, so no fine step repeats the transform. The fine
      steps are further hypotheses of the one pass over the messages, with their table entries
      stored together; they multiply the additions, not the enumeration. Over 2.2 kHz that is
-     about 350 fine steps for each 20 ms step: 9.7 s per coarse step for 24 bits on a laptop
-     CPU in one pass, against 44 s as a pass per step.
+     about 350 fine steps for each 20 ms step: as kernels, 9.7 s per coarse step for 24 bits
+     on a laptop CPU in one pass (44 s as a pass per step), and 66 ms on the GPU as 350 passes
+     with real entries.
      A slow change of the path's delay, as the ionosphere's height changes, is far below the
      20 ms spacing but not below 57 µs, and adds a delay-rate search that is not sized.
    - **Multipath.** Where positions do not share a phase, the attempts gain only within the
@@ -541,7 +560,8 @@ each sent on `L` tones: 32·`L` tones per block.
    attempts. Ten times as many hypotheses cost about 0.3 dB of block time.
 10. **Precision.** After conditioning, operands are at most four bits (sample code, evidence, bin
     values, 0/1 code tables) with exact wide accumulation. Where a device has no native 4-bit path
-    the values are carried in wider containers; the arithmetic is unchanged.
+    the values are carried in wider containers; the arithmetic is unchanged. The coefficients
+    of a transform are not among these operands; their precision is open decision 23.
 
 Properties that tests must show:
 
@@ -551,13 +571,13 @@ Properties that tests must show:
 - With nothing but noise, conditioning and the 4-bit sample code together cost under 0.3 dB.
 - The block result is never worse than per-tone reception alone by more than the threshold
   change for the added attempts.
-- Work counts: for a block, the counted first transforms, gathers, transforms across tone sums
-  and passes over the messages equal the minimum of the table in
+- Work counts: for a block, the counted first transforms, gathers, turns, transforms across tone
+  sums and passes over the messages equal the counts of
   [13.1](#131-rules-that-bind-every-implementation), and no count grows with a loop that does
   not change that stage's inputs.
-- Scheduling: from a cold start, on each target machine, the whole job finishes within a stated
-  factor of the best fixed assignment found by trying the routes (placeholder 1.2; the
-  prototype reached 0.94 to 1.12).
+- Scheduling: from a cold start, on each target machine and for both extreme configurations
+  (default HF and sub-9 kHz), the whole job finishes within a stated factor of the best fixed
+  assignment as 13.1 defines it (placeholder 1.2; the prototype reached 0.94 to 1.12).
 - Simulation: on both experiment machines of [13.5](#135-simulation) a run reports its
   throughput, per-stage times and utilization, and its per-configuration work is done once
   whatever the number of trials.
@@ -809,8 +829,10 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   `P / (2π·C·V²)`: 64 to 176 Hz at 100 kV for 2.5 to 0.9 nF, 189 to 525 Hz at 58 kV, and 16 to
   44 Hz only at 200 kV. A lower-loss antenna cannot take the power: under the earlier antenna
   note's loss cases a 61 m antenna passes 18.5 to 620 Hz at 8.27 kHz (6 Hz at 2.97 kHz), and its
-  low-loss cases would stand at 111 to 309 kV with 10 kW. Theoretical; the voltage limit of a real 61 m installation is the
-  largest unknown.
+  low-loss cases would stand at 111 to 309 kV with 10 kW. The formula assumes the whole 10 kW
+  is dissipated in series with the antenna; a matched source or energy recovery changes the
+  bandwidth by 1.5 to 3 times. Theoretical; the voltage limit of a real 61 m installation is
+  the largest unknown.
 - **The antenna limits the span, not the tone rate.** Coherent loss with one phase for all
   positions, antenna unknown to the receiver:
 
@@ -856,15 +878,22 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   | Within ±5 mHz (Sub9 moderate) | 18.4 dB | 82 s |
   | Within ±50 mHz (Sub9 worst) | 22.5 dB | 10 s |
 
-  Per-tone reception alone needs 27.4, 24.5, 21.7 and 19.2 dB on the steady path with tones of
+  Per-tone reception alone needs 27.4, 24.5, 21.8 and 19.2 dB on the steady path with tones of
   0.64, 2.56, 10.24 and 41 s. A 10.24 s tone is the best window under the worst bound, so that
-  case needs no coherence between tones.
+  case needs no coherence between tones. The 1.28 s tone offered as the fastest has a floor of
+  26.0 dB, 4.2 dB worse. A receiver that has to pick its window per block needs up to 0.8 dB
+  more than the best window.
+- **Two further reasons for the span and the spacing.** Night echoes of 0.2 to 1.9 ms on short
+  and medium paths stay one path across 12.5 Hz. Spacing should be at least eight times the
+  spread, which puts the 0.39 Hz of `j` = 4 at its edge under the 50 mHz bound.
 - **Spacing equal to the reciprocal of a long tone is not offered.** Positions 0.098 Hz apart
   for 10.24 s tones decode as well up to the worst spread bound but have no shorter window: at
   0.5 Hz of spread they did not decode at any energy, where 0.78125 Hz spacing decoded at
   27.4 dB. They also tolerate only ±6 ppm of frequency error.
 - **Below 9 kHz the search volume, not the sample rate, is the computational load.** Each
-  frequency bin, drift-rate bin and timing offset is a block decode. Bins are half of 1 ÷ window
+  frequency bin, drift-rate bin and timing offset is a hypothesis to be scored against every
+  message; the bullets below say how that is done without repeating the decode. Bins are half
+  of 1 ÷ window
   apart (0.9 dB worst loss) and drift-rate hypotheses 3.9 bins of drift apart. Frequency ×
   drift-rate bins per coherent window, at 9 kHz, for assumed reference classes
   ([calculation 18](algorithms-matrixModem/fsk-lattice/results/lattice_receiver_section18.md)):
@@ -908,7 +937,7 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   | Route | Search time | Block duration ÷ search time |
   | --- | ---: | ---: |
   | Laptop, a decode per hypothesis | 35,300 s | 0.15 |
-  | Laptop, FFT across tone sums (FFTW, 12 threads) | 1,624 s | 3.2 |
+  | Laptop, FFT across tone sums (FFTW, 12 threads), its 20 timing offsets executed | 1,643 s | 3.2 |
   | GPU, a decode per hypothesis | 980 s | 5.4 |
   | GPU, cuFFT across tone sums | 83 s | 63 |
   | GPU, FP16 matrix product across tone sums on Tensor Cores | 11.4 s | 461 |
@@ -921,10 +950,10 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
 
     | Reference at each end | Laptop, 24 bits | GPU, 24 bits | Laptop, 16 bits | GPU, 16 bits | Laptop, 10 bits |
     | --- | ---: | ---: | ---: | ---: | ---: |
-    | Slewed unseen at 1 ppm | 18 | 1,900 | 4,550 | 488,000 | 291,000 |
-    | TCXO, ±1 ppm, ±0.1 s (24 bits measured) | 3.2 | 461 | 827 | 118,000 | 52,900 |
-    | Crystal, ±20 ppm, ±1 s | 0.013 | 0.47 | 3.3 | 119 | 208 |
-    | Sound-card clock, ±100 ppm, ±1 s | 0.0006 | 0.02 | 0.16 | 5.9 | 10 |
+    | Slewed unseen at 1 ppm | 16 | 1,900 | 4,190 | 488,000 | 268,000 |
+    | TCXO, ±1 ppm, ±0.1 s (24 bits measured) | 3.2 | 461 | 836 | 118,000 | 53,500 |
+    | Crystal, ±20 ppm, ±1 s | 0.012 | 0.47 | 3.1 | 119 | 196 |
+    | Sound-card clock, ±100 ppm, ±1 s | 0.0006 | 0.02 | 0.15 | 5.9 | 9.3 |
 
   - A 24-bit block with a free-running crystal is about twice too slow on one GPU and 80 times
     on the laptop; with 16 bits both keep up. A sound-card clock is in reach for 10 bits on the
@@ -932,9 +961,22 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   - A single hypothesis is still cheapest as one plain decode; the transform pays from some
     tens of hypotheses on the laptop and about ten on the GPU. The scheduler chooses.
   - With the 10.24 s tone the tone sums are the transform's input as they stand. Shorter tones
-    are summed into sub-blocks first, and the gather then grows with the tone rate; that case
-    was not built. The benchmark has synthetic bin values and stock kernels and leaves out the
-    forming of bin values per timing offset and the presence test.
+    are summed into 512 sub-blocks first, and the gather and the turn per timing offset then
+    grow with the tone rate. Measured on the laptop for the same search, block duration ÷
+    search time: 8.9 with 41 s tones, 3.2 with 10.24 s, 2.4 with 2.56 s, 1.1 with 0.64 s and
+    0.22 with 0.16 s. The naive loop had the laptop 430 times too slow at 0.16 s; it is 4.6.
+  - More than 1,024 frequency bins exceed what tone sums carry. The range is then cut into
+    bands of 512 bins, each with its own bin values, at 0.9 dB at a band edge; the crystal and
+    sound-card rows are scaled that way.
+  - **Searching also costs sensitivity.** For a 10-bit block the search over the 696 frequency
+    and drift hypotheses of the ±1 ppm class moved the 1% point from 13.0 dB to about 14.6 dB,
+    1.6 dB (simulated on the GPU, 204,800 trials per level, offsets on the grid, steady path,
+    whole-block window). Locked references save that as well as the work.
+  - The antenna's group delay (3.7 ms at 86 Hz, 13 ms at 24 Hz) and the path delay (3.3 ms per
+    1,000 km) are as large as one 10 ms timing step. With locked references they have to be
+    known, or a few timing offsets searched.
+  - The benchmarks have synthetic bin values and stock kernels, leave out the forming of bin
+    values and the presence test, and time the large CPU cases on a sample of the messages.
 - **Clock corrections must not add unknown drift or steps.** A GPS correction slewed at 1 ppm
   moves a 9 kHz carrier by 9 mHz, about 32 one-hour bins, and a correction stepped by 10 µs is a
   32° phase jump at 9 kHz. Proposed rule: no clock or phase steps inside a block at either end;
@@ -1040,38 +1082,67 @@ counts only if it was obtained under them.
      and machine. The matrix product beat cuFFT by 7 in the sub-9 kHz search and lost to it by
      2.1 on small batches of the first transform ([13.2](#132-measured)).
    - Every run records the times it measured and the assignment it chose.
+   - **Both extremes are served by the same scheduler:** a default HF configuration, where the
+     first transform is the bulk of the work, and the sub-9 kHz configuration, where the search
+     is. Neither gets a fixed assignment of its own.
+   - **Reference for the test of section 8.** The best fixed assignment is found by trying
+     every route listed in 13.4 for every stage, at portion sizes in powers of two, on a
+     recorded workload of at least one block of each configuration under test.
+   - **Workers.** Software workers number twice the logical CPUs, as elsewhere in this project,
+     so that preparing the next portions overlaps the running ones.
 2. **Do no work twice.** Work is done at the outermost loop level at which its inputs change,
    and its result is reused inside. No loop repeats work that its loop variable does not change.
-   - **Loop order of the search.** The search is over messages × hypotheses. The enumeration of
-     the messages, the 32 symbol values of each, is done once. Hypotheses are an inner,
-     vectorised dimension: a transform where they lie on a regular grid (frequency, drift), and
-     table entries that are vectors over the hypotheses where they do not (timing fine steps,
-     spread hypotheses). They are never a loop around the decode.
+   - **Loop order of the search.** The search is over messages × hypotheses. Work that the
+     hypotheses share is done once, and the hypotheses become an inner dimension of it. For
+     frequency and drift the shared work is the gather and the ladder, and the inner dimension
+     is a transform. Where every hypothesis has its own evidence (timing and spread in per-tone
+     reception, fine timing steps) only the enumeration of the messages is shared, and that is
+     cheap; the loop order is then a route like any other.
+   - **Precedence.** Rule 2 forbids repeating shared work. Where nothing substantial is shared,
+     and for a handful of hypotheses, rule 1 decides between the forms by measured cost. The
+     measurements below show why: the form that won on two CPUs lost on the GPU.
    - **Why it is a rule and not a detail.** A hypothesis loop around the decode repeats the
      gather and the whole ladder for every hypothesis. Measured for 13,920 hypotheses: 35,300 s
-     against 1,624 s on the laptop and 980 s against 11.4 s on the GPU. The outer loop made the
-     ceiling 22 and 86 times worse than it is.
+     against 1,643 s on the laptop and 980 s against 11.4 s on the GPU. The outer loop made the
+     ceiling 21 and 86 times worse than it is.
    - **What is done once per what:**
 
      | Work | Done once per | Reused by |
      | --- | --- | --- |
      | Keys, schedules, symbol values of every message, hypothesis matrices, transform plans | Configuration or block | Everything below |
-     | Conditioning and first transform | Cell | Every timing fine step (as a phase slope), spread hypothesis and message |
-     | Bin values | Timing offset | Every message, frequency bin and drift |
-     | Evidence table entries | Symbol value, for all spread and timing hypotheses together | Every message |
-     | Gather of a message's tone values | Message and timing offset | Every frequency bin, drift and rung |
+     | Conditioning and first transform | Cell, for each cell alignment (alignments an eighth of the tone apart) | Every timing offset inside the alignment, spread hypothesis and message |
+     | Bin values | Alignment and frequency band (a band is up to 512 bins of the whole block; one band unless the range exceeds 1,024 bins) | Every message, timing offset, frequency bin and drift of the band |
+     | Evidence table entries of per-tone reception | Spread and timing hypothesis | Every message |
+     | Gather of a message's tone values and positions | Message, alignment and band | Every timing offset, frequency bin, drift and rung |
+     | Turn by a timing offset's phase slope; sum of short tones into sub-blocks | Message and timing offset | Every frequency bin, drift and rung |
      | De-chirp and transform across tone sums | Message, timing offset and drift | Every frequency bin of the whole block |
      | Transform of a rung's windows | Message and timing offset | That rung's bins, and only those its window length resolves |
-     | Decoy-key thresholds | Configuration | Every block, and every trial of a simulation |
+     | Scores under the decoy keys | Block, in the same pass as the real key | The presence test |
 
+   - **Counts for one block,** against which the test of section 8 counts. With `M` messages,
+     `A` alignments, `F` bands, `T` timing offsets per alignment, `D` drift hypotheses and `W`
+     windows in all rungs below the whole block: first transforms = cells × `A`; gathers =
+     `M`·`A`·`F`; turns = `M`·`A`·`F`·`T`; transforms across tone sums = `M`·`A`·`F`·`T`·(`D` +
+     `W`); passes over the messages in per-tone reception = 1 with vector entries, or one per
+     hypothesis, whichever route is chosen.
+   - **When a timing offset is a phase slope.** Inside an eighth of the tone from a computed
+     alignment an offset is a phase slope across positions on that alignment's bin values;
+     beyond it new bin values are formed.
    - **How each hypothesis dimension is carried.**
 
      | Dimension | Form | Basis |
      | --- | --- | --- |
-     | Frequency and drift in coherent attempts | A transform across the message's tone sums, by FFT or as one matrix product; each rung only on the bins its window length resolves | Measured: 22 times faster on the laptop and 86 times on the GPU than a decode per hypothesis ([12.2](#122-phase-stable-paths-below-9-khz)) |
-     | Spread hypotheses and timing offsets of per-tone reception; fine timing steps of the wide-band coherent attempt | Vector entries: the evidence of all hypotheses for a symbol value lies together, and one pass over the messages adds vectors | Measured on the laptop CPU against the best pass per hypothesis: 1.6, 6.0 and 6.7 times faster for 7, 56 and 350 hypotheses with real entries, and 1.4, 3.9 and 4.5 times with complex entries. Not run on a GPU |
-     | Timing offsets in coherent attempts | One operand per offset: the positions a message selects are looked up once, and each offset turns the gathered values by the phase slope of their positions before the transform | The transform per offset is a different operand, not repeated work. Looking the positions up once saves the gather's share, 4% on the laptop and 7% on the GPU (from the measured parts; the benchmarks still gather per offset) |
-     | A single hypothesis | One plain decode | Measured |
+     | Frequency and drift in coherent attempts | A transform across the message's tone sums, by FFT or as one matrix product; each rung only on the bins its window length resolves | Measured: 21 times faster on the laptop and 86 times on the GPU than a decode per hypothesis ([12.2](#122-phase-stable-paths-below-9-khz)) |
+     | Timing offsets in coherent attempts | One operand per offset: the positions a message selects are looked up once, and each offset turns the gathered values by the phase slope of their positions before the transform | Measured on the laptop with the 20 offsets executed: 1,643 s for the 24-bit search, the one gather being under 1% of it. On the GPU the operand is formed per offset, 7% of the time |
+     | Short tones | Summed into sub-blocks after the turn, so that the transform keeps its size | Measured on the laptop: 2,148 s against 7,956 s for 2.56 s tones |
+     | Spread hypotheses and timing offsets of per-tone reception; fine timing steps of the wide-band coherent attempt | Two routes: one pass over the messages with the entries of all hypotheses stored together, or a pass per hypothesis with its table in fast memory | Measured for 7, 56 and 350 hypotheses, one pass against a pass per hypothesis: laptop 1.6, 6.0 and 6.7 times faster; 27 threads of an EPYC 9554 0.7, 4.2 and 11.8; RTX PRO 6000 slower, by 1.7, 8 and 10 |
+     | A frequency range beyond 1,024 bins | Bands of 512 bins, each with its own bin values and gather; 0.9 dB at a band edge | Scaled in 12.2; not built |
+     | Drift on the two rungs below the whole block | Energies summed along tilted bin paths in the epilogue | Not built |
+     | Clock rate, where the sample clock is not tied to the carrier reference | One operand per hypothesis, as for timing offsets | Not sized beyond the factor of up to 200 of 12.2 |
+     | Frequency error of each hop with FHSS | The same transform across the tones of one hop | Not measured |
+     | Centre of a held tone with FHSS | Inside the evidence, before the search over messages (section 8, item 5) | Not a search dimension |
+     | Delay rate on a specular HF path | No form stated | Not sized |
+     | A single hypothesis, or a few | A plain decode each | Measured; the transform takes over at about 30 hypotheses on the laptop and 10 on the GPU |
 
    - **A transform across positions as well is not specified.** It would give every timing
      offset inside a cell at once. Estimated from the measured transform times it gains about
@@ -1079,9 +1150,11 @@ counts only if it was obtained under them.
      because the operand would have to be spread over the positions: 16 times the product
      below 9 kHz, 352 times over 2.2 kHz. Not built.
    - **What remains per message and hypothesis.** Where the evidence differs per hypothesis the
-     additions remain: 32 per message and hypothesis, at 0.8 ns (real) and 1.7 ns (complex) per
-     message and hypothesis on the laptop in one pass. No route found so far avoids them.
-   - **Benchmarks.** A ceiling figure states its work counts against the table above. A figure
+     32 additions per message and hypothesis remain. On the laptop they take 0.8 ns (real) and
+     1.7 ns (complex) per message and hypothesis in one pass of 350 hypotheses, and 3.1 and
+     5.6 ns in a pass of 7; on the GPU 0.011 ns as a pass per hypothesis with real entries. No
+     route found so far avoids them.
+   - **Benchmarks.** A ceiling figure states its work counts against the counts above. A figure
      taken with a repeated inner stage is labelled as the cost of that structure, not as the
      ceiling.
 3. **Simulation speed is a requirement**, of the same rank as the receiver's ceiling
@@ -1103,7 +1176,11 @@ counts only if it was obtained under them.
   | 350 (the wide-band fine timing steps) | 4.5 s | 6.7 | 9.7 s | 4.5 |
 
   The planted message won for every hypothesis. Synthetic tables; the gain comes from adding
-  eight to sixteen hypotheses in one instruction and from forming the symbol values once.
+  eight to sixteen hypotheses in one instruction and from forming the symbol values once. On
+  27 threads of an EPYC 9554 the same comparison gave 0.7, 4.2 and 11.8 with real entries and
+  0.6, 3.0 and 8.9 with complex ones (0.012 s per hypothesis as the baseline): slower for the
+  spread bank alone, faster for many hypotheses. The tables for 350 hypotheses (5.7 and
+  11.4 MB) fit the last-level cache of both CPUs; on a smaller cache the gain would shrink.
 - **Measured on a full RTX PRO 6000 Blackwell**, batches of 32,768 two-cell tones:
   - cuFFT and an FP16 matrix-product DFT both exceed 20 million times real time. Which is faster
     depends on the bins wanted and on the batch: at 32,768 per call the matrix product is 1.2
@@ -1127,7 +1204,18 @@ counts only if it was obtained under them.
     TFLOP/s; 60% Tensor Core activity and 99% GPU activity over gather, product and epilogue),
     18.9 s with 8-bit integer operands, 83 s by cuFFT and 980 s as a decode per hypothesis. The
     product was 69% of the pipeline's time, the epilogue 24% and the gather 7%. FFTW on the
-    12-thread laptop CPU took 1,624 s, against 35,300 s as a decode per hypothesis.
+    12-thread laptop CPU took 1,643 s with the 20 timing offsets executed, against 35,300 s as
+    a decode per hypothesis; a plain radix-2 transform took 6,917 s there and 880 s on 27
+    threads of an EPYC 9554.
+  - **A Monte Carlo of the 10-bit block ran at 34,900 trials a second**, generation, gather,
+    product over every rung and epilogue included (1.8 × 10⁸ times real time for an 87-minute
+    block; 98% GPU activity and 72% Tensor Core activity sustained), and at 81,000 with the
+    whole-block window only. With frequency and drift known, 1.0% of 204,800 blocks were wrong
+    at 13 dB, where exactly orthogonal messages need 12.87 dB; searched over the 696
+    hypotheses, 1% is reached at about 14.6 dB.
+  - A pass per hypothesis over all 2²⁴ messages with its table in shared memory took 0.19 ms.
+    One pass with the entries of all hypotheses stored together was slower there: 1.7, 8 and
+    10 times for 7, 56 and 350 hypotheses.
   - A sample-level simulation, noise generation included, ran at 7–12 million times real time: a
     day of signal in about 10 ms.
   - With a search running on the same GPU, every GPU transform route fell to the same 7–14
@@ -1156,15 +1244,16 @@ counts only if it was obtained under them.
     them shifts with the configuration: at HF the first transform is the bulk and the search is
     small, below 9 kHz the first transform is negligible and the search is everything.
   - Coherent attempts add two table columns per window: 128 times the decode work for a ladder
-    down to 1/64 of the block (about 65 full 24-bit decodes a second by extrapolation, 36.9
-    measured for the specification's block shape). A ladder from two tones up follows the tone
-    count instead. Over 2.2 kHz the specular search adds about 350 fine timing steps for each
-    coarse one, which is not measured.
+    down to 1/64 of the block (36.9 full 24-bit decodes a second measured for the
+    specification's block shape). A ladder from two tones up follows the tone count instead.
+    Over 2.2 kHz the specular search adds about 350 fine timing steps for each coarse one,
+    measured as kernels only ([13.2](#132-measured)).
 ### 13.4 Routes and scheduling rule
 
 - **Routes the scheduler has to hold.** For the first transform: CPU FFT, GPU FFT, and a
-  matrix-product DFT on Tensor Cores when only some bins are wanted. For the search over
-  messages: lookups in evidence tables, on CPU or GPU. For the search over frequency and drift:
+  matrix-product DFT on Tensor Cores, which computes only the bins wanted. For the search over
+  messages: lookups in evidence tables, on CPU or GPU. For hypotheses with their own evidence:
+  one pass with vector entries, or a pass per hypothesis with its table in fast memory. For the search over frequency and drift:
   a plain decode per hypothesis when there are few, and otherwise a transform across tone sums
   by CPU FFT, GPU FFT or one Tensor Core matrix product, followed by its epilogue. Portions of
   the last kind are batches of messages for one timing offset. In simulation also: signal and
@@ -1178,8 +1267,10 @@ counts only if it was obtained under them.
      time each takes is kept as a running cost per unit of work for every stage, route, portion
      size and device. If something else shares the device, that time includes the wait and is
      still the cost to use.
-  4. About 0.5 s in every 10 s goes to portions run by routes and sizes other than the current
-     best, to keep the costs fresh.
+  4. About one twentieth of the work (0.5 s in every 10 s of a live receiver) goes to portions
+     run by routes and sizes other than the current best, to keep the costs fresh. A portion is
+     never longer than a batch of messages: a decode or trial that takes seconds is cut along
+     its messages.
   5. Each stage's work on a device goes by its cheapest route and size. A free executor takes the
      oldest portion of the stage in which it is least disadvantaged against the other devices, and
      leaves it alone when the others would clear all queued work sooner than it would finish that
@@ -1203,23 +1294,25 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
   directly and is exact for a linear front end under the rules of section 3. The sample mode
   forms samples and is required for anything that involves conditioning, the 4-bit sample code
   or timing error. The cell mode is used wherever it is valid.
-- **Experiment machines.** Two kinds are the reference for simulation speed: a machine with 256
-  logical CPUs and no GPU, and a machine with 32 logical CPUs and one RTX PRO 6000 Blackwell.
+- **Experiment machines.** Two kinds are the reference for simulation speed: 256-CPU computers,
+  and 32-CPU computers with an RTX PRO 6000. They are taken here as 256 logical CPUs without a
+  GPU, and about 32 logical CPUs with one RTX PRO 6000 Blackwell.
 - **Layout of the work.**
   - A trial, one block with its noise, is a portion. Trials are independent and share only
     read-only data.
-  - On the 256-CPU machine every worker runs whole trials with one numerical thread, and there
-    are more software workers than hardware threads so that preparing the next trials overlaps
-    the running ones.
+  - On the 256-CPU machine every worker runs whole trials with one numerical thread. Software
+    workers number twice the logical CPUs, 512 there, so that preparing the next trials
+    overlaps the running ones.
   - On the GPU machine the dense stages batch across trials as they batch across messages, the
     CPU workers prepare the next batches while the GPU runs, and generation moves to the GPU
     where it is measured to be cheaper there.
   - Rule 1 applies as in the receiver: the routes are timed on that machine and the work is
     rebalanced between CPU and GPU so that the experiment finishes soonest.
 - **Rule 2 in simulation.** Everything in the first row of the table of
-  [13.1](#131-rules-that-bind-every-implementation) and the decoy-key thresholds are computed
-  once per configuration, not per trial. One noise realisation may serve every signal level of
-  a sweep. A trial runs the full hypothesis search only when the experiment's question needs
+  [13.1](#131-rules-that-bind-every-implementation) is computed once per configuration, not per
+  trial, and so is the presence threshold for a given noise model. One noise realisation may
+  serve every signal level of a sweep. A simulation sheds no work when it is slow; it states
+  its projected duration from its first measured batches. A trial runs the full hypothesis search only when the experiment's question needs
   it: an experiment about the signal's statistic at known timing and frequency scores every
   message on the known hypothesis, and an experiment about acquisition or false presence runs
   the search. The report says which.
@@ -1227,21 +1320,44 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
   the assignment chosen, and CPU and Tensor Core utilization. A run that leaves most of the
   machine idle is reported as a finding to act on.
 - **Budget.** Sample budget, uncertainty target and stopping rule are declared before the run.
+- **Measured on the 32-CPU RTX PRO 6000 class** (a pod with one RTX PRO 6000 Blackwell and a
+  CPU share of 27 threads of an EPYC 9554), a cell-mode Monte Carlo of the keyed 10-bit block
+  of the sub-9 kHz configuration, with trials batched 128 at a time as rows of the matrix
+  operand:
+
+  | Simulation | Trials a second | Times real time |
+  | --- | ---: | ---: |
+  | GPU: generation, gather, product over every rung, epilogue; frequency and drift searched | 34,900 | 1.8 × 10⁸ |
+  | GPU: the same with the whole-block window only | 81,000 | 4.3 × 10⁸ |
+  | CPU share, 27 threads: the earlier block Monte Carlo on every window, four channels, frequency known | 613 | 3.2 × 10⁶ |
+  | Laptop, 12 threads: the same program | 67 | 3.5 × 10⁵ |
+
+  - The GPU run kept 98% GPU activity and 72% Tensor Core activity; the product is 82% of a
+    batch, the gather 9%, the epilogue and read-back 8% and the generation 1%.
+  - It reproduces theory: 1.0% wrong blocks at 13 dB with frequency and drift known, against
+    12.87 dB for exactly orthogonal messages.
+  - Six signal levels of 204,800 trials each took 35 s. That is a quick experiment.
+  - Limits: 10 bits; offsets on the grid; a steady path; a decision on the whole block; no
+    presence test; one timing offset; the two programs do not simulate the same thing, so
+    their rates are not a comparison of CPU against GPU.
 - **What a trial costs with the kernels measured so far**, for one 87-minute block of 512 tones:
 
   | Trial | Laptop, 12 threads | Pod CPU share | RTX PRO 6000 Blackwell |
   | --- | ---: | ---: | ---: |
   | 24 bits, one hypothesis | 2.5 s | 0.48 s (13 threads of an EPYC 9355) | 0.07 s |
-  | 24 bits, ±1 ppm search | 1,624 s | 868 s (27 threads of an EPYC 9554, plain transform) | 11.4 s |
+  | 24 bits, ±1 ppm search, FFTW | 1,643 s | not installed there | – |
+  | 24 bits, ±1 ppm search, plain transform or matrix product | 6,917 s | 880 s (27 threads of an EPYC 9554) | 11.4 s |
   | 10 bits, one hypothesis | 0.17 ms | not timed | not timed |
-  | 10 bits, ±1 ppm search (scaled from 24 bits) | 0.10 s | 0.05 s | 0.7 ms |
+  | 10 bits, ±1 ppm search of one timing offset, generation included | not built | not built | 0.029 ms |
 
   A sweep of 2,000 trials of 24-bit blocks with the ±1 ppm search is 6.3 hours on one GPU and
-  is not a quick experiment; with 10-bit blocks it is seconds. Sample-level generation ran at
-  7 to 12 million times real time on the GPU.
-- **Not measured.** No simulator of the complete format exists. Nothing was run on a 256-CPU
-  machine: the widest CPU run had 27 threads, and whether trials scale to 256 workers is
-  untested. Generation was timed on the GPU only.
+  is not a quick experiment; experiments on sensitivity should use 10-bit blocks, or 24-bit
+  blocks on the known hypothesis. Sample-level generation ran at 7 to 12 million times real
+  time on the GPU.
+- **Not measured.** No simulator of the complete format exists; the GPU Monte Carlo above is a
+  part of one. Nothing was run on a 256-CPU machine: the widest CPU run had 27 threads, and
+  whether trials scale to 256 workers is untested. A 256-CPU run needs the hourly-billed
+  Linode route with its own approval step and was not started.
 
 ## 14. Decisions
 
@@ -1268,8 +1384,9 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 | Below 9 kHz the keyed phase is reached by an 80 ms ramp, not a step; the receiver's reference follows it | 4.4, 12.2 |
 | Below 9 kHz the window ladder runs from two tones to the block, with the tone and the cells inside it below; references are taken as GPS-locked at both ends | 8, 12.2 |
 | Below 9 kHz not hitting the computational ceiling has priority; concealment is kept only where it costs no computation (the keyed phase per tone), and phase steps inside a tone are not offered there | 1, 4.4, 11 |
-| Frequency and drift hypotheses are a transform across a message's tone sums, routed between CPU FFT, GPU FFT and a Tensor Core matrix product; they are never an outer loop of decodes | 8, 12.2, 13 |
-| Three computational rules bind receiver and simulator: time every route and rebalance for the whole job; do no work twice, with hypotheses inside the one pass over the messages; simulation speed is a requirement on a 256-CPU machine and on a 32-CPU machine with an RTX PRO 6000 | 1, 8, 13.1, 13.5 |
+| Frequency and drift hypotheses are a transform across a message's tone sums, routed between CPU FFT, GPU FFT and a Tensor Core matrix product; a decode per hypothesis is kept for a few hypotheses only | 8, 12.2, 13 |
+| Three computational rules bind receiver and simulator: time every route and rebalance for the whole job; do no work twice, with hypotheses that share work made an inner dimension of it; simulation speed is a requirement on 256-CPU computers and on 32-CPU computers with an RTX PRO 6000 | 1, 8, 13.1, 13.5 |
+| One measured scheduling serves both extremes: default HF, where the first transform is the bulk of the work, and sub-9 kHz, where the hypothesis search is | 1, 8, 13.1 |
 
 **Open**
 
@@ -1314,8 +1431,8 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 13. **Search volume below 9 kHz.** The configuration assumes GPS-locked references at both
     ends, and a lesser reference is searched by the transform of section 8. Still to decide:
     which reference classes a configuration may declare (a ±1 ppm reference is within reach of
-    the laptop CPU for 24 bits, a free-running crystal only for 16), and what the receiver does
-    beyond them: shorter windows, or a report of overload.
+    the laptop CPU for 24 bits, a free-running crystal only for 16). Beyond its ceiling the
+    receiver reports overload and drops no hypothesis (13.4, step 7); that part is settled.
 14. **Clock-correction rule.** Adopt the rule of section 12.2 and set the slew bound.
 15. **Tone rates above 6.25 Hz.** Not offered in this draft. Whether a faster rate is wanted for
     strong signals on paths that allow it, given the finer timing and larger drift search.
@@ -1330,7 +1447,8 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 18. **Value-dependent phase with few positions.** Whether the keyed map may send each value to a
     position and one of four quarter turns when fewer than sixteen positions fit. It removes
     the few-position loss of coherent reception and leaves per-tone reception as it is, but it
-    puts information into the phase, which section 1 rules out
+    puts information into the phase, which the settled decision above and 4.4 rule out, so
+    adopting it would reopen that decision
     ([sub-9 kHz note](../_ref/algorithms-matrixModem/Fable-5.2/sub9khz-fsk-rate-and-spacing.md#7-positions-and-a-value-dependent-phase)).
     The sub-9 kHz configuration does not need it, because sixteen positions fit.
 19. **Sub-9 kHz carrier and slot.** The example slot from 8,259.375 Hz clears the 50 Hz and
@@ -1346,7 +1464,12 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
     the two experiment machines once a simulator exists.
 22. **What is left of the hypothesis forms.** Whether a transform across positions is worth
     building for a CPU-only receiver with ±1 s of timing below 9 kHz (estimated gain about
-    two), and the one pass with vector entries on a GPU, where it is not measured (13.1).
+    two); the dimensions for which 13.1 states no measured form (clock rate, hop frequency,
+    delay rate, tilted bin paths); and tiered screening.
+23. **Precision of the transforms.** The transform across tone sums was measured with FP16
+    coefficients and sums, and with 8-bit integers (exact, 1.7 times slower). A product with
+    4-bit coefficients is untested, and the loss from FP16 rounding is not quantified beyond
+    the planted signal being returned and the simulated error rates matching theory.
 
 ## 15. Known weaknesses
 
@@ -1358,9 +1481,10 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
   sensitivity cost in this specification.
 - **One-cell tones were not run in the alphabet simulation.** The adjacent-position result and
   the two-cell durations do not automatically carry over.
-- **Required coherent attempts over a wide band are costly and unmeasured.** A specular path over
-  2.2 kHz needs timing to 57 µs, about 350 times the accumulation and decode work of the per-tone
-  search, and raises the presence threshold by about 0.7 dB of block time.
+- **Required coherent attempts over a wide band are costly and unmeasured as a whole.** A
+  specular path over 2.2 kHz needs timing to 57 µs: about 350 fine steps for each coarse one,
+  measured only as kernels (9.7 s per coarse step for 24 bits on the laptop, 66 ms on the GPU
+  with real entries), and a presence threshold raised by about 0.7 dB of block time.
 - **The search below 9 kHz still exceeds the computational ceiling for 24-bit blocks with
   free-running crystals and sound-card clocks**, by about two on one GPU and 80 on the laptop
   for a crystal (section 12.2); 16-bit blocks are within reach. Only the ±1 ppm case is
@@ -1443,17 +1567,21 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 - **Long messages** pay the block penalty until a long-block code is qualified.
 - **No HF precedent below about +3 dB-Hz** at milliwatt power; the lower part of the target range
   rests on theory.
-- **The search forms of 13.1 are measured as kernels, each on part of the hardware.** The
-  transform across tone sums ran on CPU and GPU for one reference class. The one pass with
-  vector entries ran on the laptop CPU only. Looking the positions up once across timing
-  offsets is specified, while the benchmarks still gather per offset (4 to 7% of their time).
-  For hypotheses with their own evidence the 32 additions per message and hypothesis remain:
-  the wide-band fine timing steps cost 9.7 s per coarse step for 24 bits on the laptop.
-- **Simulation speed is required but not measured on its machines.** No simulator of the
-  complete format exists, nothing was run on a 256-CPU machine, and a 24-bit trial with the
-  ±1 ppm search takes 11 s on the GPU, which makes sweeps of thousands of such trials slow.
-- **The scheduler exists only as a test prototype.** Rules 1 to 5 of section 13 ran on synthetic
-  portions with two executors on one GPU type and an emulated slow one. Rule 6 and rule 7 have
-  not run, and nothing is in a receiver. Its exploration cost 4–12% and can probably be reduced.
+- **The search forms of 13.1 are measured as kernels with synthetic values.** The transform
+  across tone sums ran on CPU and GPU for one reference class; the other classes are scaled.
+  Six of the dimensions listed in 13.1 have no measured form. For hypotheses with their own
+  evidence the 32 additions per message and hypothesis remain, and the faster loop order
+  differs between CPU and GPU, so it has to be measured on every machine.
+- **Simulation speed is measured for part of a simulator on one of its two machines.** The
+  GPU Monte Carlo of the 10-bit block runs 34,900 trials a second on the 32-CPU RTX PRO 6000
+  class, but it has no presence test, no timing search and no channel model. Nothing was run
+  on a 256-CPU machine. A 24-bit trial with the ±1 ppm search takes 11 s on the GPU, which
+  makes sweeps of thousands of such trials slow.
+- **The measured transforms are not 4-bit.** The matrix product ran with FP16 coefficients and
+  sums, and with 8-bit integers; the brief asks for 4-bit arithmetic throughout (open
+  decision 23).
+- **The scheduler exists only as a test prototype.** Steps 1 to 5 of the scheduling rule (13.4)
+  ran on synthetic portions with two executors on one GPU type and an emulated slow one. Steps
+  6 and 7 have not run, and nothing is in a receiver or a simulator. Its exploration cost 4–12% and can probably be reduced.
 - **Acquisition** over real clock, oscillator and drift uncertainty, native 4-bit devices,
   integrated GPUs and live operation are unmeasured.

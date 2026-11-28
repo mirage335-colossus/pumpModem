@@ -7,25 +7,31 @@
 //
 // Block: 24 information bits, 32 symbols of 256 values, value_j = Ghi_j[c_hi] xor Glo_j[c_lo];
 // N tones, each on one of 16 positions through a keyed balanced map redrawn per tone; a keyed
-// interleaver assigns tones to symbols. For one timing hypothesis the receiver holds one complex
-// 4-bit bin value per tone and position.
+// interleaver assigns tones to symbols. The receiver holds one complex 4-bit bin value per tone
+// and position.
 //
-// Per message and timing hypothesis:
-//   gather    u[n] = bin value of the position this message puts tone n on        (N lookups)
-//   rung 0    whole block: for each drift hypothesis, de-chirp u, transform 2N points, take
+// Per message:
+//   gather    the bin value and the position of every tone for this message: N lookups, done once,
+//             whatever the number of timing offsets
+//   per timing offset (steps of 1/(8 x span), a phase slope across the 16 positions):
+//     turn    every gathered value by the phase of its position, and sum the tones into K
+//             sub-blocks when the tones are shorter than the frequency search needs (K < N)
+//     rung 0  whole block: for each drift hypothesis, de-chirp, transform 2K points, take
 //             |X[b]|^2 on the NB frequency bins half a reciprocal of the block apart
-//   rung r    windows of N/2^r tones: transform each window on 2N/2^r points, add the windows'
-//             energies bin by bin, take the best of the NB/2^r bins that rung needs; windows of
-//             eight tones and fewer are evaluated directly on their one to three bins
-// The planted message, frequency bin and drift have to come out on rung 0.
+//     rung r  windows of K/2^r sub-blocks: transform each window on 2K/2^r points, add the
+//             windows' energies bin by bin, take the best of the NB/2^r bins that rung needs;
+//             windows of eight sub-blocks and fewer are evaluated directly on their bins
+//     short   windows shorter than two sub-blocks (only when K < N): energies on their one bin
+// The planted message, frequency bin, drift and timing offset have to come out on rung 0.
 //
-// The three parts are timed separately so that other reference classes (more bins, more drift
-// hypotheses, more timing offsets) can be costed from them; search_ceiling.py does that.
+// The parts are timed separately so that other reference classes can be costed from them;
+// search_margins.py does that.
 //
 // Build: g++ -O3 -march=native -std=c++20 -fopenmp search_bench.cpp -o /tmp/search_bench
 //        add -DUSE_FFTW -l:libfftw3f.so.3 to use FFTW's single-precision transforms (prototypes
 //        are declared here because only the runtime library is installed on the host)
 // Run:   /tmp/search_bench [threads] [tones] [frequency bins] [sampled blocks of 4096 messages]
+//                          [timing offsets, default 1] [sub-blocks, default = tones]
 
 #include <algorithm>
 #include <chrono>
@@ -48,7 +54,7 @@ void* fftwf_malloc(size_t n);
 }
 #endif
 
-static const int NSYM = 32, NV = 256, HB = 12, NH = 1 << HB, POS = 16, ND = 4, MAXR = 16;
+static const int NSYM = 32, NV = 256, HB = 12, NH = 1 << HB, POS = 16, ND = 4, MAXR = 24;
 static const double PI = 3.14159265358979323846;
 static double now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
@@ -81,11 +87,15 @@ int main(int argc, char** argv) {
   const int N = argc > 2 ? atoi(argv[2]) : 512;
   const int NB0 = argc > 3 ? atoi(argv[3]) : 174;
   const int S = argc > 4 ? atoi(argv[4]) : 96;
+  const int T = argc > 5 ? atoi(argv[5]) : 1;
+  const int K = argc > 6 ? atoi(argv[6]) : N;
   omp_set_num_threads(threads);
-  int R = 0; while ((2 << R) <= N) ++R;                 // rungs 0..R-1, windows of N .. 2 tones
-  if ((1 << R) != N || NB0 > 2 * N) { fprintf(stderr, "tones must be a power of two and bins at most 2N\n"); return 2; }
+  int R = 0; while ((2 << R) <= K) ++R;                 // rungs 0..R-1, windows of K .. 2 sub-blocks
+  const int G = N / K;                                  // tones per sub-block
+  int RS = 0; while ((2 << RS) <= G) ++RS;              // short rungs: windows of G, G/2, .. 2 tones
+  if ((1 << R) != K || K * G != N || (G & (G - 1)) || NB0 > 2 * K || NB0 > K * (G > 1 ? 1 : 2) || T < 1 || T > 256) { fprintf(stderr, "tones and sub-blocks must be powers of two, bins at most 2K (K when tones are summed), 1 to 256 timing offsets\n"); return 2; }
   std::vector<int> nb(R), L(R); std::vector<bool> direct(R);
-  for (int r = 0; r < R; ++r) { L[r] = N >> r; nb[r] = std::max(1, (NB0 + (1 << r) - 1) >> r); direct[r] = L[r] <= 8; }
+  for (int r = 0; r < R; ++r) { L[r] = K >> r; nb[r] = std::max(1, (NB0 + (1 << r) - 1) >> r); direct[r] = L[r] <= 8; }
 
   std::mt19937_64 rng(2026);
   std::normal_distribution<double> gauss(0, 1);
@@ -99,32 +109,38 @@ int main(int argc, char** argv) {
   std::vector<uint8_t> sym(N); for (int t = 0; t < N; ++t) sym[t] = (uint8_t)(t % NSYM);
   for (int t = N - 1; t > 0; --t) std::swap(sym[t], sym[rng() % (uint64_t)(t + 1)]);
 
-  // planted message, frequency bin and drift; bin values per tone and value through the keyed map
+  // planted message, frequency bin, drift and timing offset; bin values per tone and value
   const uint32_t planted = (uint32_t)(rng() & 0xFFFFFF);
   const int f0 = -NB0 / 2 + (int)(rng() % (uint64_t)NB0), d0 = 2;
+  const int q0 = T > 1 ? (int)(rng() % (uint64_t)T) : 0;
   const double gd[ND] = {-5.82, -1.94, 1.94, 5.82};      // frequency change over the block, in bins
-  std::vector<int8_t> zmap((size_t)N * NV * 2);
+  // a timing offset of q steps turns position p by -2 pi p (q - T/2) / 128: steps of 1/(8 x span)
+  auto tphase = [&](int q, int p) { return T > 1 ? -2 * PI * p * (q - T / 2) / 128.0 : 0.0; };
+  std::vector<int8_t> zmap((size_t)N * NV * 2); std::vector<uint8_t> pmap((size_t)N * NV);
   for (int t = 0; t < N; ++t) {
     uint8_t map[NV]; for (int v = 0; v < NV; ++v) map[v] = (uint8_t)(v % POS);
     for (int v = NV - 1; v > 0; --v) std::swap(map[v], map[rng() % (uint64_t)(v + 1)]);
     double zr[POS], zi[POS];
     for (int p = 0; p < POS; ++p) { zr[p] = 2.2 * gauss(rng); zi[p] = 2.2 * gauss(rng); }
-    const double x = (double)t / N, ph = PI * f0 * x + PI * gd[d0] * x * x / 2;
     const int pp = map[value(sym[t], planted)];
+    const double x = (double)t / N, ph = PI * f0 * x + PI * gd[d0] * x * x / 2 - tphase(q0, pp);
     zr[pp] += 2.5 * std::cos(ph); zi[pp] += 2.5 * std::sin(ph);
     for (int v = 0; v < NV; ++v) {
       zmap[((size_t)t * NV + v) * 2] = (int8_t)std::max(-7, std::min(7, (int)std::lrint(zr[map[v]])));
       zmap[((size_t)t * NV + v) * 2 + 1] = (int8_t)std::max(-7, std::min(7, (int)std::lrint(zi[map[v]])));
+      pmap[(size_t)t * NV + v] = map[v];
     }
   }
-  std::vector<float> chirp((size_t)ND * N * 2);
-  for (int d = 0; d < ND; ++d) for (int t = 0; t < N; ++t) { const double x = (double)t / N, a = -PI * gd[d] * x * x / 2; chirp[((size_t)d * N + t) * 2] = (float)std::cos(a); chirp[((size_t)d * N + t) * 2 + 1] = (float)std::sin(a); }
+  std::vector<float> trot((size_t)T * POS * 2);
+  for (int q = 0; q < T; ++q) for (int p = 0; p < POS; ++p) { trot[((size_t)q * POS + p) * 2] = (float)std::cos(tphase(q, p)); trot[((size_t)q * POS + p) * 2 + 1] = (float)std::sin(tphase(q, p)); }
+  std::vector<float> chirp((size_t)ND * K * 2);         // at the centre of each sub-block
+  for (int d = 0; d < ND; ++d) for (int k = 0; k < K; ++k) { const double x = (k * G + (G - 1) / 2.0) / N, a = -PI * gd[d] * x * x / 2; chirp[((size_t)d * K + k) * 2] = (float)std::cos(a); chirp[((size_t)d * K + k) * 2 + 1] = (float)std::sin(a); }
   std::vector<std::vector<float>> rot(R);                // direct rungs: e^{-j pi b i / L}
   for (int r = 0; r < R; ++r) if (direct[r]) { rot[r].resize((size_t)nb[r] * L[r] * 2); for (int bi = 0; bi < nb[r]; ++bi) for (int i = 0; i < L[r]; ++i) { const double a = -PI * (bi - nb[r] / 2) * i / L[r]; rot[r][((size_t)bi * L[r] + i) * 2] = (float)std::cos(a); rot[r][((size_t)bi * L[r] + i) * 2 + 1] = (float)std::sin(a); } }
 
 #ifdef USE_FFTW
   std::vector<fftwf_plan> plan(R, nullptr);
-  { fftwf_complex* tmp = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * 2 * N);
+  { fftwf_complex* tmp = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * 2 * K);
     for (int r = 0; r < R; ++r) if (!direct[r]) plan[r] = fftwf_plan_dft_1d(2 * L[r], tmp, tmp, -1, 0U); }
   const char* fftname = "FFTW 3 single precision, measured plans";
 #else
@@ -136,65 +152,81 @@ int main(int argc, char** argv) {
   std::vector<int> blocks(S); blocks[0] = (int)(planted >> HB);
   for (int i = 1; i < S; ++i) blocks[i] = (int)(rng() % (uint64_t)NH);
 
-  struct Out { double secs; float best[MAXR]; uint32_t msg; int bin, drift; double sink; };
+  struct Out { double secs; float best[MAXR]; uint32_t msg; int bin, drift, off; double sink; };
   auto pass = [&](int upto) {                            // upto: 0 gather only, 1 rung 0, 2 all rungs
     Out o{}; for (auto& b : o.best) b = -1; double sink = 0;
     const double t0 = now();
 #pragma omp parallel reduction(+ : sink)
     {
 #ifdef USE_FFTW
-      float* buf = (float*)fftwf_malloc(sizeof(float) * 4 * N);
+      float* buf = (float*)fftwf_malloc(sizeof(float) * 4 * K);
 #else
-      std::vector<float> bufv(4 * N); float* buf = bufv.data();
+      std::vector<float> bufv(4 * K); float* buf = bufv.data();
 #endif
-      std::vector<float> u(2 * N), acc(2 * N);
-      float tb[MAXR]; for (auto& b : tb) b = -1; uint32_t tm = 0; int tbin = 0, tdr = 0;
+      std::vector<float> z(2 * N), ut(2 * N), u(2 * K), acc(2 * K); std::vector<uint8_t> pz(N);
+      float tb[MAXR]; for (auto& b : tb) b = -1; uint32_t tm = 0; int tbin = 0, tdr = 0, tq = 0;
 #pragma omp for schedule(dynamic, 1)
       for (int s = 0; s < S; ++s) {
         const int chi = blocks[s]; uint8_t gh[NSYM]; for (int j = 0; j < NSYM; ++j) gh[j] = ghi[(size_t)j * NH + chi];
         for (int clo = 0; clo < NH; ++clo) {
           uint8_t val[NSYM]; for (int j = 0; j < NSYM; ++j) val[j] = gh[j] ^ glo[(size_t)j * NH + clo];
-          for (int t = 0; t < N; ++t) { const int8_t* z = &zmap[((size_t)t * NV + val[sym[t]]) * 2]; u[2 * t] = z[0]; u[2 * t + 1] = z[1]; }
-          if (upto == 0) { sink += u[0] + u[2 * N - 1]; continue; }
-          for (int d = 0; d < ND; ++d) {                 // rung 0
-            const float* c = &chirp[(size_t)d * N * 2];
-            for (int t = 0; t < N; ++t) { buf[2 * t] = u[2 * t] * c[2 * t] - u[2 * t + 1] * c[2 * t + 1]; buf[2 * t + 1] = u[2 * t] * c[2 * t + 1] + u[2 * t + 1] * c[2 * t]; }
-            std::fill(buf + 2 * N, buf + 4 * N, 0.f);
-#ifdef USE_FFTW
-            fftwf_execute_dft(plan[0], (fftwf_complex*)buf, (fftwf_complex*)buf);
-#else
-            plan[0].run(buf);
-#endif
-            for (int bi = 0; bi < nb[0]; ++bi) { const int k = (bi - nb[0] / 2 + 2 * N) % (2 * N); const float e = buf[2 * k] * buf[2 * k] + buf[2 * k + 1] * buf[2 * k + 1]; if (e > tb[0]) { tb[0] = e; tm = ((uint32_t)chi << HB) | (uint32_t)clo; tbin = bi - nb[0] / 2; tdr = d; } }
-          }
-          if (upto == 1) continue;
-          for (int r = 1; r < R; ++r) {
-            const int Lr = L[r], W = 1 << r, n2 = 2 * Lr, nbr = nb[r];
-            std::fill(acc.begin(), acc.begin() + nbr, 0.f);
-            if (direct[r]) {
-              const float* ro = rot[r].data();
-              for (int w = 0; w < W; ++w) for (int bi = 0; bi < nbr; ++bi) {
-                float sr = 0, si = 0; const float* q = ro + (size_t)bi * Lr * 2; const float* x = &u[(size_t)w * Lr * 2];
-                for (int i = 0; i < Lr; ++i) { sr += x[2 * i] * q[2 * i] - x[2 * i + 1] * q[2 * i + 1]; si += x[2 * i] * q[2 * i + 1] + x[2 * i + 1] * q[2 * i]; }
-                acc[bi] += sr * sr + si * si;
-              }
-            } else {
-              for (int w = 0; w < W; ++w) {
-                std::copy(&u[(size_t)w * Lr * 2], &u[(size_t)(w + 1) * Lr * 2], buf); std::fill(buf + 2 * Lr, buf + 4 * Lr, 0.f);
-#ifdef USE_FFTW
-                fftwf_execute_dft(plan[r], (fftwf_complex*)buf, (fftwf_complex*)buf);
-#else
-                plan[r].run(buf);
-#endif
-                for (int bi = 0; bi < nbr; ++bi) { const int k = (bi - nbr / 2 + n2) % n2; acc[bi] += buf[2 * k] * buf[2 * k] + buf[2 * k + 1] * buf[2 * k + 1]; }
-              }
+          for (int t = 0; t < N; ++t) { const size_t idx = (size_t)t * NV + val[sym[t]]; z[2 * t] = zmap[idx * 2]; z[2 * t + 1] = zmap[idx * 2 + 1]; pz[t] = pmap[idx]; }
+          if (upto == 0) { sink += z[0] + z[2 * N - 1] + pz[N / 2]; continue; }
+          for (int q = 0; q < T; ++q) {
+            const float* src = z.data();
+            if (T > 1) {                                 // turn by the phase of each tone's position
+              const float* tr = &trot[(size_t)q * POS * 2];
+              for (int t = 0; t < N; ++t) { const float cr = tr[2 * pz[t]], ci = tr[2 * pz[t] + 1]; ut[2 * t] = z[2 * t] * cr - z[2 * t + 1] * ci; ut[2 * t + 1] = z[2 * t] * ci + z[2 * t + 1] * cr; }
+              src = ut.data();
             }
-            for (int bi = 0; bi < nbr; ++bi) if (acc[bi] > tb[r]) tb[r] = acc[bi];
+            if (G > 1) { for (int k = 0; k < K; ++k) { float sr = 0, si = 0; for (int i = 0; i < G; ++i) { sr += src[2 * (k * G + i)]; si += src[2 * (k * G + i) + 1]; } u[2 * k] = sr; u[2 * k + 1] = si; } }
+            const float* uu = G > 1 ? u.data() : src;
+            for (int d = 0; d < ND; ++d) {               // rung 0
+              const float* c = &chirp[(size_t)d * K * 2];
+              for (int k = 0; k < K; ++k) { buf[2 * k] = uu[2 * k] * c[2 * k] - uu[2 * k + 1] * c[2 * k + 1]; buf[2 * k + 1] = uu[2 * k] * c[2 * k + 1] + uu[2 * k + 1] * c[2 * k]; }
+              std::fill(buf + 2 * K, buf + 4 * K, 0.f);
+#ifdef USE_FFTW
+              fftwf_execute_dft(plan[0], (fftwf_complex*)buf, (fftwf_complex*)buf);
+#else
+              plan[0].run(buf);
+#endif
+              for (int bi = 0; bi < nb[0]; ++bi) { const int k = (bi - nb[0] / 2 + 2 * K) % (2 * K); const float e = buf[2 * k] * buf[2 * k] + buf[2 * k + 1] * buf[2 * k + 1]; if (e > tb[0]) { tb[0] = e; tm = ((uint32_t)chi << HB) | (uint32_t)clo; tbin = bi - nb[0] / 2; tdr = d; tq = q; } }
+            }
+            if (upto == 1) continue;
+            for (int r = 1; r < R; ++r) {
+              const int Lr = L[r], W = 1 << r, n2 = 2 * Lr, nbr = nb[r];
+              std::fill(acc.begin(), acc.begin() + nbr, 0.f);
+              if (direct[r]) {
+                const float* ro = rot[r].data();
+                for (int w = 0; w < W; ++w) for (int bi = 0; bi < nbr; ++bi) {
+                  float sr = 0, si = 0; const float* qq = ro + (size_t)bi * Lr * 2; const float* x = &uu[(size_t)w * Lr * 2];
+                  for (int i = 0; i < Lr; ++i) { sr += x[2 * i] * qq[2 * i] - x[2 * i + 1] * qq[2 * i + 1]; si += x[2 * i] * qq[2 * i + 1] + x[2 * i + 1] * qq[2 * i]; }
+                  acc[bi] += sr * sr + si * si;
+                }
+              } else {
+                for (int w = 0; w < W; ++w) {
+                  std::copy(&uu[(size_t)w * Lr * 2], &uu[(size_t)(w + 1) * Lr * 2], buf); std::fill(buf + 2 * Lr, buf + 4 * Lr, 0.f);
+#ifdef USE_FFTW
+                  fftwf_execute_dft(plan[r], (fftwf_complex*)buf, (fftwf_complex*)buf);
+#else
+                  plan[r].run(buf);
+#endif
+                  for (int bi = 0; bi < nbr; ++bi) { const int k = (bi - nbr / 2 + n2) % n2; acc[bi] += buf[2 * k] * buf[2 * k] + buf[2 * k + 1] * buf[2 * k + 1]; }
+                }
+              }
+              for (int bi = 0; bi < nbr; ++bi) if (acc[bi] > tb[r]) tb[r] = acc[bi];
+            }
+            for (int sr_ = 0; sr_ < RS; ++sr_) {   // windows of G, G/2, .. 2 tones, one bin
+              const int len = G >> sr_; float e = 0;
+              if (sr_ == 0) { for (int k = 0; k < K; ++k) e += uu[2 * k] * uu[2 * k] + uu[2 * k + 1] * uu[2 * k + 1]; }
+              else for (int w = 0; w < N / len; ++w) { float a = 0, b = 0; for (int i = 0; i < len; ++i) { a += src[2 * (w * len + i)]; b += src[2 * (w * len + i) + 1]; } e += a * a + b * b; }
+              if (len >= 2 && e > tb[R + sr_]) tb[R + sr_] = e;
+            }
           }
         }
       }
 #pragma omp critical
-      { for (int r = 0; r < R; ++r) if (tb[r] > o.best[r]) { o.best[r] = tb[r]; if (r == 0) { o.msg = tm; o.bin = tbin; o.drift = tdr; } } }
+      { for (int r = 0; r < MAXR; ++r) if (tb[r] > o.best[r]) { o.best[r] = tb[r]; if (r == 0) { o.msg = tm; o.bin = tbin; o.drift = tdr; o.off = tq; } } }
     }
     o.secs = now() - t0; o.sink = sink; return o;
   };
@@ -202,25 +234,30 @@ int main(int argc, char** argv) {
   pass(0);                                               // warm up threads and caches
   const Out a = pass(0), b = pass(1), c = pass(2);
   const double msgs = (double)S * NH, M24 = 16777216.0;
-  const double tg = a.secs / msgs, t0 = (b.secs - a.secs) / msgs / ND, tr = (c.secs - b.secs) / msgs, tall = c.secs / msgs;
+  const double tg = a.secs / msgs, t0 = (b.secs - a.secs) / msgs / ND / T, tr = (c.secs - b.secs) / msgs / T, tall = c.secs / msgs;
   printf("# Hypothesis search by a transform across tone sums, CPU\n\n");
-  printf("threads %d, tones %d, frequency bins on the whole block %d, drift hypotheses %d, rungs %d (windows of %d to 2 tones)\n", threads, N, NB0, ND, R, N);
+  printf("threads %d, tones %d", threads, N); if (G > 1) printf(" summed into %d sub-blocks of %d", K, G);
+  printf(", frequency bins on the whole block %d, drift hypotheses %d, timing offsets %d, rungs %d\n", NB0, ND, T, R + RS);
   printf("transform: %s\n", fftname);
   printf("timed on %d blocks of 4096 messages (%.0f messages), all threads busy\n\n", S, msgs);
-  printf("planted message %06x, frequency bin %d, drift hypothesis %d; found %06x, bin %d, drift %d: %s\n\n", planted, f0, d0, c.msg, c.bin, c.drift,
-         (c.msg == planted && c.bin == f0 && c.drift == d0 && b.msg == planted) ? "correct" : "WRONG");
-  printf("| Part, per message and timing hypothesis | Time | Rate |\n| --- | ---: | ---: |\n");
-  printf("| Gather of %d tone values | %.3f us | %.3g tone lookups/s |\n", N, tg * 1e6, N / tg);
-  printf("| Rung 0, per drift hypothesis: de-chirp, transform of %d points, %d bin energies | %.3f us | %.3g transforms/s |\n", 2 * N, nb[0], t0 * 1e6, 1 / t0);
-  printf("| Rungs 1 to %d together | %.3f us | |\n", R - 1, tr * 1e6);
-  printf("| All of it with %d drift hypotheses | %.3f us | %.3g messages/s |\n\n", ND, tall * 1e6, 1 / tall);
-  long hyp = (long)ND * nb[0]; for (int r = 1; r < R; ++r) hyp += nb[r];
-  printf("frequency and drift hypotheses evaluated per message and timing: %d x %d on the whole block, %ld with the shorter rungs\n\n", nb[0], ND, hyp);
-  const double D = N * 5242.88 / 512.0 * (512.0 / N) * 1.0;   // block of 87.4 minutes whatever the tone count
-  printf("One timing hypothesis over all messages, and the whole search with 20 timing offsets, against a block of %.0f s:\n\n", D);
-  printf("| Block | One timing hypothesis | 20 timing offsets | Block duration / search time |\n| --- | ---: | ---: | ---: |\n");
-  for (int k : {24, 16, 10}) { const double one = tall * M24 / (double)(1 << (24 - k)); printf("| %d bits | %.4g s | %.4g s | %.4g |\n", k, one, 20 * one, D / (20 * one)); }
+  printf("planted message %06x, frequency bin %d, drift hypothesis %d, timing offset %d; found %06x, bin %d, drift %d, offset %d: %s\n\n", planted, f0, d0, q0, c.msg, c.bin, c.drift, c.off,
+         (c.msg == planted && c.bin == f0 && c.drift == d0 && c.off == q0 && b.msg == planted) ? "correct" : "WRONG");
+  printf("| Part | Time | Rate |\n| --- | ---: | ---: |\n");
+  printf("| Gather of %d tone values and positions, once per message | %.3f us | %.3g tone lookups/s |\n", N, tg * 1e6, N / tg);
+  printf("| Rung 0, per drift hypothesis and timing offset: %sde-chirp, transform of %d points, %d bin energies | %.3f us | %.3g transforms/s |\n", (T > 1 || G > 1) ? "share of turn and summing, " : "", 2 * K, nb[0], t0 * 1e6, 1 / t0);
+  printf("| All other rungs, per timing offset | %.3f us | |\n", tr * 1e6);
+  printf("| All of it, per message, with %d drift hypotheses and %d timing offset%s | %.3f us | %.3g messages/s |\n\n", ND, T, T > 1 ? "s" : "", tall * 1e6, 1 / tall);
+  const double D = 5242.88;
+  if (T == 1) {
+    printf("One timing offset over all messages, and 20 timing offsets as 20 times that, against a block of %.0f s:\n\n", D);
+    printf("| Block | One timing offset | 20 timing offsets | Block duration / search time |\n| --- | ---: | ---: | ---: |\n");
+    for (int k : {24, 16, 10}) { const double one = tall * M24 / (double)(1 << (24 - k)); printf("| %d bits | %.4g s | %.4g s | %.4g |\n", k, one, 20 * one, D / (20 * one)); }
+  } else {
+    printf("The whole search with its %d timing offsets executed, against a block of %.0f s:\n\n", T, D);
+    printf("| Block | Search time | Block duration / search time |\n| --- | ---: | ---: |\n");
+    for (int k : {24, 16, 10}) { const double all = tall * M24 / (double)(1 << (24 - k)); printf("| %d bits | %.4g s | %.4g |\n", k, all, D / all); }
+  }
   printf("\nThe 16-bit and 10-bit rows are the 24-bit time divided by 2^8 and 2^14, not separate timings.\n");
-  printf("\nbest energy per rung:"); for (int r = 0; r < R; ++r) printf(" %.4g", c.best[r]); printf("\n");
+  printf("\nbest energy per rung:"); for (int r = 0; r < R + RS; ++r) printf(" %.4g", c.best[r]); printf("\n");
   return 0;
 }

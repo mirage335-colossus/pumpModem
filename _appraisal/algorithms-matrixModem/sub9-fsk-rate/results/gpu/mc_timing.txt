@@ -1,0 +1,5 @@
+coherent_block_mc 2000 b 0125 (2,000 blocks, format b, four channels: 8,000 block rows)
+laptop wall 118.525163341 s
+(Ryzen 5 PRO 5650U, 12 threads)
+pod wall 13.0521 s, 27 threads
+(EPYC 9554, 27 threads, the pod's CPU quota)

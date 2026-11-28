@@ -1,0 +1,41 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+
+# Monte Carlo of the 10-bit block, cell mode, 512 tones on 16 positions, 128 trials per batch
+
+## whole-block window only (4 drift hypotheses x 174 bins): 696 complex rows in the matrix operand
+
+| Block E/N0 | Trials | Wrong, frequency and drift known | Wrong, searched over 696 hypotheses | Wall time | Trials per second |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 11 dB | 204800 | 0.1278 | 0.5466 | 2.64 s | 77690 |
+| 12 dB | 204800 | 0.0448 | 0.3245 | 2.55 s | 80318 |
+| 13 dB | 204800 | 0.0102 | 0.1357 | 2.52 s | 81388 |
+| 14 dB | 204800 | 0.0013 | 0.0331 | 2.51 s | 81585 |
+| 15 dB | 204800 | 0.0001 | 0.0042 | 2.51 s | 81571 |
+| 16 dB | 204800 | 0.0000 | 0.0002 | 2.51 s | 81568 |
+
+share of a batch: generation 2%, gather 20%, product 60% (393 nominal TFLOP/s), epilogue and read-back 18%; 1.58 ms per batch of 128 trials when each stage is waited for
+one trial stands for a block of 5,242.88 s: 4.28e+08 times real time
+
+## every rung of the ladder in the product, decision on the whole block: 2294 complex rows in the matrix operand
+
+| Block E/N0 | Trials | Wrong, frequency and drift known | Wrong, searched over 696 hypotheses | Wall time | Trials per second |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 11 dB | 204800 | 0.1278 | 0.5496 | 5.87 s | 34886 |
+| 12 dB | 204800 | 0.0446 | 0.3231 | 5.87 s | 34888 |
+| 13 dB | 204800 | 0.0104 | 0.1364 | 5.87 s | 34891 |
+| 14 dB | 204800 | 0.0013 | 0.0339 | 5.87 s | 34894 |
+| 15 dB | 204800 | 0.0001 | 0.0043 | 5.87 s | 34909 |
+| 16 dB | 204800 | 0.0000 | 0.0002 | 5.87 s | 34895 |
+
+share of a batch: generation 1%, gather 9%, product 82% (406 nominal TFLOP/s), epilogue and read-back 8%; 3.68 ms per batch of 128 trials when each stage is waited for
+one trial stands for a block of 5,242.88 s: 1.83e+08 times real time
+
+# One pass over 2^24 messages with vector entries against a pass per hypothesis, real 16-bit entries
+
+per hypothesis: 0.1899 ms for all messages (5267 passes per second); planted found
+
+| Hypotheses | One pass | Per hypothesis would take | One pass is faster by | Planted |
+| ---: | ---: | ---: | ---: | --- |
+| 7 | 2.255 ms | 1.329 ms | 0.59 | found |
+| 56 | 86.301 ms | 10.633 ms | 0.12 | found |
+| 350 | 683.483 ms | 66.454 ms | 0.10 | found |

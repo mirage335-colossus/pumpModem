@@ -10,7 +10,7 @@ sources.
 `search_ceiling.py` are theoretical calculations (the third with a Monte Carlo part); their
 outputs are the reference for the specification's sub-9 kHz spacing, tone length, phase ramp and
 search figures. `decode_bench.cpp`, `decode_gpu.cu`, `search_bench.cpp`, `search_gpu.cu`,
-`hypothesis_pass_bench.cpp` and `results/gpu/` are measurements with provenance;
+`sim_gpu.cu`, `hypothesis_pass_bench.cpp` and `results/gpu/` are measurements with provenance;
 `search_margins.py` is arithmetic on them. [`literature-calcs/`](literature-calcs/README.md) holds the scratch calculations of
 the delegated literature searches. Keep them as research material under the
 [research-material rule](../../../docs/development.md#research-material).
@@ -174,30 +174,77 @@ Every route has to return the planted message, frequency bin and drift on the wh
 ```bash
 g++ -O3 -march=native -std=c++20 -fopenmp -DUSE_FFTW search_bench.cpp -l:libfftw3f.so.3 -o /tmp/search_bench_fftw
 g++ -O3 -march=native -std=c++20 -fopenmp search_bench.cpp -o /tmp/search_bench
-{ /tmp/search_bench_fftw 12 512 174 960; /tmp/search_bench_fftw 6 512 174 480; /tmp/search_bench 12 512 174 480;
-  /tmp/search_bench_fftw 12 128 174 2048; /tmp/search_bench_fftw 12 2048 174 128; } > results/search_bench.md
+F=/tmp/search_bench_fftw    # arguments: threads, tones, bins, sampled blocks, timing offsets, sub-blocks
+{ $F 12 512 174 960; $F 6 512 174 480; /tmp/search_bench 12 512 174 480; $F 12 128 174 2048; $F 12 2048 174 128;
+  $F 12 512 174 96 20; $F 12 2048 174 48 20 512; $F 12 8192 174 12 20 512; $F 12 32768 174 4 20 512; } > results/search_bench.md
 nvcc -O3 -std=c++17 -arch=sm_120 search_gpu.cu -lcublas -lcufft -o search_gpu
 ./search_gpu > search_gpu.out                 # 174 bins, batches of 131,072 messages
 ./search_gpu 512 696 8 > search_gpu_696bins.out   # scaling check: 8,520 rows, product route only
 ./search_gpu sustain gemm 9                   # also gemm8, fft; inside nvidia-smi dmon for telemetry
 ```
 
-`results/search_bench.md` holds the five laptop runs (the stored file separates them with
-rules). `results/gpu/` holds the run of 28 November 2026 04:13 UTC on a full RTX PRO 6000
-Blackwell Server Edition: `search_gpu.out`, `search_gpu_696bins.out`, `tele_search_gemm.csv`,
-`tele_search_gemm8.csv`, `tele_search_fft.csv`, `search_bench_pod.out` (the CPU program with the
-plain transform on the pod's EPYC 9554, 27 threads, its CPU quota) and `identity_search.out`.
+The CPU program was extended later on 28 November. It now looks the positions up with the tone
+values, once per message; executes any number of timing offsets by turning the gathered values
+by each offset's phase slope across the positions (fifth argument); and sums tones into
+sub-blocks before the transform when they are shorter than the frequency search needs (sixth
+argument). The planted timing offset has to be found as well.
+
+`results/search_bench.md` holds the nine laptop runs of that version (the stored file separates
+them with rules): the five of the first version repeated, then 20 timing offsets executed for
+512 tones, and for 2,048, 8,192 and 32,768 tones summed into 512 sub-blocks. `results/gpu/`
+holds the run of 28 November 2026 04:13 UTC on a full RTX PRO 6000 Blackwell Server Edition:
+`search_gpu.out`, `search_gpu_696bins.out`, `tele_search_gemm.csv`, `tele_search_gemm8.csv`,
+`tele_search_fft.csv` and `identity_search.out`. `search_bench_pod.out` is from the later pod
+of `sim_gpu.cu` below and the extended CPU program (plain transform, 27 threads of an EPYC
+9554); the CPU output of the 04:13 run was for the first version and was replaced, so the
+`search_bench` hashes in `identity_search.out` no longer have an output here.
 One on-demand pod, 0.116 h, about 0.31 USD, verified removed, no persistent volume. The GPU
 program compiled and returned the planted signal on its first run; a second run after a change
 that only added the scaling check gave the same times within 1%, and is the stored one.
 
 Limits: synthetic 4-bit bin values and one planted signal; stock kernels (the library's general
-matrix product and FFT, a plain epilogue); one timing offset timed and multiplied by twenty;
-forming the bin values per timing offset and the presence test are not included; at the two
-rungs below the whole block a drifting reference moves the signal between windows by up to 1.5
-bins, which a real epilogue covers by summing along tilted paths; shorter tones than 10.24 s
-would be summed into sub-blocks before the transform, which is not built (the 2,048-tone run
-shows the cost without it); 16-bit and 10-bit figures are the 24-bit time scaled.
+matrix product and FFT, a plain epilogue); the GPU program times one timing offset and
+multiplies by twenty, the CPU program executes them; forming the bin values and the presence
+test are not included; at the two rungs below the whole block a drifting reference moves the
+signal between windows by up to 1.5 bins, which a real epilogue covers by summing along tilted
+paths; 16-bit and 10-bit figures are the 24-bit time scaled; FFTW was not available on the
+pods, so their CPU figures use the plain transform, which is about four times slower.
+
+## `sim_gpu.cu`
+
+Two measurements on a GPU.
+
+1. **Simulation speed.** A cell-mode Monte Carlo of the keyed 10-bit block of the adopted
+   configuration with the frequency and drift search as one matrix product. A trial is one
+   block with its own noise, planted message, frequency bin and drift; 128 trials are the rows
+   (trial × message) of one batch. Stages: generation of the 4-bit bin values on the GPU from a
+   counter-based generator, gather, FP16 product, epilogue, and a read-back of one best message
+   per trial. It reports wrong blocks with frequency and drift known and with the best of all
+   696 hypotheses taken, at six signal levels, for the whole-block window alone and with every
+   rung in the product, and trials per second.
+2. **Vector entries on a GPU.** The comparison of `hypothesis_pass_bench.cpp` with real
+   entries: one kernel pass with the entries of all hypotheses stored together, against a pass
+   per hypothesis with that hypothesis's table in shared memory.
+
+```bash
+nvcc -O3 -std=c++17 -arch=sm_120 sim_gpu.cu -lcublas -o sim_gpu
+./sim_gpu 204800 > sim_gpu.out          # trials per signal level
+./sim_gpu sustain 9                     # inside nvidia-smi dmon for telemetry
+```
+
+`results/gpu/` holds the run of 28 November 2026 05:09 UTC on a full RTX PRO 6000 Blackwell
+Server Edition with a CPU share of 27 threads of an EPYC 9554: `sim_gpu.out`, `tele_sim.csv`,
+`search_bench_pod.out`, `hypothesis_pass_pod.out` (the CPU comparison on those 27 threads),
+`mc_timing.txt` (wall time of `coherent_block_mc 2000 b 0125` on the laptop and on the pod's
+CPU share) and `identity_sim.out`. One on-demand pod, 0.220 h, about 0.59 USD, verified
+removed, no persistent volume. The program built and gave error rates matching theory on its
+first run (1.0% at 13 dB with frequency and drift known, against 12.87 dB for exactly
+orthogonal messages).
+
+Limits: 10 bits; offsets on the grid; a steady path; a decision on the whole block only; no
+presence test and no timing search; the noise is drawn per trial, not shared between signal
+levels; the GPU's vector-entry kernel is plain (16 messages per thread, eight hypotheses at a
+time) and a better one may exist.
 
 ## `hypothesis_pass_bench.cpp`
 
@@ -219,8 +266,12 @@ per-tone kernel of `decode_bench.cpp` and is timed on eight hypotheses and multi
 version compared against a slower per-message loop and overstated the gain by about three; its
 output was not kept.
 
-Limits: laptop CPU only, not a GPU; synthetic 16-bit entries; the tables for 350 hypotheses
-(5.7 and 11.4 MB) sit in the last-level cache of this CPU and would not on a smaller one.
+It was also run on 27 threads of an EPYC 9554 (`results/gpu/hypothesis_pass_pod.out`), where
+the one pass is slower for 7 hypotheses and faster for 56 and 350, and its real-entry case has a
+GPU counterpart in `sim_gpu.cu`, where the one pass is slower throughout.
+
+Limits: synthetic 16-bit entries; the tables for 350 hypotheses (5.7 and 11.4 MB) sit in the
+last-level cache of the laptop's CPU and would not on a smaller one.
 
 ## `search_margins.py`
 

@@ -1,0 +1,28 @@
+# One pass over the messages for many hypotheses, CPU
+
+threads 27; 24-bit block, all 2^24 messages enumerated in every timed pass; synthetic tables with a
+planted message that has to win for every hypothesis. "Per hypothesis" is one enumeration of the
+messages for each hypothesis, timed on 8 hypotheses and multiplied; "one pass" enumerates them once.
+
+## Real entries
+
+Per hypothesis: 0.0120 s for all messages (0.71 ns per message and hypothesis); planted found in 8 of 8.
+
+| Hypotheses | One pass, all messages | Per message and hypothesis | Per hypothesis would take | One pass is faster by | Planted found for |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 7 | 0.112 s | 0.96 ns | 0.08 s | 0.7 | 7 of 7 |
+| 56 | 0.161 s | 0.17 ns | 0.67 s | 4.2 | 56 of 56 |
+| 350 | 0.356 s | 0.06 ns | 4.19 s | 11.8 | 350 of 350 |
+
+## Complex entries
+
+Per hypothesis: 0.0179 s for all messages (1.07 ns per message and hypothesis); planted found in 8 of 8.
+
+| Hypotheses | One pass, all messages | Per message and hypothesis | Per hypothesis would take | One pass is faster by | Planted found for |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 7 | 0.201 s | 1.71 ns | 0.13 s | 0.6 | 7 of 7 |
+| 56 | 0.340 s | 0.36 ns | 1.00 s | 3.0 | 56 of 56 |
+| 350 | 0.704 s | 0.12 ns | 6.28 s | 8.9 | 350 of 350 |
+
+Table size in the one pass: 32 symbols x 256 values x hypotheses x 2 bytes (x 2 for complex):
+0.1 MB for 7 real hypotheses, 0.9 MB for 56, 5.7 MB for 350, twice that for complex entries.
