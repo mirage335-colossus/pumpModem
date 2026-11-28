@@ -598,10 +598,12 @@ Margin, fitted divided by needed, for tones of 0.16 / 2.56 / 10.24 / 41 s:
   provides and a short one does not.
 - **The timing offsets could come from a transform across positions.** Summing each position
   separately and transforming across the sixteen sums gives every delay inside one cell at once,
-  for about sixteen times the accumulators. Derived; not costed. It pays only when the offsets
-  outnumber the positions: the 20 offsets of ±0.1 s are as cheap as an outer loop of 20 gathers
-  and transforms, and the 200 offsets of ±1 s would be 12 times cheaper this way. The
-  specification lists the timing loop among the repetitions it still contains (its 13.1).
+  for about sixteen times the accumulators. Derived; not built. Costed from the measured
+  transform times it gains nothing at the 20 offsets of ±0.1 s and about two at the 200 offsets
+  of ±1 s on a CPU; a first estimate of twelve left out the transform across positions itself.
+  On the matrix-product route it loses, because the operand would have to be spread over the
+  sixteen positions. The specification therefore carries timing offsets as one operand per
+  offset, with the positions a message selects looked up once (its 13.1).
 - **Thinning hypotheses for statistical reasons does not pay**: 10³, 10⁶ and 10⁹ independent
   hypotheses cost 1.2, 2.0 and 2.7 dB of block energy at a false-presence rate of 10⁻⁶.
 - The counting rules stand against the continuous-wave literature: half-bin frequency spacing is
@@ -695,6 +697,33 @@ the two rungs below the whole block, a drifting reference moving the signal by u
 between windows, which the epilogue covers by summing along tilted bin paths and which was not
 timed. The kernels are stock: the library's general matrix product and a plain epilogue.
 
+### 6.5 Hypotheses that are not a transform
+
+[Measured; `hypothesis_pass_bench` on the laptop, 12 threads, all 2²⁴ messages in every timed
+pass, synthetic tables with a planted message that won for every hypothesis.]
+
+Spread hypotheses, the timing offsets of per-tone reception and the fine timing steps of a
+wide-band coherent attempt each have their own evidence, so no transform yields them. What can
+be shared is the enumeration of the messages: the entries of all hypotheses for a symbol value
+are stored together, a lookup returns a vector over the hypotheses, and the 32 additions per
+message are vector additions.
+
+| Hypotheses in the pass | Real entries, one pass | Against a pass per hypothesis | Complex entries, one pass | Against a pass per hypothesis |
+| ---: | ---: | ---: | ---: | ---: |
+| 7 | 0.37 s | 1.6 times faster | 0.65 s | 1.4 |
+| 56 | 0.80 s | 6.0 | 1.8 s | 3.9 |
+| 350 | 4.5 s | 6.7 | 9.7 s | 4.5 |
+
+- The pass per hypothesis is the best one measured, the per-tone kernel with symbols in the
+  outer loop (0.086 s per hypothesis for real entries, 0.126 s for complex).
+- A first version of this benchmark compared against a slower loop of its own and showed gains
+  of 3.8 to 18; that comparison was unfair to the baseline and is not kept.
+- The additions remain: 0.8 ns per message and hypothesis with real entries and 1.7 ns with
+  complex ones. This does not bear on the sub-9 kHz configuration with locked references, which
+  has one timing offset and no spread bank in its coherent attempts; it is here because the
+  specification's rule against repeated work needed it.
+- Not run on a GPU.
+
 ## 7. Positions and a value-dependent phase
 
 [Simulated; `coherent_block_mc` with and without the option, 2,000 blocks per row, steady path;
@@ -763,7 +792,9 @@ item 7, 12.2 and 13), with concealment below 9 kHz limited to what costs no comp
 three computational rules became requirements for the receiver and the simulator (the
 specification's 13.1 and 13.5): time every route and rebalance for the whole job, do no work
 twice, and treat simulation speed on a 256-CPU machine and on a 32-CPU machine with an RTX PRO
-6000 as a requirement.
+6000 as a requirement. Last, the specification's list of repetitions it still contained was
+replaced by a stated form for every hypothesis dimension, with the one pass over the messages
+measured (section 6.5 here).
 
 The earlier statement that the lattice scale "is worth at most 1.6 dB, and only for an antenna
 narrower than about 50 Hz" compared antenna loss alone at 4 to 16 positions. It stands as a

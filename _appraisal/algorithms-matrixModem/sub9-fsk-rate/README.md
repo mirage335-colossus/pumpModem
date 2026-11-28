@@ -9,8 +9,9 @@ sources.
 **Purpose and retention.** `antenna_keying.cpp`, `phase_slew.cpp`, `coherent_block_mc.cpp` and
 `search_ceiling.py` are theoretical calculations (the third with a Monte Carlo part); their
 outputs are the reference for the specification's sub-9 kHz spacing, tone length, phase ramp and
-search figures. `decode_bench.cpp`, `decode_gpu.cu`, `search_bench.cpp`, `search_gpu.cu` and
-`results/gpu/` are measurements with provenance; `search_margins.py` is arithmetic on them. [`literature-calcs/`](literature-calcs/README.md) holds the scratch calculations of
+search figures. `decode_bench.cpp`, `decode_gpu.cu`, `search_bench.cpp`, `search_gpu.cu`,
+`hypothesis_pass_bench.cpp` and `results/gpu/` are measurements with provenance;
+`search_margins.py` is arithmetic on them. [`literature-calcs/`](literature-calcs/README.md) holds the scratch calculations of
 the delegated literature searches. Keep them as research material under the
 [research-material rule](../../../docs/development.md#research-material).
 
@@ -197,6 +198,29 @@ rungs below the whole block a drifting reference moves the signal between window
 bins, which a real epilogue covers by summing along tilted paths; shorter tones than 10.24 s
 would be summed into sub-blocks before the transform, which is not built (the 2,048-tone run
 shows the cost without it); 16-bit and 10-bit figures are the 24-bit time scaled.
+
+## `hypothesis_pass_bench.cpp`
+
+Hypotheses whose evidence differs per hypothesis (spread bank, timing offsets of per-tone
+reception, fine timing steps of a wide-band coherent attempt) scored in one pass over all 2²⁴
+messages with vector table entries, against one pass per hypothesis. It tests rule 2 of the
+specification's section 13.1 for the dimensions that are not a transform. For 7, 56 and 350
+hypotheses, with real and with complex entries; the planted message has to win for every
+hypothesis.
+
+```bash
+g++ -O3 -march=native -std=c++20 -fopenmp hypothesis_pass_bench.cpp -o /tmp/hypothesis_pass_bench
+/tmp/hypothesis_pass_bench 12 > results/hypothesis_pass_bench.md
+```
+
+Under a minute on 12 threads. Both sides run symbols in the outer loop and a chunk of
+consecutive messages inside, which is the faster order for both; the pass per hypothesis is the
+per-tone kernel of `decode_bench.cpp` and is timed on eight hypotheses and multiplied. A first
+version compared against a slower per-message loop and overstated the gain by about three; its
+output was not kept.
+
+Limits: laptop CPU only, not a GPU; synthetic 16-bit entries; the tables for 350 hypotheses
+(5.7 and 11.4 MB) sit in the last-level cache of this CPU and would not on a smaller one.
 
 ## `search_margins.py`
 

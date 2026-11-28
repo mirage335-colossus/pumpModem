@@ -1,6 +1,6 @@
 # Matrix Modem FSK research pass (Fable-5.2)
 
-26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: computational rules for receiver and simulator
+26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: a stated form for every hypothesis dimension
 
 This pass supports the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md). It
 builds on the [Sol-6.2](../Sol-6.2/README.md) and [Opus-5.5](../Opus-5.5/README.md) passes and
@@ -345,6 +345,15 @@ A cross-check of the repository's own earlier research, not a literature review:
     for the live receiver only, the no-repetition rule covered frequency and drift only while
     the text itself described repeated decodes for the spread bank and the wide-band fine
     timing steps, and simulation speed was not required at all.
+43. **Every hypothesis dimension now has a stated form, and none is a loop of decodes.**
+    Frequency and drift: a transform across tone sums (finding 40). Hypotheses with their own
+    evidence (spread bank, timing offsets of per-tone reception, wide-band fine timing steps):
+    one pass over the messages with vector table entries, measured on the laptop at 1.6, 6.0
+    and 6.7 times faster than the best pass per hypothesis for 7, 56 and 350 hypotheses (1.4,
+    3.9 and 4.5 with complex entries). Timing offsets of coherent attempts: one operand per
+    offset with the positions looked up once; a transform across positions as well is estimated
+    to gain about two on a CPU at 200 offsets and to lose on the matrix-product route, and is
+    not specified. The 32 additions per message and hypothesis remain where evidence differs.
 
 ## State of the specification
 
@@ -444,12 +453,22 @@ repetitions the draft still contains), 13.2 (measured), 13.3 (what the settings 
 (routes and scheduling rule, now for the simulator as well) and 13.5 (simulation: machines,
 layout of the work, reporting, what a trial costs, what is not measured). Section 1 states the
 rules as a fixed decision; section 8 has three new properties that tests must show (work
-counts, scheduling within a stated factor, simulation reporting); item 7 and the wide-band
-passage of item 8 no longer describe a decode per hypothesis; section 14 has one settled row
+counts, scheduling within a stated factor, simulation reporting). Three passages had described
+exactly the repetition the rule forbids and were rewritten: section 13 had opened with "the
+receiver's work is the hypothesis count times the decode", item 7 of section 8 had called for
+one decode per timing and spread hypothesis, and item 8 had said that each of about 350
+wide-band fine timing steps "repeats the accumulation and the decode". Further, section 14 has one settled row
 and open decisions 21 and 22; section 15 lists the remaining repetitions and the unmeasured
 simulation speed. A statement of the previous step was corrected: the wide-band fine timing
 steps cannot be had from a transform across positions at a saving, because 352 positions meet
 350 steps.
+
+On the user's request to update the specification again, the list of "repetitions this draft
+still contains" in 13.1 was replaced by a table of the form each hypothesis dimension takes and
+what that form rests on (finding 43), the one pass with vector entries was built and measured
+([`hypothesis_pass_bench`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/results/hypothesis_pass_bench.md)),
+and 13.2, item 7 and item 8 of section 8, open decisions 12 and 22 and the weaknesses were
+brought into line.
 
 ## Corrections to earlier Matrix Modem documents
 
@@ -467,6 +486,7 @@ Found by the reviews of this pass. The first four are annotated where they occur
 | Earlier guidance on impulsive noise | "Clip or blank before the transform" | Insufficient for OTHR: 7–35% duty with long filter tails; a 3σ clipper loses 8 dB at 28% duty ([OTHR review](reviews/review-othr-interference.md)) |
 | [Lattice design note](fsk-lattice-design.md), "Without FHSS" | "The lattice scale is worth at most 1.6 dB, and only for an antenna narrower than about 50 Hz" | Holds for antenna loss alone at 4 to 16 positions. The scale is also what lets sixteen positions fit the mains slot and a 10 s tone keep a wide spacing ([sub-9 kHz note](sub9khz-fsk-rate-and-spacing.md)) |
 | [Sub-9 kHz note](sub9khz-fsk-rate-and-spacing.md), first version, and specification 12.2 of 28 November | With a ±1 ppm reference the laptop is seven times too slow for 24 bits at 10.24 s tones; a 24-bit block with a free-running crystal is out of reach at any rate; Tensor Cores do not help the ladder | Those figures loop a full decode over every hypothesis. As a transform across tone sums the laptop keeps up by 3.2 and the GPU by 461 (measured); a crystal with 24 bits is about twice too slow on one GPU (scaled). The matrix product that was slow was the search over messages; the search over frequency and drift runs at 404 nominal TFLOP/s |
+| Specification 13.1 and the sub-9 kHz note, 28 November, before the last revision | Splitting tone values by position "pays whenever the timing offsets outnumber the positions" and would be "12 times cheaper" at 200 offsets | That count left out the transform across positions. Costed from measured transform times the gain is about two on a CPU at 200 offsets, and on the matrix-product route it is a loss |
 | Specification section 13 and finding 10 above | "About 65" coherent-ladder decodes a second, by extrapolation from 8,400 | Measured 36.9 for 64 windows and the specification's block shape; the per-tone decode measures 5,900, the 8,400 was for 24 symbols of 64 tones |
 ## Open questions carried forward
 

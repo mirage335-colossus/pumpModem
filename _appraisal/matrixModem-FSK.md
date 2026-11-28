@@ -2,7 +2,7 @@
 
 Draft of 26 November 2026, last reconciled 27 November (fourth pass), with the sub-9 kHz
 configuration adopted, the hypothesis search restructured and the computational rules of
-section 13.1 added on 28 November, for review. It extends the
+section 13.1 added and completed on 28 November, for review. It extends the
 [Matrix Modem brief](matrixModem.md) with a concrete keyed MFSK waveform, optionally frequency
 hopped, and the receiver behaviour it requires. No implementation exists. Every number is a
 calculation, a model simulation or a stage measurement on one GPU type and three CPUs. The supporting research is
@@ -465,7 +465,8 @@ each sent on `L` tones: 32·`L` tones per block.
    - *Per-tone reception:* one pass over the messages for all timing and spread hypotheses.
      The evidence of all hypotheses for a symbol value is stored together, so that the
      messages are enumerated once ([section 13](#131-rules-that-bind-every-implementation),
-     rule 2).
+     rule 2). On a laptop CPU that was 1.6 times faster than a pass per hypothesis for the
+     7 spread hypotheses and 6.0 times for 56 hypotheses.
    - *Coherent attempts with a single frequency hypothesis* (references locked and logged): one
      decode on the window ladder.
    - *Coherent attempts with many frequency or drift hypotheses:* for each message and timing
@@ -524,7 +525,8 @@ each sent on `L` tones: 32·`L` tones per block.
      is applied to the stored bin values, so no fine step repeats the transform. The fine
      steps are further hypotheses of the one pass over the messages, with their table entries
      stored together; they multiply the additions, not the enumeration. Over 2.2 kHz that is
-     about 350 fine steps for each 20 ms step.
+     about 350 fine steps for each 20 ms step: 9.7 s per coarse step for 24 bits on a laptop
+     CPU in one pass, against 44 s as a pass per step.
      A slow change of the path's delay, as the ionosphere's height changes, is far below the
      20 ms spacing but not below 57 µs, and adds a delay-rate search that is not sized.
    - **Multipath.** Where positions do not share a phase, the attempts gain only within the
@@ -1062,19 +1064,23 @@ counts only if it was obtained under them.
      | Transform of a rung's windows | Message and timing offset | That rung's bins, and only those its window length resolves |
      | Decoy-key thresholds | Configuration | Every block, and every trial of a simulation |
 
-   - **Repetitions this draft still contains.** Each has to be removed or shown to be necessary
-     before a ceiling is quoted for the case it affects.
-     - *Timing offsets* repeat the gather and the transform across tone sums: 20 times below
-       9 kHz for ±0.1 s. Keeping a message's tone values apart by position and transforming
-       across positions gives every offset at once, from as many partial transforms as there
-       are positions. That pays only when the offsets outnumber the positions: below 9 kHz
-       from about ±1 s of timing (200 offsets against 16 positions), and never over 2.2 kHz,
-       where 352 positions meet 350 fine steps. Derived, not built.
-     - *The spread bank and the wide-band fine timing steps* have separate evidence for every
-       hypothesis. They cost 32 additions per message and hypothesis, which no route found so
-       far avoids; what must not be repeated is the enumeration of the messages. One pass with
-       vector entries is derived, not built.
-     - *A single hypothesis* is one plain decode, which is the right form for it.
+   - **How each hypothesis dimension is carried.**
+
+     | Dimension | Form | Basis |
+     | --- | --- | --- |
+     | Frequency and drift in coherent attempts | A transform across the message's tone sums, by FFT or as one matrix product; each rung only on the bins its window length resolves | Measured: 22 times faster on the laptop and 86 times on the GPU than a decode per hypothesis ([12.2](#122-phase-stable-paths-below-9-khz)) |
+     | Spread hypotheses and timing offsets of per-tone reception; fine timing steps of the wide-band coherent attempt | Vector entries: the evidence of all hypotheses for a symbol value lies together, and one pass over the messages adds vectors | Measured on the laptop CPU against the best pass per hypothesis: 1.6, 6.0 and 6.7 times faster for 7, 56 and 350 hypotheses with real entries, and 1.4, 3.9 and 4.5 times with complex entries. Not run on a GPU |
+     | Timing offsets in coherent attempts | One operand per offset: the positions a message selects are looked up once, and each offset turns the gathered values by the phase slope of their positions before the transform | The transform per offset is a different operand, not repeated work. Looking the positions up once saves the gather's share, 4% on the laptop and 7% on the GPU (from the measured parts; the benchmarks still gather per offset) |
+     | A single hypothesis | One plain decode | Measured |
+
+   - **A transform across positions as well is not specified.** It would give every timing
+     offset inside a cell at once. Estimated from the measured transform times it gains about
+     two on a CPU at 200 offsets and nothing at 20, and on the matrix-product route it loses,
+     because the operand would have to be spread over the positions: 16 times the product
+     below 9 kHz, 352 times over 2.2 kHz. Not built.
+   - **What remains per message and hypothesis.** Where the evidence differs per hypothesis the
+     additions remain: 32 per message and hypothesis, at 0.8 ns (real) and 1.7 ns (complex) per
+     message and hypothesis on the laptop in one pass. No route found so far avoids them.
    - **Benchmarks.** A ceiling figure states its work counts against the table above. A figure
      taken with a repeated inner stage is labelled as the cost of that structure, not as the
      ceiling.
@@ -1086,6 +1092,18 @@ counts only if it was obtained under them.
 - **Live reception** needs a small fraction of one CPU core for the first transform. The
   receiver's work is the search over messages and hypotheses, laid out as rule 2 requires; it
   is not the hypothesis count times a decode.
+- **Measured on the 12-thread Ryzen 5 PRO 5650U**, one pass over all 2²⁴ messages with vector
+  entries against the best pass per hypothesis (the per-tone kernel, 0.086 s per hypothesis,
+  and its complex form, 0.126 s):
+
+  | Hypotheses in the pass | Real entries | Faster by | Complex entries | Faster by |
+  | ---: | ---: | ---: | ---: | ---: |
+  | 7 (the spread bank) | 0.37 s | 1.6 | 0.65 s | 1.4 |
+  | 56 | 0.80 s | 6.0 | 1.8 s | 3.9 |
+  | 350 (the wide-band fine timing steps) | 4.5 s | 6.7 | 9.7 s | 4.5 |
+
+  The planted message won for every hypothesis. Synthetic tables; the gain comes from adding
+  eight to sixteen hypotheses in one instruction and from forming the symbol values once.
 - **Measured on a full RTX PRO 6000 Blackwell**, batches of 32,768 two-cell tones:
   - cuFFT and an FP16 matrix-product DFT both exceed 20 million times real time. Which is faster
     depends on the bins wanted and on the batch: at 32,768 per call the matrix product is 1.2
@@ -1290,9 +1308,9 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 12. **Measuring the always-on coherent attempts** against the computational ceiling. Done for a
     narrow band without FHSS, with the frequency and drift search as a transform across tone
     sums on CPU and on Tensor Cores (sections 12.2 and 13). The wide-band specular search is
-    still unmeasured. Its 350 fine timing steps cannot be had from a transform across positions
-    at a saving, because 352 positions meet them; they are vector entries of the one pass over
-    the messages (13.1), which is not built.
+    still unmeasured as a whole. Its 350 fine timing steps cannot be had from a transform
+    across positions at a saving; they are vector entries of the one pass over the messages
+    (13.1), measured on a CPU as a kernel: 9.7 s per coarse timing step for 24 bits.
 13. **Search volume below 9 kHz.** The configuration assumes GPS-locked references at both
     ends, and a lesser reference is searched by the transform of section 8. Still to decide:
     which reference classes a configuration may declare (a ±1 ppm reference is within reach of
@@ -1326,9 +1344,9 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 21. **Acceptance figures for the computational rules.** The factor within which the scheduler
     has to come to the best fixed assignment (placeholder 1.2), and numeric speed targets for
     the two experiment machines once a simulator exists.
-22. **Hypotheses that are still loops.** Whether to build the split by position for timing
-    uncertainty of about ±1 s and more below 9 kHz, and the one pass with vector entries for
-    the spread bank and the wide-band fine timing steps (13.1).
+22. **What is left of the hypothesis forms.** Whether a transform across positions is worth
+    building for a CPU-only receiver with ±1 s of timing below 9 kHz (estimated gain about
+    two), and the one pass with vector entries on a GPU, where it is not measured (13.1).
 
 ## 15. Known weaknesses
 
@@ -1425,11 +1443,12 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 - **Long messages** pay the block penalty until a long-block code is qualified.
 - **No HF precedent below about +3 dB-Hz** at milliwatt power; the lower part of the target range
   rests on theory.
-- **This draft still contains repeated work in three places** (13.1): timing offsets repeat
-  the gather and the transform across tone sums, 20 times below 9 kHz; the spread bank and the
-  wide-band fine timing steps were described as repeated decodes until this revision. The
-  forms that avoid the repetition are derived, not built, and for the last two the additions
-  per message and hypothesis remain.
+- **The search forms of 13.1 are measured as kernels, each on part of the hardware.** The
+  transform across tone sums ran on CPU and GPU for one reference class. The one pass with
+  vector entries ran on the laptop CPU only. Looking the positions up once across timing
+  offsets is specified, while the benchmarks still gather per offset (4 to 7% of their time).
+  For hypotheses with their own evidence the 32 additions per message and hypothesis remain:
+  the wide-band fine timing steps cost 9.7 s per coarse step for 24 bits on the laptop.
 - **Simulation speed is required but not measured on its machines.** No simulator of the
   complete format exists, nothing was run on a 256-CPU machine, and a 24-bit trial with the
   ±1 ppm search takes 11 s on the GPU, which makes sweeps of thousands of such trials slow.
