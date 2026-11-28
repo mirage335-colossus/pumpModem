@@ -598,7 +598,10 @@ Margin, fitted divided by needed, for tones of 0.16 / 2.56 / 10.24 / 41 s:
   provides and a short one does not.
 - **The timing offsets could come from a transform across positions.** Summing each position
   separately and transforming across the sixteen sums gives every delay inside one cell at once,
-  for about sixteen times the accumulators. Derived; not costed.
+  for about sixteen times the accumulators. Derived; not costed. It pays only when the offsets
+  outnumber the positions: the 20 offsets of ±0.1 s are as cheap as an outer loop of 20 gathers
+  and transforms, and the 200 offsets of ±1 s would be 12 times cheaper this way. The
+  specification lists the timing loop among the repetitions it still contains (its 13.1).
 - **Thinning hypotheses for statistical reasons does not pay**: 10³, 10⁶ and 10⁹ independent
   hypotheses cost 1.2, 2.0 and 2.7 dB of block energy at a false-presence rate of 10⁻⁶.
 - The counting rules stand against the continuous-wave literature: half-bin frequency spacing is
@@ -753,6 +756,14 @@ decisions, and adopted on 28 November 2026 at the user's request.
   in range (19), and the ramp length against a real transmitter (20).
 - Section 15: weaknesses for the assumed antenna, the untested ramp, the slot, and the slow
   service of a strong link.
+
+Two further revisions followed on 28 November, both from the user's questions. The hypothesis
+search became a transform across tone sums (section 6.4 here; the specification's section 8
+item 7, 12.2 and 13), with concealment below 9 kHz limited to what costs no computation. Then
+three computational rules became requirements for the receiver and the simulator (the
+specification's 13.1 and 13.5): time every route and rebalance for the whole job, do no work
+twice, and treat simulation speed on a 256-CPU machine and on a 32-CPU machine with an RTX PRO
+6000 as a requirement.
 
 The earlier statement that the lattice scale "is worth at most 1.6 dB, and only for an antenna
 narrower than about 50 Hz" compared antenna loss alone at 4 to 16 positions. It stands as a

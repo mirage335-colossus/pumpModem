@@ -1,6 +1,6 @@
 # Matrix Modem FSK research pass (Fable-5.2)
 
-26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: the hypothesis search as a transform across tone sums
+26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: computational rules for receiver and simulator
 
 This pass supports the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md). It
 builds on the [Sol-6.2](../Sol-6.2/README.md) and [Opus-5.5](../Opus-5.5/README.md) passes and
@@ -332,6 +332,19 @@ A cross-check of the repository's own earlier research, not a literature review:
     keyed phase per tone), and not hitting the computational ceiling has priority. The
     sub-9 kHz case is meant as the extreme one that makes the specification call for the right
     balance between CPU FFT, Tensor Core DFT and the hypothesis search that follows.
+42. **Three computational rules are now requirements of the specification, for the receiver and
+    the simulator** (the user's requirements of 28 November; section 13.1). (1) Every route is
+    timed on the machine it runs on, CPU FFT against GPU FFT against a Tensor Core
+    matrix-product DFT and the like, and work is rebalanced so that the whole job finishes
+    soonest. (2) No work is done twice: work sits at the outermost loop level at which its
+    inputs change, the messages are enumerated once, and hypotheses are an inner dimension, as
+    a transform or as vector table entries; a table states what is done once per what, and
+    tests have to count the work. (3) Simulation speed is a requirement on a 256-CPU machine
+    and on a 32-CPU machine with an RTX PRO 6000, with trials as portions under the same
+    scheduling. An audit found the earlier text short on all three: rebalancing was required
+    for the live receiver only, the no-repetition rule covered frequency and drift only while
+    the text itself described repeated decodes for the spread bank and the wide-band fine
+    timing steps, and simulation speed was not required at all.
 
 ## State of the specification
 
@@ -424,6 +437,20 @@ across tone sums as a routed stage), 11, 12.2 (measured search table and scaled 
 (the product as the Tensor Core workload; routes the scheduler has to hold), 14 (two settled
 rows; open decisions 2, 12 and 13 narrowed) and 15.
 
+The user then asked whether the specification calls for measuring and rebalancing routes, for
+simulation speed on the experiment machines, and for not repeating work (finding 42). Section
+13 was divided into 13.1 (the three rules, the table of what is done once per what, and the
+repetitions the draft still contains), 13.2 (measured), 13.3 (what the settings do), 13.4
+(routes and scheduling rule, now for the simulator as well) and 13.5 (simulation: machines,
+layout of the work, reporting, what a trial costs, what is not measured). Section 1 states the
+rules as a fixed decision; section 8 has three new properties that tests must show (work
+counts, scheduling within a stated factor, simulation reporting); item 7 and the wide-band
+passage of item 8 no longer describe a decode per hypothesis; section 14 has one settled row
+and open decisions 21 and 22; section 15 lists the remaining repetitions and the unmeasured
+simulation speed. A statement of the previous step was corrected: the wide-band fine timing
+steps cannot be had from a transform across positions at a saving, because 352 positions meet
+350 steps.
+
 ## Corrections to earlier Matrix Modem documents
 
 Found by the reviews of this pass. The first four are annotated where they occur.
@@ -472,8 +499,10 @@ Found by the reviews of this pass. The first four are annotated where they occur
     5.17 and 8.27 kHz; a measured phase spectrum of a sub-9 kHz carrier; the transform search
     inside a receiver (bin values per timing offset, tilted bin paths, short tones summed into
     sub-blocks, a fused epilogue, batched small transforms on the CPU, the 4-bit and FP8/FP4
-    Tensor paths); the same product for the fine timing steps of the wide-band specular search;
-    tiered screening.
+    Tensor paths); one pass with vector table entries for the spread bank and for the fine
+    timing steps of the wide-band specular search; the split by position for timing
+    uncertainty of ±1 s and more; tiered screening; a simulator of the complete format and its
+    speed on a 256-CPU machine and on a 32-CPU machine with an RTX PRO 6000.
 
 ## Cost and provenance of the GPU run
 
