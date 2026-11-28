@@ -290,6 +290,14 @@ meteor figures no longer stand side by side as if they were the same case; cross
 the limits paragraph were brought into line; and a settled row records that meteor burst, if
 pursued, is an FSK path class on overdense trails.
 
+A fourth pass the same day read the whole specification again. It removed a duplicated
+statement in section 1, widened the definition of "held tone" to cover tones without FHSS,
+replaced the last uses of "segment" by "phase interval", renamed 12.1 to "Paths the format
+serves" since it includes troposcatter at 50 MHz, restated why a keyed tone and not PSK
+separately for underdense trails, overdense trails and HF, noted in section 3 that meteor burst
+is the one path that would want a shorter cell, and split the meteor-burst weakness into its
+four parts.
+
 ## Corrections to earlier Matrix Modem documents
 
 Found by the reviews of this pass. The first four are annotated where they occur.

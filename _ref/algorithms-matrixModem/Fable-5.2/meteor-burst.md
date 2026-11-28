@@ -214,6 +214,10 @@ range; trail formation and absorption losses are left out; the noise is galactic
 
 ## What this means for the specification
 
+Written after the underdense results only. The first bullet is superseded by the overdense and
+whole-sky sections below; the current position is in the conclusions above and in section 12.3
+of the specification.
+
 - Meteor burst is outside the specification's power range with small antennas, and should not
   be listed as a supported path. With directional antennas at both ends and 100 mW it is a
   marginal erasure channel of tens of tones an hour.
@@ -661,13 +665,22 @@ Preben-Hansen (OZ1RH), "Troposcatter inside and out",
 
 ## Open
 
-- Overdense trails: the formulas were read only in secondary reproductions; Sugar 1964, Hines
-  and Forsyth 1957 and McKinley 1961 remain unread. No measured distribution of durations
-  beyond 1 s, of Doppler spread, or of overdense rates per hour was found. The 1/q rate above
-  the transition is one link's figure extended.
-- The sky-coverage gain of wide antennas against the level they lose.
-- Block time for a 10-bit block collected over bursts.
-- The sign of the P.843 diurnal factor.
+- **Formulas.** The overdense formulas were read only in secondary reproductions; Sugar 1964,
+  Hines and Forsyth 1957 and McKinley 1961 remain unread.
+- **Measurements.** No measured distribution was found of overdense durations beyond 1 s, of
+  Doppler spread on trails, of overdense rates per hour, or of 50 MHz troposcatter loss.
+- **Flux.** Whether trails above q continue to fall as 1/q up to 10¹⁶, and the sign of the
+  P.843 diurnal factor. Shower against sporadic rates.
+- **Whole-sky model.** Trail length and height distributions, fading inside an echo, the gain a
+  real array keeps at low elevation, and non-specular echoes from warped trails (which would
+  raise both the link's and a radar's share).
+- **The modem on this path.** Block time for a 10-bit block collected over one or several
+  trails; the cell length that suits 1–10 Hz fading; the per-trail frequency search; the
+  evidence clip.
+- **Troposcatter at 50 MHz.** A prediction method validated there, the low-antenna loss, and
+  the fading rate.
+- **Other frequencies.** Only 50 MHz was computed for overdense and whole-sky cases; 40 MHz
+  should be better by the λ laws.
 
 ## References
 

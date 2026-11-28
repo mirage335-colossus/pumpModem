@@ -1,6 +1,6 @@
 # Matrix Modem FSK: specification draft
 
-Draft of 26 November 2026, last reconciled 27 November, for review. It extends the
+Draft of 26 November 2026, last reconciled 27 November (fourth pass), for review. It extends the
 [Matrix Modem brief](matrixModem.md) with a concrete keyed MFSK waveform, optionally frequency
 hopped, and the receiver behaviour it requires. No implementation exists. Every number is a
 calculation, a model simulation or a stage measurement on one GPU. The supporting research is
@@ -11,8 +11,8 @@ indexed in
 
 ## 1. Scope and fixed decisions
 
-- One-way, one tone at a time, constant envelope at full peak power, fixed configuration per
-  purpose, no feedback, no length fields.
+- One-way, one tone at a time at full peak power, fixed configuration per purpose, no feedback,
+  no length fields.
 - Target: 2–100 mW through more than 150 dB of path loss, C/N₀ from about +10 down to −20 dB-Hz,
   short messages that may take hours, days or weeks. On phase-stable paths without FHSS the range
   extends to about −37 dB-Hz, where coherent links below 9 kHz already work.
@@ -54,7 +54,7 @@ indexed in
 | Position | One of the tone frequencies, 6.25 Hz apart. |
 | Tone | One tone on one position. **Tone length** is how long it stays there, in cells. |
 | Hop | With FHSS, the radio's stay on one hop frequency. **Hop length** includes its edges. |
-| Held tone | A tone as long as the flat part of its hop: one tone per hop. |
+| Held tone | A tone longer than one cell. With FHSS it is as long as the flat part of its hop: one tone per hop. |
 | Block | 10, 16 or 24 information bits sent as 32 symbols. |
 | Phase key | The keyed phase of 0°, 90°, 180° or 270° that every tone is sent with. |
 | Phase interval | The stretch sent with one keyed phase: the tone, or a part of it. |
@@ -79,10 +79,12 @@ indexed in
 - These rules give exact orthogonality over a cell, one transform plan, and bin statistics that a
   simulator may draw without forming samples.
 - **Lattice scale.** The cell may be set to 160 ms × 2^j with positions 6.25 Hz / 2^j apart.
-  `j` = 0 is the default and serves every supported path. A larger `j` only refits the tones to a transmit
-  antenna narrower than about 50 Hz, where it recovers up to 1.6 dB. Shorter cells are not
-  offered: a 40 ms cell is never better than 160 ms for weak signals, at any spread up to 100 Hz
-  ([4.2](#42-tone-length) gives the cost of faster tone rates).
+  `j` = 0 is the default and serves every supported path. A larger `j` only refits the tones to
+  a transmit antenna narrower than about 50 Hz, where it recovers up to 1.6 dB. Shorter cells
+  are not offered: a 40 ms cell is never better than 160 ms for weak signals on a continuous
+  path, at any spread up to 100 Hz ([4.2](#42-tone-length) gives the cost of faster tone
+  rates). Meteor burst, which this draft does not support, is the one path that would want a
+  shorter cell ([12.3](#123-meteor-burst-and-troposcatter-at-50-mhz)).
 
 ## 4. Tone, hop and phase key
 
@@ -341,8 +343,8 @@ each sent on `L` tones: 32·`L` tones per block.
 - AES-256 generates every schedule: the position map for every tone, the tone-to-symbol
   assignment for every block, the matrices `G_j` and masks `m_j`, the hop frequencies, and the
   phase key. Inputs are the key, the shift frequency rounded to the configured multiple of
-  10 Hz, and the block, tone and phase-interval ordinals. The hop frequency is not an input to the
-  other schedules.
+  10 Hz, and the block, tone and phase-interval ordinals. The hop frequency is not an input to
+  the other schedules.
 - Payload bits are encrypted before coding by the AES-256 + Serpent cascade keystream. Encryption
   adds no bits.
 - Encryption is always on, with the published zero key or a loaded keyfile, as in the brief.
@@ -578,8 +580,9 @@ per held tone does not help against a filter bank. 32 held tones per block, same
 | 40 s | 1.6–5.7 dB | 12–14 dB | 11–13 dB | 9.5–11.5 dB | 8–10 dB |
 | 400 s | 1.6–5.7 dB | 17–19 dB | 16–17.5 dB | 14–16 dB | 13–14.5 dB |
 
-These are for an observer that adds a tone's segment energies and takes the largest; allow
-about 2 dB for a better statistic. Two segments per tone gain only 0.5 to 0.7 dB.
+These are for an observer that adds the energies of a tone's phase intervals and takes the
+largest; allow about 2 dB for a better statistic. Two phase intervals per tone gain only 0.5 to
+0.7 dB.
 
 **Where the keyed receiver adds coherently, the gap grows with the coherent time.** The keyed
 receiver needs a fixed total energy (about 57 times the noise density for a 10-bit block), and
@@ -590,7 +593,7 @@ not computed.
 
 ## 12. Paths other than mid-latitude HF
 
-### 12.1 Supported paths
+### 12.1 Paths the format serves
 
 The receiver adapts to the path by its spread hypothesis and its coherent attempts. Extra
 transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s hop unless stated:
@@ -601,7 +604,7 @@ transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s 
 | Aurora, flutter | 50–500 Hz, with offset | 1.0–1.1 dB | spread hypotheses up to 500 Hz |
 | Earth–Moon–Earth | about 20 Hz per GHz | 1.0–2.4 dB | the predicted Doppler shift (up to ±20 kHz and 1.3 Hz/s at 5.76 GHz) removed before the transform |
 | Troposcatter at 0.9–5.8 GHz | roughly 0.3–20 Hz (an extrapolation from 30 MHz data) | 6.4 dB at 0.5 Hz, 2.4 dB at 3 Hz, 1.5 dB at 10 Hz | nothing; where hopping is not imposed, a longer tone recovers the slow end |
-| Troposcatter at 50 MHz, up to about 300 km | about 0.01–0.1 Hz (inferred, not measured) | not computed | a held tone of seconds or more; not yet a configured path class ([12.3](#123-meteor-burst-and-troposcatter-at-50-mhz)) |
+| Troposcatter at 50 MHz, up to about 300 km | about 0.01–0.1 Hz (inferred, not measured) | not computed | a held tone of seconds or more; served by the format, not yet a configured path class ([12.3](#123-meteor-burst-and-troposcatter-at-50-mhz)) |
 | Phase-stable (sub-9 kHz, daytime groundwave), per-tone reception, no FHSS | below 1 mHz | 18 dB (28 at −20, 38 at −30 dB-Hz) | this is only the fallback |
 | The same, coherent windows of 1 min / 22 min / 5.8 h | below 1 mHz | 1.4 / 0.2 / 0.0 dB (5.7 / 1.0 / 0.1 at −20; 14.1 / 4.4 / 0.7 at −30) | both references and the path steady over the window |
 
@@ -610,6 +613,7 @@ transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s 
   bank to 500 Hz.
 - **Strong signals on very wide spreads are limited in rate, not in sensitivity.** This modem
   does not chase that case.
+
 ### 12.2 Phase-stable paths below 9 kHz
 
 - **Phase-stable paths use the default lattice with FHSS off**, few positions, and the receiver's
@@ -692,9 +696,9 @@ competes with meteor burst at short range.
   without gain 0.6 tone-worth trails an hour. 2 mW without receive gain gets no block.
 - **Up to about 300 km troposcatter is the better path at 50 MHz.** It is continuous: about
   +13 to +27 dB-Hz at 150 km and −2 to +11 dB-Hz at 300 km for 100 mW without antenna gain
-  (median), which this specification serves as it stands. At 500 km it falls to −16 to
-  −6 dB-Hz and meteor trails win. It fades slowly (0.01–0.1 Hz), so a held tone fits it
-  better than the one-cell tone. No prediction method is validated at 50 MHz and no
+  (median), which is inside this specification's range and needs no change of format. At
+  500 km it falls to −16 to −6 dB-Hz and meteor trails win. It fades slowly (0.01–0.1 Hz), so
+  a held tone fits it better than the one-cell tone. No prediction method is validated at 50 MHz and no
   measurement was found. Its footprint is wide where a trail's is a strip of about 5 × 40 km.
 - **What limits these figures.** The published meteor flux law is continued two decades past
   where it is established. Fading inside an echo is not modelled, hence the column with 6 dB
@@ -715,10 +719,10 @@ competes with meteor burst at short range.
   converge: a radar at the transmitter also sees 53–57% of the link's block-worth trails at
   50 km between the stations, 17–21% at 150 km and about 10% at 300 km. If only the receiver
   uses the probe, the link stays one-way. No literature on such a probe was found.
-- **Why a keyed tone and not PSK.** On underdense trails the path itself would carry PSK
-  (delay spread under 100 ns for 90% of the time), but no burst at these powers holds enough
-  energy for a carrier. On overdense trails the fading rules it out as on HF, where the
-  reason is the delay spread ([4.4](#44-phase-key)).
+- **Why a keyed tone and not PSK.** The reason differs by path. On underdense trails the path
+  itself would carry PSK (delay spread under 100 ns for 90% of the time), but no burst at these
+  powers holds enough energy for a carrier. On overdense trails it is the fading of 1 to 10
+  times a second. On HF it is the delay spread ([4.4](#44-phase-key)).
 - **Wideband keyed-phase mode for underdense trails, outside this specification.** A rapid
   keyed phase sequence over a wide band, received by a digitally formed array. Assessed, not
   computed:
@@ -811,7 +815,7 @@ competes with meteor burst at short range.
 | About 10 bits take less than twice as long as one bit at similar confidence | 1, 10 |
 | 256 values with a keyed placement over all positions, where earlier notes suggested 64 with wide spacing | 5 |
 | Conditioning ahead of the 4-bit sample code uses full precision; everything after it is 4-bit | 8 |
-| The spread bank reaches 500 Hz; EME needs a predicted-Doppler input | 8, 12 |
+| The spread bank reaches 500 Hz; EME needs a predicted-Doppler input | 8, 12.1 |
 | "Dwell" is replaced by tone, hop and held tone | 2 |
 | At least one keyed phase change per tone is mandatory in all cases, with four phases | 1, 4.4 |
 | Preferred tone rate: as fast as the spread and total bandwidth allow, up to one tone per cell | 4.2 |
@@ -864,7 +868,8 @@ competes with meteor burst at short range.
     144 MHz probe. The wideband keyed-phase mode for underdense trails would be a separate
     specification.
 17. **Troposcatter at 50 MHz** (section 12.3) as a path class for up to about 300 km, with a
-    held tone for its slow fading. It competes with meteor burst at short range and needs no array.
+    held tone for its slow fading. It competes with meteor burst at short range and needs no
+    array.
 
 ## 15. Known weaknesses
 
@@ -920,13 +925,15 @@ competes with meteor burst at short range.
   positions one steady interferer covers a large share of the alphabet.
 - **Two to four positions** cost 2.6 and 0.8 dB against a coherent phase-keyed signal, which has
   no such loss. From 8 positions the difference is under 0.3 dB.
-- **Meteor-burst figures rest on thin ground.** They scale one measured 500 W link down by 37
-  to 54 dB and extend its trail rate above the overdense transition; the whole-sky figures
-  continue the published flux law two decades past where it is established and assume receive
-  gain down to 3° elevation. The 50 MHz troposcatter figures come from methods not validated
-  at that frequency, and differ by 10 to 13 dB between methods. The overdense formulas
-  were read only in secondary sources, real echo durations are poorly established, and fading
-  inside an echo is not modelled.
+- **Meteor-burst and 50 MHz troposcatter figures rest on thin ground** (section 12.3).
+  - The long-path figures scale one measured 500 W link down by 37 to 54 dB and extend its
+    trail rate above the overdense transition.
+  - The whole-sky figures continue the published flux law two decades past where it is
+    established and assume receive gain down to 3° elevation.
+  - The overdense formulas were read only in secondary sources, real echo durations are poorly
+    established, and fading inside an echo is not modelled.
+  - The troposcatter figures come from methods not validated at 50 MHz, which differ by 10 to
+    13 dB among themselves; no measurement was found.
 - **Outage looks like quiet.** A fadeout longer than two block periods ends the message unless the
   schedule resumes.
 - **Long messages** pay the block penalty until a long-block code is qualified.
