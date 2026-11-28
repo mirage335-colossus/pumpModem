@@ -1,16 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="555" viewBox="0 0 1280 555" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="655" viewBox="0 0 1280 655" role="img" aria-labelledby="title description">
 <title id="title">HF transmit waterfall</title>
-<desc id="description">Frequency increases left to right and time increases down. The first panel shows all 64 tones. The second expands the first, four middle and last tone slots, labelled by coded byte index and scheduled phase. The two copies of the first transmitted symbol are highlighted.</desc>
-<rect x="0.000" y="0.000" width="1280.000" height="555.000" fill="#ffffff"/>
+<desc id="description">Frequency increases left to right and time increases down. The first panel shows all 64 tones. The second expands the first, four middle and last tone slots, labelled by coded byte index and scheduled phase. Brackets identify the full block, one cell and a repeated keyed phase. The two copies of the first transmitted symbol are linked. A magnified frequency ruler shows adjacent positions 6.25 Hz apart.</desc>
+<rect x="0.000" y="0.000" width="1280.000" height="655.000" fill="#ffffff"/>
 <g font-family="DejaVu Sans, sans-serif">
 <text x="27" y="39.000" text-anchor="start" font-size="31" font-weight="700" fill="#193242">HF transmit waterfall</text>
-<text x="27" y="70.000" text-anchor="start" font-size="21" font-weight="400" fill="#193242">Word 173 · one 160 ms tone per slot · 64 slots · 10.24 s</text>
-<text x="87" y="109.000" text-anchor="start" font-size="24" font-weight="700" fill="#193242">Full block</text>
+<text x="27" y="70.000" text-anchor="start" font-size="21" font-weight="400" fill="#193242">Word 173 (10 bits) → 32 coded bytes → 64 interleaved tones</text>
+<text x="87" y="109.000" text-anchor="start" font-size="24" font-weight="700" fill="#193242">One block · 64 tones · 10.24 s</text>
 <text x="596" y="109.000" text-anchor="start" font-size="24" font-weight="700" fill="#193242">Selected tone slots</text>
 <text x="76" y="138.000" text-anchor="end" font-size="18" font-weight="400" fill="#193242">Time (s)</text>
 <text x="522" y="138.000" text-anchor="end" font-size="18" font-weight="400" fill="#193242">Start (s)</text>
 <text x="584" y="138.000" text-anchor="end" font-size="18" font-weight="400" fill="#193242">Slot</text>
-<text x="1033" y="138.000" text-anchor="middle" font-size="19" font-weight="400" fill="#193242">Coded symbol</text>
+<text x="1033" y="138.000" text-anchor="middle" font-size="19" font-weight="400" fill="#193242">Symbol index</text>
 <text x="1188" y="138.000" text-anchor="middle" font-size="19" font-weight="400" fill="#193242">Keyed phase</text>
 <rect x="87.000" y="153.000" width="360.000" height="302.000" fill="#122635"/>
 <line x1="87.000" y1="153.000" x2="87.000" y2="455.000" stroke="#49606b" stroke-width="1"/>
@@ -58,6 +58,9 @@
 <text x="76" y="394.938" text-anchor="end" font-size="18" font-weight="400" fill="#193242">8</text>
 <line x1="87.000" y1="455.000" x2="447.000" y2="455.000" stroke="#3e5562" stroke-width="1"/>
 <text x="76" y="461.000" text-anchor="end" font-size="18" font-weight="400" fill="#193242">10.24</text>
+<rect x="457.200" y="153.000" width="1.600" height="302.000" fill="#193242"/>
+<rect x="451.000" y="152.200" width="7.000" height="1.600" fill="#193242"/>
+<rect x="451.000" y="454.200" width="7.000" height="1.600" fill="#193242"/>
 <rect x="145.807" y="153.000" width="1.023" height="4.719" fill="#69f3ce"/>
 <circle cx="146.318" cy="155.359" r="5" fill="none" stroke="#69f3ce" stroke-width="1.5"/>
 <rect x="87.000" y="157.719" width="0.511" height="4.719" fill="#fff3a8"/>
@@ -126,6 +129,7 @@
 <rect x="221.489" y="450.281" width="1.023" height="4.719" fill="#fff3a8"/>
 <line x1="596.000" y1="153.000" x2="956.000" y2="153.000" stroke="#49606b" stroke-width="1"/>
 <rect x="654.807" y="153.000" width="1.023" height="40.000" fill="#69f3ce"/>
+<rect x="1013.000" y="158.000" width="40.000" height="30.000" fill="#d7f7ee"/>
 <text x="522" y="180.000" text-anchor="end" font-size="21" font-weight="700" fill="#075b50">0.00</text>
 <text x="584" y="180.000" text-anchor="end" font-size="21" font-weight="700" fill="#075b50">0</text>
 <text x="1033" y="180.000" text-anchor="middle" font-size="21" font-weight="700" fill="#075b50">15</text>
@@ -136,6 +140,7 @@
 <circle cx="776.000" cy="215.000" r="1.6" fill="#193242"/>
 <line x1="596.000" y1="224.000" x2="956.000" y2="224.000" stroke="#49606b" stroke-width="1"/>
 <rect x="725.375" y="224.000" width="1.023" height="40.000" fill="#69f3ce"/>
+<rect x="1013.000" y="229.000" width="40.000" height="30.000" fill="#d7f7ee"/>
 <text x="522" y="251.000" text-anchor="end" font-size="21" font-weight="700" fill="#075b50">3.68</text>
 <text x="584" y="251.000" text-anchor="end" font-size="21" font-weight="700" fill="#075b50">23</text>
 <text x="1033" y="251.000" text-anchor="middle" font-size="21" font-weight="700" fill="#075b50">15</text>
@@ -168,6 +173,38 @@
 <text x="584" y="442.000" text-anchor="end" font-size="21" font-weight="400" fill="#193242">63</text>
 <text x="1033" y="442.000" text-anchor="middle" font-size="21" font-weight="400" fill="#193242">14</text>
 <text x="1188" y="442.000" text-anchor="middle" font-size="21" font-weight="400" fill="#193242">90°</text>
-<text x="27" y="540.000" text-anchor="start" font-size="20" font-weight="400" fill="#075b50">Green marks two copies of symbol 15. The phase labels come from the schedule.</text>
+<rect x="664.318" y="172.200" width="13.000" height="1.600" fill="#69f3ce"/>
+<polygon points="658.318,173.000 665.318,169.000 665.318,177.000" fill="#69f3ce"/>
+<text x="683.3181818181819" y="169.000" text-anchor="start" font-size="17" font-weight="700" fill="#69f3ce">Tone</text>
+<text x="683.3181818181819" y="187.000" text-anchor="start" font-size="16" font-weight="400" fill="#69f3ce">C = 1 cell</text>
+<rect x="865.200" y="153.000" width="1.600" height="40.000" fill="#e7f3f4"/>
+<rect x="859.000" y="152.200" width="7.000" height="1.600" fill="#e7f3f4"/>
+<rect x="859.000" y="192.200" width="7.000" height="1.600" fill="#e7f3f4"/>
+<text x="874" y="169.000" text-anchor="start" font-size="17" font-weight="700" fill="#e7f3f4">1 cell</text>
+<text x="874" y="187.000" text-anchor="start" font-size="16" font-weight="400" fill="#e7f3f4">160 ms</text>
+<rect x="1071.200" y="173.000" width="1.600" height="71.000" fill="#075b50"/>
+<rect x="1054.000" y="172.200" width="18.000" height="1.600" fill="#075b50"/>
+<rect x="1054.000" y="243.200" width="18.000" height="1.600" fill="#075b50"/>
+<text x="1080" y="212.500" text-anchor="start" font-size="17" font-weight="400" fill="#075b50">Copies</text>
+<rect x="1220.200" y="324.000" width="1.600" height="40.000" fill="#193242"/>
+<rect x="1213.000" y="323.200" width="8.000" height="1.600" fill="#193242"/>
+<rect x="1213.000" y="363.200" width="8.000" height="1.600" fill="#193242"/>
+<text x="1227" y="349.000" text-anchor="start" font-size="17" font-weight="400" fill="#193242">same</text>
+<text x="87" y="545.000" text-anchor="start" font-size="21" font-weight="700" fill="#193242">Adjacent positions · enlarged</text>
+<line x1="113.000" y1="573.000" x2="226.000" y2="573.000" stroke="#193242" stroke-width="1"/>
+<line x1="113.000" y1="569.000" x2="113.000" y2="577.000" stroke="#193242" stroke-width="1"/>
+<line x1="226.000" y1="569.000" x2="226.000" y2="577.000" stroke="#193242" stroke-width="1"/>
+<text x="169.5" y="569.000" text-anchor="middle" font-size="17" font-weight="700" fill="#193242">Δf = 6.25 Hz</text>
+<line x1="101.000" y1="585.000" x2="351.000" y2="585.000" stroke="#193242" stroke-width="1"/>
+<line x1="113.000" y1="580.000" x2="113.000" y2="590.000" stroke="#193242" stroke-width="1"/>
+<text x="113" y="608.000" text-anchor="middle" font-size="17" font-weight="400" fill="#193242">450 Hz</text>
+<line x1="226.000" y1="580.000" x2="226.000" y2="590.000" stroke="#193242" stroke-width="1"/>
+<text x="226" y="608.000" text-anchor="middle" font-size="17" font-weight="400" fill="#193242">456.25 Hz</text>
+<line x1="339.000" y1="580.000" x2="339.000" y2="590.000" stroke="#193242" stroke-width="1"/>
+<text x="339" y="608.000" text-anchor="middle" font-size="17" font-weight="400" fill="#193242">462.5 Hz</text>
+<text x="596" y="545.000" text-anchor="start" font-size="20" font-weight="700" fill="#193242">Frequency from the slot’s coded-byte placement</text>
+<text x="596" y="572.000" text-anchor="start" font-size="20" font-weight="400" fill="#193242">One keyed phase per tone, assigned independently</text>
+<text x="596" y="606.000" text-anchor="start" font-size="19" font-weight="400" fill="#193242">Bright marks show ideal analysis bins.</text>
+<text x="596" y="631.000" text-anchor="start" font-size="19" font-weight="400" fill="#193242">Measure occupied bandwidth separately.</text>
 </g>
 </svg>

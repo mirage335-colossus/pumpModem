@@ -1,70 +1,76 @@
 # Matrix Modem FSK specification
 
-**Read one row at a time.** A Matrix FSK block puts one tone on the waterfall in each active slot. The tone’s frequency carries data. The sequence of frequencies across the block identifies a short word. The receiver can follow the expected frequencies by their energy, or combine the underlying complex observations when their phases line up.
-
-This is a draft for a standalone modem. A native ten-bit HF experiment exercises a configured calendar with hopping off and reproducible test schedules. Wire interoperability, field sensitivity and sustained service for the full search remain open. [Implementation status](algorithms-matrixModem/block-reception/README.md#implementation-status) · [Research and measured limits](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
+Draft for a standalone modem. The native ten-bit HF reference uses a configured calendar, hopping off and reproducible test schedules. Wire interoperability, field sensitivity and sustained service for the full search remain open. [Implementation status](algorithms-matrixModem/block-reception/README.md#implementation-status) · [Research and measured limits](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
 
 ## Reading the transmit format
 
-![Ideal waterfall of the complete 64-tone HF block and six enlarged rows. Time runs down, frequency increases to the right, and each bright mark is the transmitted frequency for one slot. Enlarged rows label the coded symbols and their keyed phase offsets.](algorithms-matrixModem/block-reception/format-waterfall.svg)
-
-The full waterfall uses the 160 ms cadence of the native ten-bit HF test (word 173, ordinal 0, hopping off). The close-up keeps the same frequency axis and expands selected rows. Its two breaks skip the intervening tones. Each mark shows one on-grid FFT bin at the transmitted centre under ideal, noiseless conditions. The phase labels come from the shared schedule. A power waterfall cannot show those angles. [Native trace and reproduction](algorithms-matrixModem/block-reception/README.md#reproduce-the-transmit-waterfall)
-
-| What you see | Format term |
+| Term | Matrix FSK meaning |
 | --- | --- |
-| A bright mark at one frequency | **Position** on the frequency grid. A **tone** holds that position for one or more **cells**. A cell is the time unit that sets the spacing of the grid. |
-| The full 64-row rectangle | **Block**, the calendar interval for one word. Each row in this example is a one-cell tone slot. |
-| The same symbol label on different rows | Copies of one **coded symbol**, an eight-bit value. Each slot has its own byte-to-position map, so the copies can light up different frequencies. |
-| An angle beside a row | **Keyed phase offset**, known from the schedule. A change of frequency can leave the keyed phase unchanged. |
-| With hopping enabled, a segment between retunes | **Hop**. Several tones can fit on the same hop frequency. Retuning takes place in the quiet edges. |
+| **Tone** | One FSK beep at one assigned frequency position, held for `C` cells. A **held tone** uses `C > 1`. |
+| **Cell** | Base time unit `T`. For spacing `Δf` in Hz, a cell lasts `1000/Δf` ms. At one cell per tone, that is also `1000 / tone rate` ms. |
+| **Row** | One cell of time on this format waterfall. A tone spans `C` rows. |
+| **Position** | One allowed tone centre. Positions are spaced `Δf = 1/T` apart when `T` is in seconds. |
+| **Block** | The full waterfall rectangle for one scheduled word, including all rows and any hop guards or unused slots. |
+| **Hop** | With frequency-hopping spread spectrum (FHSS), one stay at a temporary shift frequency, including its quiet edges. A hop can hold several tones. |
+| **Coded symbol** | One of 32 bytes computed from the word. Each **copy** uses one tone slot and that slot's placement map. |
+| **Keyed phase** | One scheduled phase offset per tone, even when the tone spans several cells. Consecutive tones can receive the same offset. |
 
-### How coding and interleaving change the waterfall
+![HF block waterfall with cell and block brackets, marked copies of coded symbol 15 and keyed phase annotations.](algorithms-matrixModem/block-reception/format-waterfall.svg)
 
-Each encrypted word produces 32 coded bytes. Each byte contains eight scheduled binary combinations of the word’s bits, with a keyed mask. Each candidate word therefore predicts a sequence across the entire waterfall. Coding gives the receiver many observations of that word. Repetition gives it multiple looks at each coded byte, and interleaving spreads those looks among other symbols in time.
+The plot uses the native no-hop HF fixture. Each mark is the ideal on-grid FFT peak of a one-cell tone. The expanded view keeps the frequency scale and skips the intervening rows. Phase angles are schedule annotations. [Reproduce the figure](algorithms-matrixModem/block-reception/README.md#reproduce-the-transmit-waterfall)
 
-Follow **symbol 15** in the figure. The first copy lights up **812.5 Hz** in slot 0. The shuffled copy lights up **1243.75 Hz** in slot 23, **3.68 s later**. A fade at the first mark can leave the second available. The per-tone decoder adds evidence for the same byte at its two scheduled frequencies. Even if both copies vanish, surviving coded symbols can distinguish the word when their position sequences separate the candidates. On a small grid, several bytes can light up the same position in one row. The receiver uses their wider pattern across rows to resolve those collisions. [Codeword and burst-loss checks](../_ref/algorithms-matrixModem/fsk-code-identifiability.md)
+### Mandatory tone rules
 
-## Waveform profiles
-
-Use one full-power, constant-amplitude tone per flat interval. Position `n`, counting from zero, has centre `f₀ + n/T`. The tone lasts `C × T` seconds. The four knobs below change the waterfall in different ways.
-
-| Knob | What changes on the waterfall | When to consider it |
-| --- | --- | --- |
-| `j`, the lattice scale | Start at `j = 0` with a 160 ms cell and 6.25 Hz spacing. Each increment doubles the cell duration and halves the spacing. In general `T = 0.160 × 2^j` s and spacing is `1/T`, with integer `j ≥ 0`. | A smaller `j` puts more Hz between positions. A larger `j` fits the same number of positions into less bandwidth. Compare the spacing with Doppler spread and oscillator error, and check antenna and filter bandwidth. |
-| `C`, cells per tone | Hold the same frequency for `C ≥ 1` whole cells. Each tone gets taller with the same horizontal grid. | Longer tones collect more energy at fixed power and can help on weak, stable paths. Shorter tones limit exposure to rapid phase change. The receiver can also score shorter windows within a held tone. |
-| `N`, number of positions | `N ≥ 2` sets how many columns the transmitter can choose. At fixed `j`, a larger `N` widens the grid. | A wider grid accommodates more distinct byte labels and can place copies outside a narrow fade. A narrow grid fits a restricted passband. Closely spaced alternatives can become hard to tell apart under spread or a shared fade. |
-| `L`, copies per coded symbol | Increasing `L` adds rows to the block at the same tone duration. | Extra rows collect more energy at fixed power and offer more chances to survive a fade. They also use more airtime and receiver work. Compare the likely outage duration against a whole block. |
-
-Use expected received power after path and pointing loss, Doppler spread, usable bandwidth and the delivery deadline to choose a profile. At HF the recorded equal-airtime comparison found a benefit from longer tones in slow fading, while both tested choices were weak at the same energy in faster fading. [Profile comparisons](../_ref/algorithms-matrixModem/fsk-reconciliation.md#choosing-tone-length-and-power-constraints)
-
-| Setting | HF | Below 9 kHz |
-| --- | --- | --- |
-| Cell and spacing | `j = 0` gives 160 ms and 6.25 Hz. | `j = 3` gives 1.28 s and 0.78125 Hz. Alternatives are 2 and 4 for `j`. |
-| Frequency grid | Default 352 positions from 450 to 2643.75 Hz (2.2 kHz grid). Up to 448 positions in 2.8 kHz. | 16 positions in a 12.5 Hz nominal grid at `j = 3`. |
-| Tone length | One or more cells. | Eight cells (10.24 s at `j = 3`), alternatively one or 32. |
-| Hopping | Optional. Reference hop 0.4 s, alternate 40 s for one-cell tones. | Off. |
-| Keyed phase | Apply the new offset at the tone boundary. | Change position at the boundary. Move linearly from the previous phase to the new phase over the first 80 ms of the tone, alternatively 160 ms. Use the shortest rotation with keyed direction for a half turn. |
-| Frequency reference | Configured oscillator uncertainty. | Both ends GPS-locked. Log corrections or retime audio from the pulse-per-second reference. |
-
-Choose each keyed offset from {0°, 90°, 180°, 270°} independently of payload and position. With hopping off, keep tones contiguous without amplitude ramps or guards. Carry forward the phase accumulated at the band origin `f₀`. Relative to that origin each grid position completes an integer number of cycles per cell. Below 9 kHz the receiver follows the phase ramp inside the tone.
-
-With hopping on, retune during quiet. At the reference HF setting a 0.4 s hop contains, in order, **20 ms quiet · 20 ms amplitude ramp up · 320 ms flat · 20 ms amplitude ramp down · 20 ms quiet**. The amplitude ramps are raised cosines. Longer reference hops use 60 ms quiet at each edge and the same 20 ms ramps. Target 26 dB out-of-band attenuation relative to mean in-band power with a specified filter, measurement bandwidth and averaging interval. [Hop and phase definitions](../_ref/algorithms-matrixModem/fsk-design-study.md#43-hop)
+- **One tone at a time.** Use a full-power, constant-amplitude tone during each flat interval. Only the selected frequency position carries data.
+- **One keyed phase assignment per tone.** Select from {0°, 90°, 180°, 270°} independently of the byte and its position. Apply it at the tone boundary, as a step or the profile's phase ramp. A held tone has no additional keyed phase assignments at its interior cell boundaries.
+- **Whole cells.** Set `C ≥ 1` for the profile. With hopping off, transmit consecutive tones without amplitude ramps or guards. Carry forward the phase at the band origin `f₀`. Relative to that origin each position completes a whole number of cycles per cell.
 
 ## Block coding and calendar
 
-1. Configure the profile and clock-derived calendar at both ends. Transmission uses no feedback or length fields. For each encrypted word `c` of `k ∈ {10,16,24}` bits, form 32 coded bytes `vₛ = Gₛc XOR mₛ` using keyed `8 × k` binary matrices and byte masks.
-2. Schedule exactly `L ≥ 1` copies of each coded byte in shuffled order. Redraw the placement map for each of the `32L` tones. With `N ≥ 256`, the first 256 entries of a keyed permutation give each byte its own position. On smaller grids use an agreed pool of `P = 2^floor(log₂ N)` positions, `256/P` bytes per position, and `L ≥ ceil(8/log₂ P)`. A single observation can then represent several bytes. Distinguish candidates by their whole sequence of positions. [Codeword checks after erasures](../_ref/algorithms-matrixModem/fsk-code-identifiability.md)
-3. Without hopping, a block lasts `32LCT`. With hopping, let `q = floor(flat cells per hop / C)` be the number of whole tones that fit. Require `q ≥ 1` and `L ≥ q`. A block uses `ceil(32L/q)` whole hop periods. Leave residual cells and unused slots in the final hop idle.
+1. **Code the word.** Form 32 bytes from the encrypted word `c` of `k ∈ {10,16,24}` bits. Each byte is `vₛ = Gₛc XOR mₛ` using a keyed binary `8 × k` matrix and byte mask. This provides coding redundancy across the block. The receiver scores each candidate using the available tone evidence.
+2. **Repeat and interleave.** Shuffle exactly `L ≥ 1` copies of each coded byte into `32L` tone slots. The green pair in the figure carries symbol 15 at 812.5 and 1243.75 Hz, 3.68 s apart. Either copy can contribute evidence if the other is lost.
+3. **Place each copy.** Draw a fresh byte-to-position map per tone. For `N ≥ 256` positions, use the first 256 entries of a keyed permutation. For smaller grids use an agreed pool of `P = 2^floor(log₂ N)` positions, with `256/P` bytes per position and `L ≥ ceil(8/log₂ P)`. The receiver distinguishes words by their complete position patterns. Recovery after a fade depends on whether the surviving positions still distinguish the words. [Codeword and burst-loss checks](../_ref/algorithms-matrixModem/fsk-code-identifiability.md)
+4. **Fix the calendar.** Both ends agree on the profile and clock-derived schedule. With hopping off a block lasts `32LCT`. With hopping on, `q = floor(flat cells per hop / C)` whole tones fit per hop. Require `q ≥ 1` and `L ≥ q`. A block occupies `ceil(32L/q)` whole hops. Leave residual cells and unused final slots idle. Transmission uses no feedback or length fields.
 
-For the HF example, `L = 2` and `C = 1` give 64 tones in **10.24 s**. With the reference 0.4 s hop the same tones occupy 32 hops or **12.8 s**. Below 9 kHz, `N = 16`, `L = 2`, `C = 8` and `j = 3` also give 64 tones, but one block takes **655.36 s**. These durations cover one word. Physical completion uses the next two scored quiet blocks.
+## Waveform profiles
+
+### Choose spacing and tone rate
+
+| Control | Effect and selection |
+| --- | --- |
+| **FSK spacing `Δf`** | Pick a position grid for expected Doppler spread, offset uncertainty and usable passband. A tighter grid fits more positions into a narrow band. A wider spacing separates adjacent alternatives when spread blurs them. The draft grids use `Δf = 6.25/2^j` Hz, integer `j ≥ 0`. The lattice scale `j` indexes these spacing presets. It also fixes the cell duration. |
+| **FSK tone rate `Δf/C`** | At a fixed spacing, choose `Δf`, `Δf/2`, `Δf/3`, … tones/s by holding each tone for `C` whole cells. At 6.25 Hz spacing, 160 ms tones give 6.25 tones/s and 320 ms tones give 3.125 tones/s. These are rates during the flat interval. |
+| **Grid origin `f₀` and position count `N`** | Use `N ≥ 2` centres `f₀ + nΔf` for `n = 0 … N−1`. At fixed spacing, `N` changes the total grid span and the number of distinct labels a slot can carry. Budget passband for offset, spread and filter transitions. |
+| **Copies per symbol `L`** | More copies add tones and airtime at the same FSK rate. Size them for received power, loss duration, diversity and deadline. |
+
+**Choose spacing for the channel, then set the tone rate.** Increase `C` to slow the tones on the same grid. At fixed power this collects more energy per tone. Faster phase variation can favor shorter observation windows, even inside a held tone. Change `j` to change the grid itself, for example to fit the same number of positions in a narrower passband. The reciprocal cell duration aligns positions with rectangular FFT bins. The power-of-two presets also let those cells use 512 samples at a correspondingly decimated rate where the passband permits. [Lattice and sample rates](../_ref/algorithms-matrixModem/fsk-design-study.md#3-lattice) · [Tone length comparisons](../_ref/algorithms-matrixModem/fsk-reconciliation.md#choosing-tone-length-and-power-constraints)
+
+Spacing measures adjacent grid positions. Successive tones can skip bins or repeat the same position. A wider-spaced placement pool at the same cell duration is also a candidate for strong spread. It gives up frequency choices in a fixed passband, so check the surviving codewords and receiver sensitivity for that pool. [Adjacent and spaced-bin comparisons](../_ref/algorithms-matrixModem/fsk-lattice-validity.md#adjacent-tones-under-diffuse-doppler)
+
+### Example profiles
+
+| Setting | HF reference | Narrowband example below 9 kHz |
+| --- | --- | --- |
+| Spacing and cell | 6.25 Hz and 160 ms (`j = 0`). | 0.78125 Hz and 1.28 s (`j = 3`). Alternatives are 1.5625 Hz and 0.390625 Hz. |
+| Positions | 352 from 450 to 2643.75 Hz (2.2 kHz grid). Up to 448 in 2.8 kHz. | 16 in a 12.5 Hz nominal grid at `j = 3`. |
+| Tone length | One or more cells. | Eight cells (10.24 s), alternatively one or 32. |
+| Hopping | Optional. Reference hop 0.4 s, alternate 40 s for one-cell tones. | Off. |
+| Keyed phase transition | Step at the tone boundary if the offset changes. | Set the next tone's position at the boundary. When the offset changes, rotate linearly in the first 80 ms, alternatively 160 ms. Use the shortest rotation with keyed direction for a half turn. The receiver follows the ramp. |
+| Frequency reference | Configured oscillator uncertainty. | Both ends GPS-locked. Log corrections or retime audio from the pulse-per-second reference. |
+
+With `L = 2`, the one-cell HF example takes **10.24 s** with hopping off or **12.8 s** with 0.4 s hops. The eight-cell narrowband example takes **655.36 s**. Each duration is for one word. Physical completion uses two further scored quiet blocks.
+
+### Hop edges and spectrum
+
+Retune during quiet. The 0.4 s HF hop uses **20 ms quiet · 20 ms raised-cosine amplitude ramp up · 320 ms flat · 20 ms ramp down · 20 ms quiet**. Longer reference hops use 60 ms quiet at each edge and the same 20 ms ramps. Target 26 dB out-of-band attenuation relative to mean in-band power with a specified filter, measurement bandwidth and averaging interval. [Hop and phase definitions](../_ref/algorithms-matrixModem/fsk-design-study.md#43-hop)
 
 ## Keys and addressing
 
-Before coding, XOR the payload with AES-256-CTR and Serpent-256-CTR keystreams, preserving bit count. Use separate AES-256 purposes for symbol order, matrices, masks, placement, hops and phase. Address by epoch, ordinals and nominal shift rounded to the configured multiple of 10 Hz. Retunes and measured corrections preserve that address. [Key interface and unresolved wire details](../_ref/algorithms-matrixModem/fsk-reconciliation.md#integration-and-profile-selection)
+Before coding, XOR the payload with AES-256-CTR and Serpent-256-CTR keystreams, preserving bit count. Use separate AES-256 purposes for symbol order, matrices, masks, placement, hops and phase. Address by epoch, ordinals and the operator-configured nominal shift rounded to the configured multiple of 10 Hz. Every hop and receiver correction uses that same nominal shift for the key address. [Key interface and unresolved wire details](../_ref/algorithms-matrixModem/fsk-reconciliation.md#integration-and-profile-selection)
 
 ## Receiver search
 
-For each plausible alignment, form a table of complex frequency projections for the waterfall rows. Both scoring branches start with those values where their apertures match. The power display uses their squared magnitudes. The coherent branch also needs the retained phase.
+An **aperture** is the receiver's sample interval for one projection. The aligned reference plot uses one cell per aperture. A held tone can use both cell-length and longer apertures. For each timing hypothesis, both scoring branches reuse the complex frequency projections where their apertures match.
 
 | What can happen to the transmitted marks | Receiver response |
 | --- | --- |
@@ -77,7 +83,7 @@ In the close-up, slots 23–26 have keyed offsets **90°, 180°, 90°, 90°**. R
 
 ```mermaid
 flowchart TD
-    block["Next block · active or quiet"] --> bins["Project samples into waterfall rows<br/>Keep complex values"]
+    block["Next block · active or quiet"] --> bins["Project the configured sample apertures<br/>Keep complex frequency bins"]
     bins --> energy["Per-tone energy<br/>Sum weighted powers near each predicted mark"]
     bins --> phase["Coherent windows<br/>Gather and align complex values at the marks"]
     energy --> esum["Add repeat evidence by coded byte<br/>Sum 32 entries per word"]
@@ -120,13 +126,15 @@ For example, **word → absence → unscored → absence → word** stays open. 
 
 Share `W = 2H` native software workers across stages, where `H` is effective logical CPU capacity after affinity and quota. Honor explicit limits. Reuse schedules, projections and gathers within admitted workspace. Target four-bit input, evidence and complex-bin components. Size accumulators and squared magnitudes for the maximum block.
 
+**Tone gathers and cell transforms scale separately.** At fixed spacing and airtime, longer tones with fewer copies leave fewer tones to gather per candidate. The number of cell apertures stays the same if the receiver still projects every cell. At fixed copy count, longer tones give the receiver more time per block and add cell apertures. Measure both stages and the full timing, frequency and drift search when qualifying a slower profile. [Sub-9 kHz tone-rate study](../_ref/algorithms-matrixModem/Fable-5.2/sub9khz-fsk-rate-and-spacing.md#5-tone-rate)
+
 ### What the CPU and GPU can take
 
-A **transform portion** is a batch of ready sample apertures, such as several waterfall rows at one timing alignment. FFT routes compute a regular grid of bins. A matrix-product DFT can compute just the requested frequencies. The output is a tile of complex bins shared by hypotheses with compatible apertures. A **search portion** is a range of candidate words at a ready alignment or evidence table. Those words reuse the same rows of the waterfall. Candidate tiling bounds the live tables and leaves more workspace for incoming blocks.
+A **transform portion** is a batch of ready sample apertures at one timing alignment, such as several one-cell rows. FFT routes compute a regular grid of bins. A matrix-product DFT can compute just the requested frequencies. The output is a tile of complex bins shared by hypotheses with compatible apertures. A **search portion** is a range of candidate words at a ready alignment or evidence table. Those words reuse the same projections. Candidate tiling bounds the live tables and leaves more workspace for incoming blocks.
 
 ```mermaid
 flowchart TD
-    samples["Ready samples<br/>Batch of aligned waterfall rows"]
+    samples["Ready samples<br/>Batch of aligned apertures"]
     samples --> cpu["CPU FFT"]
     samples --> gpu["GPU FFT"]
     samples --> dft["GPU matrix DFT<br/>Tensor Cores"]
