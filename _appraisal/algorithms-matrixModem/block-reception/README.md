@@ -82,18 +82,18 @@ g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -pthread -Isrc -Iinclude \
 
 Tested on an AMD Ryzen 5 PRO 5650U with Debian GCC 14.2.0. Repository FFT and research RNG from revision `396b47e1`; all signal generation, FFT, scoring and decisions run natively on the CPU. The FFT uses floating-point coefficients and results. The 4-bit restrictions tested here apply to the input and evidence codes. [Native experiment](block_reception.cpp)
 
-### Four-tone format example
+### Reproduce the transmit waterfall
 
-Run `/tmp/matrix-block-reception --format-example` after the build above to reproduce the [HF transmit diagram](../../matrixModem-FSK.md#four-tones-from-one-hf-block). It uses fixture seed `0xaa6218f2`, block ordinal 0, word 173 and a flat, noiseless path with common phase 0.73 radians. The schedule is the experiment's reproducible substitute for wire keys. The trace uses the raw FFT before quantization and checks each corrected projection against the complex amplitude of the generated tone.
+The [format guide](../../matrixModem-FSK.md#reading-the-transmit-format) shows the noiseless transmit fixture at seed `0xaa6218f2`, ordinal 0 and word 173. The fixture uses reproducible surrogate schedules. For each 160 ms tone, `--format-example` checks that the largest bin in the 512-sample FFT matches the scheduled frequency. It also checks the projection after removing the keyed phase against the expected complex amplitude. The experiment uses a centred complex band. Position `p` is signed FFT bin `p − 176` and is labelled at `450 + 6.25p` Hz on the audio grid.
 
-| Tone | Position index | Keyed phase | Raw complex projection (rounded) | After key removal (rounded) |
-| ---: | ---: | ---: | --- | --- |
-| 0 | 58 | 270° | 14.98 − 16.74i | 16.74 + 14.98i |
-| 1 | 0 | 0° | 16.74 + 14.98i | 16.74 + 14.98i |
-| 2 | 117 | 270° | 14.98 − 16.74i | 16.74 + 14.98i |
-| 3 | 231 | 270° | 14.98 − 16.74i | 16.74 + 14.98i |
+```sh
+/tmp/matrix-block-reception --format-example > /tmp/matrix-format-example.csv
+python3 _appraisal/algorithms-matrixModem/block-reception/plot_format_waterfall.py \
+  _appraisal/algorithms-matrixModem/block-reception/format-waterfall.svg \
+  < /tmp/matrix-format-example.csv
+```
 
-The experimental FFT uses a centred complex band. Position `p` is signed FFT bin `p − 176`; the HF profile labels it on the audio grid at `450 + 6.25p` Hz. Each unnormalized FFT sums 512 samples. For the chosen block amplitude its predicted bin magnitude is `512 × sqrt(10^1.8 / 32768)`. The shared residual angle explains why these four values add coherently. A separate [static two-path check](../lattice-validity/README.md#four-contiguous-held-tones) exercises the frequency-dependent case.
+The figure marks the verified bin for each of the 64 intervals. The enlargement labels each selected slot and its schedule, with breaks before and after slots 23–26. Its frequency scale matches the overview. Slots 0 and 23 carry copies of coded symbol 15 with independently drawn placements. The schematic uses equal peak power and no noise. The [orientation experiment](pointing-loss.md) shows received spectra on a noisy path.
 
 ## Original six-hypothesis bank
 

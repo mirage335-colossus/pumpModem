@@ -40,6 +40,7 @@ void shuffle(std::span<T> items, mm::Rng& rng) {
 struct Schedule {
     std::array<std::array<uint16_t, words>, tones> position{};
     std::array<int, tones> quarter_phase{};
+    std::array<int, tones> symbol_order{};
     explicit Schedule(uint64_t ordinal, uint64_t key, int held_cells = 1) {
         mm::Rng rng(key, ordinal);
         std::array<std::array<uint8_t, words>, symbols> values{};
@@ -53,17 +54,16 @@ struct Schedule {
                 table[m] = static_cast<uint8_t>(v);
             }
         }
-        std::array<int, tones> order{};
         const int active_tones = tones / held_cells;
-        for (int t = 0; t < active_tones; ++t) order[t] = t % symbols;
-        shuffle<int>(std::span(order).first(active_tones), rng);
+        for (int t = 0; t < active_tones; ++t) symbol_order[t] = t % symbols;
+        shuffle<int>(std::span(symbol_order).first(active_tones), rng);
         for (int t = 0; t < active_tones; ++t) {
             std::array<int, positions> map{};
             std::iota(map.begin(), map.end(), 0);
             shuffle<int>(map, rng);
             const int start = t * held_cells;
             quarter_phase[start] = rng.next() % 4;
-            for (int m = 0; m < words; ++m) position[start][m] = map[values[order[t]][m]];
+            for (int m = 0; m < words; ++m) position[start][m] = map[values[symbol_order[t]][m]];
             for (int j = 1; j < held_cells; ++j) {
                 quarter_phase[start + j] = quarter_phase[start];
                 position[start + j] = position[start];
@@ -738,24 +738,26 @@ bool compare_coherent(const FloatPlan& plan, const std::vector<Schedule>& fixtur
 
 #include "timing_experiment.hpp"
 
-// Print the four transmitted tones shown in the format guide, using the same
-// waveform and FFT as the HF experiment. An aligned flat path has one common gain.
+// Export the on-grid tone centres for the waterfall in the format guide.
 bool format_example(const Schedule& schedule, const FloatPlan& plan) {
     constexpr int word = 173;
     constexpr double energy_db = 18., common_phase = .73;
     std::vector<Sample> samples(nsamples);
     transmit(samples, 0, schedule, word, energy_db, false, common_phase, 0.);
     const auto expected = std::polar(nfft * std::sqrt(mm::undb(energy_db) / nsamples), common_phase);
-    std::cout << "tone  position  phase(deg)  FFT projection  after key removal\n";
-    for (int t = 0; t < 4; ++t) {
+    std::cout << "tone,symbol,position,phase_deg\n";
+    for (int t = 0; t < tones; ++t) {
         std::array<Sample, nfft> spectrum;
         std::copy_n(samples.begin() + t * nfft, nfft, spectrum.begin());
         fft(spectrum, false, plan);
         const int p = schedule.position[t][word], q = schedule.quarter_phase[t];
-        const Sample raw = spectrum[fft_bin(p)], corrected = raw * inverse_quarter_turn[q];
-        std::cout << t << "  " << p << "  " << 90 * q << "  " << raw << "  " << corrected << '\n';
-        if (!(std::abs(std::complex<double>(corrected) - expected) <= 1e-5 * std::abs(expected)))
+        const auto peak = std::max_element(spectrum.begin(), spectrum.end(),
+            [](Sample a, Sample b) { return std::norm(a) < std::norm(b); });
+        const Sample corrected = *peak * inverse_quarter_turn[q];
+        if (peak != spectrum.begin() + fft_bin(p) ||
+            !(std::abs(std::complex<double>(corrected) - expected) <= 1e-5 * std::abs(expected)))
             return false;
+        std::cout << t << ',' << schedule.symbol_order[t] << ',' << p << ',' << 90 * q << '\n';
     }
     return true;
 }

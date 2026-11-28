@@ -1,51 +1,41 @@
 # Matrix Modem FSK specification
 
-**One tone at a time.** Frequency-shift keying (FSK) carries one short word in a sequence of frequency choices. A shared schedule tells the receiver where each possible word would put its tones and what phase each tone would start with on HF. The receiver scores every candidate on the same samples in two ways. It can use the energy at the predicted frequencies even when the path spoils the phase relationship between tones.
+**Read one row at a time.** A Matrix FSK block puts one tone on the waterfall in each active slot. The tone’s frequency carries data. The sequence of frequencies across the block identifies a short word. The receiver can follow the expected frequencies by their energy, or combine the underlying complex observations when their phases line up.
 
 This is a draft for a standalone modem. A native ten-bit HF experiment exercises a configured calendar with hopping off and reproducible test schedules. Wire interoperability, field sensitivity and sustained service for the full search remain open. [Implementation status](algorithms-matrixModem/block-reception/README.md#implementation-status) · [Research and measured limits](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
 
 ## Reading the transmit format
 
-```mermaid
-flowchart TD
-    word["Word · 10, 16 or 24 encrypted bits"] --> code["32 coded symbols · one byte each"]
-    code --> order["Repeat each symbol L times and shuffle"]
-    order --> slot["Next tone slot in this block"]
-    slot --> pos["Map this copy's byte to one frequency position"]
-    slot --> phase["Look up this slot's keyed phase"]
-    pos --> tone["Send one tone for C cells"]
-    phase --> tone
-    tone -->|more slots| slot
-```
+![Ideal waterfall of the complete 64-tone HF block and six enlarged rows. Time runs down, frequency increases to the right, and each bright mark is the transmitted frequency for one slot. Enlarged rows label the coded symbols and their keyed phase offsets.](algorithms-matrixModem/block-reception/format-waterfall.svg)
 
-| Term | How to read it |
+The full waterfall uses the 160 ms cadence of the native ten-bit HF test (word 173, ordinal 0, hopping off). The close-up keeps the same frequency axis and expands selected rows. Its two breaks skip the intervening tones. Each mark shows one on-grid FFT bin at the transmitted centre under ideal, noiseless conditions. The phase labels come from the shared schedule. A power waterfall cannot show those angles. [Native trace and reproduction](algorithms-matrixModem/block-reception/README.md#reproduce-the-transmit-waterfall)
+
+| What you see | Format term |
 | --- | --- |
-| Block and symbol | A **block** is one calendar interval for a word. A **symbol** is one of its 32 coded bytes. |
-| Cell, position and tone | The **cell** sets the clock and grid spacing. A **tone** sounds at one frequency **position** for one or more cells. |
-| Hop | With frequency hopping (FHSS), a **hop** is the radio's stay on one hop frequency, including its quiet edges. Several tones can fit inside it. |
-| Coherent window | The receiver chooses a span over which to add phase-aligned observations. Trying another window length uses the same transmission. |
+| A bright mark at one frequency | **Position** on the frequency grid. A **tone** holds that position for one or more **cells**. A cell is the time unit that sets the spacing of the grid. |
+| The full 64-row rectangle | **Block**, the calendar interval for one word. Each row in this example is a one-cell tone slot. |
+| The same symbol label on different rows | Copies of one **coded symbol**, an eight-bit value. Each slot has its own byte-to-position map, so the copies can light up different frequencies. |
+| An angle beside a row | **Keyed phase offset**, known from the schedule. A change of frequency can leave the keyed phase unchanged. |
+| With hopping enabled, a segment between retunes | **Hop**. Several tones can fit on the same hop frequency. Retuning takes place in the quiet edges. |
 
-### Four tones from one HF block
+### How coding and interleaving change the waterfall
 
-Time runs **down** and frequency increases **to the right**. Each box marks the one frequency that sounds for those 160 ms and its keyed phase offset. This is the start of a native ten-bit test block (word 173, ordinal 0, hopping off). The diagram shows the four used audio centres.
+Each encrypted word produces 32 coded bytes. Each byte contains eight scheduled binary combinations of the word’s bits, with a keyed mask. Each candidate word therefore predicts a sequence across the entire waterfall. Coding gives the receiver many observations of that word. Repetition gives it multiple looks at each coded byte, and interleaving spreads those looks among other symbols in time.
 
-```mermaid
-sequenceDiagram
-    participant low as 450 Hz
-    participant mid as 812.5 Hz
-    participant high as 1181.25 Hz
-    participant top as 1893.75 Hz
-    Note over mid: 0–160 ms · 270°
-    Note over low: 160–320 ms · 0°
-    Note over high: 320–480 ms · 270°
-    Note over top: 480–640 ms · 270°
-```
-
-At 480 ms the frequency changes and the keyed phase stays at 270°. To add these tones coherently, the receiver first measures each at its own frequency. It rotates the three 270° observations back by a quarter turn (+90°) and leaves the 0° observation alone. On the flat, noiseless test path all four then point in the same direction. Their complex sum has four times the magnitude of one observation, even with an unknown common path phase. [Native trace and reproduction](algorithms-matrixModem/block-reception/README.md#four-tone-format-example)
+Follow **symbol 15** in the figure. The first copy lights up **812.5 Hz** in slot 0. The shuffled copy lights up **1243.75 Hz** in slot 23, **3.68 s later**. A fade at the first mark can leave the second available. The per-tone decoder adds evidence for the same byte at its two scheduled frequencies. Even if both copies vanish, surviving coded symbols can distinguish the word when their position sequences separate the candidates. On a small grid, several bytes can light up the same position in one row. The receiver uses their wider pattern across rows to resolve those collisions. [Codeword and burst-loss checks](../_ref/algorithms-matrixModem/fsk-code-identifiability.md)
 
 ## Waveform profiles
 
-Use one full-power, constant-amplitude tone per flat interval. Only frequency position carries data. Choose integer scale `j ≥ 0`, cell duration `T = 0.160 × 2^j` seconds and `N ≥ 2` positions. Position `n` has centre `f₀ + n/T`, counting from zero. Hold it for `C ≥ 1` whole cells.
+Use one full-power, constant-amplitude tone per flat interval. Position `n`, counting from zero, has centre `f₀ + n/T`. The tone lasts `C × T` seconds. The four knobs below change the waterfall in different ways.
+
+| Knob | What changes on the waterfall | When to consider it |
+| --- | --- | --- |
+| `j`, the lattice scale | Start at `j = 0` with a 160 ms cell and 6.25 Hz spacing. Each increment doubles the cell duration and halves the spacing. In general `T = 0.160 × 2^j` s and spacing is `1/T`, with integer `j ≥ 0`. | A smaller `j` puts more Hz between positions. A larger `j` fits the same number of positions into less bandwidth. Compare the spacing with Doppler spread and oscillator error, and check antenna and filter bandwidth. |
+| `C`, cells per tone | Hold the same frequency for `C ≥ 1` whole cells. Each tone gets taller with the same horizontal grid. | Longer tones collect more energy at fixed power and can help on weak, stable paths. Shorter tones limit exposure to rapid phase change. The receiver can also score shorter windows within a held tone. |
+| `N`, number of positions | `N ≥ 2` sets how many columns the transmitter can choose. At fixed `j`, a larger `N` widens the grid. | A wider grid accommodates more distinct byte labels and can place copies outside a narrow fade. A narrow grid fits a restricted passband. Closely spaced alternatives can become hard to tell apart under spread or a shared fade. |
+| `L`, copies per coded symbol | Increasing `L` adds rows to the block at the same tone duration. | Extra rows collect more energy at fixed power and offer more chances to survive a fade. They also use more airtime and receiver work. Compare the likely outage duration against a whole block. |
+
+Use expected received power after path and pointing loss, Doppler spread, usable bandwidth and the delivery deadline to choose a profile. At HF the recorded equal-airtime comparison found a benefit from longer tones in slow fading, while both tested choices were weak at the same energy in faster fading. [Profile comparisons](../_ref/algorithms-matrixModem/fsk-reconciliation.md#choosing-tone-length-and-power-constraints)
 
 | Setting | HF | Below 9 kHz |
 | --- | --- | --- |
@@ -74,17 +64,29 @@ Before coding, XOR the payload with AES-256-CTR and Serpent-256-CTR keystreams, 
 
 ## Receiver search
 
+For each plausible alignment, form a table of complex frequency projections for the waterfall rows. Both scoring branches start with those values where their apertures match. The power display uses their squared magnitudes. The coherent branch also needs the retained phase.
+
+| What can happen to the transmitted marks | Receiver response |
+| --- | --- |
+| A row has one narrow mark near its predicted frequency. | Try one-bin per-tone evidence. Shift the prediction under the configured frequency-offset hypotheses. |
+| Doppler spread blurs each mark across nearby columns. | Try weighted sums of bin energies at the configured spread widths. Add evidence along the candidate's track even when the phase changes between rows. |
+| Several rows are faint and their complex projections share a consistent phase after correction. | Gather at the predicted frequencies. Undo the keyed phases and correct timing, offset and drift. Try adding complex values over windows of different lengths. |
+| Multipath changes the phase from frequency to frequency. | Try shorter coherent windows and retain per-tone evidence. A deep fade can leave little energy for either branch. |
+
+In the close-up, slots 23–26 have keyed offsets **90°, 180°, 90°, 90°**. Rotate their captured projections by the opposite angles. On the flat test path they then point in the same direction. A four-tone window sums them before squaring the magnitude. The per-tone score uses each row's energy first. The receiver scores both branches on the same block, including when spread is plausible, and applies their separate calibrated cutoffs.
+
 ```mermaid
 flowchart TD
-    block["Next public block · active or quiet"] --> front["Condition samples and project onto tones"]
-    front --> energy["Per-tone branch<br/>Measure energy near predicted positions"]
-    front --> complex["Coherent branch<br/>Gather complex projections at predicted positions"]
-    energy --> esum["Add repeat evidence by byte<br/>Sum 32 entries per candidate"]
-    complex --> csum["Undo keyed phase, correct timing and frequency<br/>Sum projections within each window"]
-    csum --> rung["Take each sum's squared magnitude<br/>Add window energies at each length"]
-    esum --> decide["Keep each branch's best word and hypothesis<br/>Apply the block decision in order"]
-    rung --> decide
-    decide -->|advance ordinal| block
+    block["Next block · active or quiet"] --> bins["Project samples into waterfall rows<br/>Keep complex values"]
+    bins --> energy["Per-tone energy<br/>Sum weighted powers near each predicted mark"]
+    bins --> phase["Coherent windows<br/>Gather and align complex values at the marks"]
+    energy --> esum["Add repeat evidence by coded byte<br/>Sum 32 entries per word"]
+    phase --> csum["Sum complex values within a window<br/>Then take squared magnitude"]
+    csum --> ladder["Add window energies<br/>Repeat for configured window lengths"]
+    esum --> decide["Take each branch's maximum<br/>over words and configured hypotheses"]
+    ladder --> decide
+    decide --> commit["Apply cutoffs and commit in calendar order"]
+    commit -->|advance ordinal| block
 ```
 
 **Input and search coverage.** Use fixed gain and a linear guarded passband with radio blanking and noise reduction off. Translate and filter 48 kHz real audio to 3,200 complex samples/s. Allow wider qualified capture for offsets, spread and transitions, or filtered 400 samples/s at `j = 3`. Estimate component noise scale `σ` from the lower quartile of complex power under circular Gaussian noise. Round I/Q at `0.45σ` and erase a sample if either component code is nonfinite or outside −7…+7.
@@ -118,17 +120,46 @@ For example, **word → absence → unscored → absence → word** stays open. 
 
 Share `W = 2H` native software workers across stages, where `H` is effective logical CPU capacity after affinity and quota. Honor explicit limits. Reuse schedules, projections and gathers within admitted workspace. Target four-bit input, evidence and complex-bin components. Size accumulators and squared magnitudes for the maximum block.
 
-The following is the **proposed assignment loop** for both profiles. A portion can be a batch of tone transforms or a range of candidate words. Prepare the next batch while independent work runs, within the shared worker and workspace limits. Splitting the work must still cover every configured hypothesis.
+### What the CPU and GPU can take
+
+A **transform portion** is a batch of ready sample apertures, such as several waterfall rows at one timing alignment. FFT routes compute a regular grid of bins. A matrix-product DFT can compute just the requested frequencies. The output is a tile of complex bins shared by hypotheses with compatible apertures. A **search portion** is a range of candidate words at a ready alignment or evidence table. Those words reuse the same rows of the waterfall. Candidate tiling bounds the live tables and leaves more workspace for incoming blocks.
 
 ```mermaid
 flowchart TD
-    ready["Ready work fits in memory"] --> assign["Free CPU or GPU takes an eligible portion<br/>Use measured route and batch costs"]
-    assign --> done["Finish portion and release dependent work<br/>Measure cost and backlog"]
-    done --> balance{"What did the complete stream show?"}
-    balance -->|on track| ready
-    balance -->|persistent timing mismatch| test["Compare qualified assignments as slack permits<br/>Use the one that clears backlog faster"]
+    samples["Ready samples<br/>Batch of aligned waterfall rows"]
+    samples --> cpu["CPU FFT"]
+    samples --> gpu["GPU FFT"]
+    samples --> dft["GPU matrix DFT<br/>Tensor Cores"]
+    cpu --> bins["Reusable complex bins"]
+    gpu --> bins
+    dft --> bins
+    bins --> energy["Per-tone tables<br/>One per timing and spread hypothesis"]
+    bins --> gather["Coherent search<br/>Gather tone sums for a tile of words"]
+    energy --> lookup["CPU or GPU table lookup<br/>Walsh–Hadamard route where qualified"]
+    gather --> direct["Small offset and drift bank<br/>Direct scoring"]
+    gather --> wide["Broad offset and drift bank<br/>Dechirp, then CPU or GPU FFT<br/>or Tensor Core matrix DFT"]
+    lookup --> decision["Finish both searched maxima<br/>Apply cutoffs and commit in order"]
+    direct --> decision
+    wide --> decision
+```
+
+Choose one qualified transform route for each batch and one scoring route for each portion of its branch. The lower matrix DFT searches residual frequency using each candidate's tone sums. Its input comes from the upper transform and the gather. Reuse the gather over compatible hypotheses. Recompute or correct the projection when the timing hypothesis moves the sample boundaries. Qualify each route for its geometry, arithmetic and decision rule. [Route and reuse details](../_ref/algorithms-matrixModem/fsk-design-study.md#13-computation-and-simulation)
+
+### How work is rebalanced
+
+Start from measured route costs and the oldest ready work. For example, while the GPU scores a large candidate tile, the CPU can transform a batch of later rows or prepare the next schedule. Dispatch more transform batches to the GPU when it has room and that clears the full queue faster. A downstream search becomes eligible when its required bins are ready. Keep bins resident when that saves a transfer, and reserve workspace for search and ordered results before preparing more rows.
+
+```mermaid
+flowchart TD
+    ready["Oldest ready portions<br/>Inputs and workspace available"] --> assign["Assign CPU and GPU work<br/>Use measured cost and input location"]
+    assign --> done["Finish portion and release dependent work<br/>Measure elapsed cost and backlog"]
+    done --> balance{"How is the full stream keeping up?"}
+    balance -->|as predicted| ready
+    balance -->|persistent timing mismatch| test["Compare qualified assignments as slack permits<br/>Keep the one that clears backlog faster"]
     test --> ready
     balance -->|fastest full search falls behind| overload["Report overload"]
 ```
 
-Choose the fastest qualified **complete** search on active, quiet and unsuccessful blocks. Within the selected stage take its oldest ready portion. Leave it for another device when that device can clear the queue sooner. Count preparation, transfers, live workspace and ordered decisions through closure. Any reduced-work route requires explicit identification, recalibrated decisions, and demonstrated sensitivity and deadline margin. [Assignment evidence and limits](../_ref/algorithms-matrixModem/fsk-reconciliation.md#assigning-work-across-cpu-and-gpu) · [Receiver qualification requirements](algorithms-matrixModem/block-reception/README.md#receiver-qualification-requirements)
+On the recorded Blackwell transform benchmark, cuFFT beat the FP16 matrix DFT by **2.08×** for batches of 4,096 apertures. At 32,768 apertures the matrix DFT led by **1.21×**. Its lead at that size shrank to **1.02×** during concurrent direct search. Measure whole-stream service under load to decide which assignment of CPU and GPU work clears the backlog fastest. The benchmark used synthetic stage inputs. [Batch timings](algorithms-matrixModem/fsk-lattice/results/gpu/chunks.out) · [Concurrent timings](algorithms-matrixModem/fsk-lattice/results/gpu/contend.out) · [Assignment evidence and limits](../_ref/algorithms-matrixModem/fsk-reconciliation.md#assigning-work-across-cpu-and-gpu)
+
+Choose the fastest qualified **complete** search on active, quiet and unsuccessful blocks. Preserve all configured hypotheses across portions. Count preparation, transfers, live workspace and ordered decisions through closure. Any reduced-work route requires explicit identification, recalibrated decisions, and demonstrated sensitivity and deadline margin. [Receiver qualification requirements](algorithms-matrixModem/block-reception/README.md#receiver-qualification-requirements)
