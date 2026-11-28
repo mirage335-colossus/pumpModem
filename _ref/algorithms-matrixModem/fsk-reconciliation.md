@@ -11,6 +11,27 @@ The original brief asks for a one-way modem that can keep up when reception is d
 | For operator-read short words, size initially to 10⁻⁴ raw false admissions per quiet block. Express the achieved rate per listening day and measure wrong active words separately. | [Listening exposure and interpretation of decrypted words](fsk-presence-calibration.md#how-often-an-operator-sees-a-false-word) · [one-bit and ten-bit sizing](../../_appraisal/algorithms-matrixModem/fsk-lattice/results/admission_tradeoff.md) · [frozen-threshold experiment](../../_appraisal/algorithms-matrixModem/block-reception/README.md#one-false-admission-per-ten-thousand-quiet-blocks) |
 | For an intact signal weakened by antenna mispointing, size the profile for off-axis received power. Compare waterfall visibility and ordinary word recovery on the same samples. Keep distortion searches opt-in so weak or quiet blocks retain the full ordinary receiver budget. | [Receiver search](../../_appraisal/matrixModem-FSK.md#receiver-search) · [Pointing-loss research and historical §8.1 method](fsk-visible-signal-recovery.md) · [Paired pointing-loss test](../../_appraisal/algorithms-matrixModem/block-reception/pointing-loss.md) · [Optional fault experiments](../../_appraisal/algorithms-matrixModem/block-reception/fault-tests.md) |
 
+## Integration and profile selection
+
+The FSK interface carries encrypted words and configured schedule addresses. The
+application supplies either the shared v4 keyfile material or the published zero key.
+The length-preserving confidentiality construction combines AES-256-CTR and
+Serpent-256-CTR keystreams before coding. Matrix address serialization, rounding ties
+and interoperability vectors remain open. The raw 24-bit word stream also leaves
+final-byte framing and file integrity unspecified. [Key and stream design](Opus-5.5/09-keys-schedules-spectrum-and-stream-contract.md)
+
+Choose the tone length and repeats for ordinary recovery of intact signals visible
+on the receiving station's waterfall after antenna pointing loss. Use the expected
+off-axis power, channel spread and delivery deadline. Apply the configured 3, 6, 10,
+13, 16 or 20 dB margin to remaining uncertainty after accounting for pointing loss
+once. The ordinary receiver scores the data independently of waterfall visibility.
+[Profile comparisons](#choosing-tone-length-and-power-constraints) · [Pointing-loss qualification](fsk-visible-signal-recovery.md)
+
+The native reference's current coverage and the requirements for timing, calibration
+and complete-service measurements are maintained with its experiment records.
+[Implementation status](../../_appraisal/algorithms-matrixModem/block-reception/README.md#implementation-status)
+· [Receiver qualification requirements](../../_appraisal/algorithms-matrixModem/block-reception/README.md#receiver-qualification-requirements)
+
 ## Keeping findings outside the specification
 
 The specification records the proposed format and receiver requirements. Its
@@ -33,8 +54,9 @@ specification.
   interpretation to that record; a favorable count alone is not the finding.
 - **Current design consequences.** Reconcile the result with the native implementation,
   this review and its topic guide. Update the specification when the waveform, receiver
-  requirement, selected algorithm or implementation status changes, linking the changed
-  requirement to its supporting explanation. Keep unresolved alternatives
+  requirement, selected algorithm or configuration changes, linking the changed requirement
+  to its supporting explanation. Record implementation status and qualification procedures
+  in the experiment documentation. Keep unresolved alternatives
   and their evidence in the research note. Update the existing indexes when a new topic needs a
   discovery path. New research documents belong under
   `_ref/algorithms-matrixModem/`; `docs/` continues to distinguish experimental

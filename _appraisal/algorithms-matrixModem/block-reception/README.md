@@ -4,6 +4,47 @@ This bounded sample-level experiment tests whether a 10-bit block survives the c
 
 The pointing-loss experiment measures whether the ordinary single-orientation receiver can read an intact waveform as its received power falls. The draft receiver uses per-tone and coherent evidence together. The no-argument experiment below is the earlier per-tone-only comparison. Separate, explicitly selected experiments evaluate reversed spectra, mis-set tone spacing and damaged tones. Their extra searches run only in those experiments. [Pointing loss and waterfall visibility](pointing-loss.md) · [Optional receiver fault tests](fault-tests.md)
 
+## Implementation status
+
+The native ten-bit HF reference takes complex samples, uses seeded surrogate schedules
+with FHSS off, and receives the configured public calendar and block ordinal.
+Its ordinary receiver searches residual timing and frequency using one- and five-bin
+energy sums and coherent windows. Candidate scores are standardized within each
+hypothesis before taking searched maxima. The experiment uses a floating-point FFT
+and coherent sums, with four-bit-valued sample, evidence and complex-bin components
+in wider containers. Four-bit transform arithmetic remains unqualified.
+
+The full design spread bank, broader timing and drift envelopes, unknown-epoch or
+ordinal acquisition, wire interoperability, field sensitivity and sustained receiver
+service remain open. The protocols below state the geometry and coverage actually
+executed. [FSK requirements](../../matrixModem-FSK.md) · [Timing coverage](timing-coverage.md)
+
+## Receiver qualification requirements
+
+These requirements govern qualification of the receiver design and its accelerated
+routes. The bounded experiments below supply evidence for their recorded subsets.
+
+- Check distinguishability on the surviving whole-word position sequences. Qualify
+  public decisions, sensitivity and executed arithmetic before service comparisons.
+  Freeze branch cutoffs before checking fresh quiet, active, interfered and
+  wrong-schedule blocks. Include optional inverse-power weighting, sparse-line excision
+  and truncated frequency apertures in calibration. [Code identifiability](../../../_ref/algorithms-matrixModem/fsk-code-identifiability.md)
+  · [Presence calibration](../../../_ref/algorithms-matrixModem/fsk-presence-calibration.md)
+- Measure complete single-stream service through ordered decisions and two-quiet closure,
+  including preparation, transfers, unsuccessful search, recurring calibration and peak
+  live workspace. Measure sustained backlog over a declared interval. Record each run's
+  timings, chosen assignment and limiting stage per device.
+- Use the same scheduling policy for HF and sub-9 kHz. Charge mandatory phase operations,
+  timing searches and workspace. Additional concealment below 9 kHz must add no receiver
+  processing cost. Test an independent challenging workload before extrapolating from a
+  kernel or a single block.
+- Compare direct lookup with a qualified Walsh–Hadamard transform for additive word
+  scores. For oscillator searches compare direct scoring on small banks with dechirping
+  and transforms across tone sums on broad banks. Time qualified CPU FFT, GPU FFT and
+  matrix-product DFT routes at actual batch sizes. These are candidate routes whose
+  decisions and complete service require qualification for the intended configuration.
+  [Route evidence and assumptions](../../../_ref/algorithms-matrixModem/fsk-design-study.md#13-computation-and-simulation)
+
 ## Fixed protocol before sampling
 
 - Use eight distinct reproducible public schedule fixtures. Select one uniformly for each isolated trial. For each fixture draw the 32 binary matrices and masks, a shuffled repeated symbol assignment, an independent 256-of-352 injection and a quarter-turn for each tone. Use the repository's research RNG to reproduce schedule structure. Payloads are uniformly selected post-encryption bits. A second independent set of schedules supplies the wrong-schedule check.

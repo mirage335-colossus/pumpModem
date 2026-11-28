@@ -39,7 +39,8 @@ contracts and validation remain in the component guides below.
 Keep scientific explanations and literature in the relevant Matrix research note.
 Keep experiment methods, outcomes and provenance with the experiment. Update the
 FSK specification when a finding changes a waveform setting, receiver requirement,
-selected algorithm or its implementation status. [Research and evidence placement guide](../_ref/algorithms-matrixModem/fsk-reconciliation.md#keeping-findings-outside-the-specification)
+or selected algorithm. Keep implementation status and qualification procedures in
+the experiment documentation. [Research and evidence placement guide](../_ref/algorithms-matrixModem/fsk-reconciliation.md#keeping-findings-outside-the-specification)
 
 ## Current Robust modem
 
