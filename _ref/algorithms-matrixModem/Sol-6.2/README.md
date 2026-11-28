@@ -5,7 +5,7 @@ The [FSK receiver reconciliation](../fsk-reconciliation.md) connects the current
 25 November 2026 · Research and experimental design
 
 **26 November 2026.** The [Fable-5.2 pass](../Fable-5.2/README.md) adds the FSK lattice design behind the
-[FSK specification draft](../../../_appraisal/matrixModem-FSK.md), a GPU measurement of DFT against FFT, an
+[FSK format and receiver requirements](../../../_appraisal/matrixModem-FSK.md) and its [dated design study](../fsk-design-study.md), a GPU measurement of DFT against FFT, an
 OTHR tolerance simulation, exact short-message energy tables and four literature reviews. It also lists
 [corrections](../Fable-5.2/README.md#corrections-to-earlier-matrix-modem-documents) to statements in this
 directory, which are annotated where they occur.

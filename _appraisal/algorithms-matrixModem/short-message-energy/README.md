@@ -3,7 +3,7 @@
 Standalone programs written by the coding reviewer of this pass. They support the
 [coding and interleaving review](../../../_ref/algorithms-matrixModem/Fable-5.2/reviews/review-coding-interleaving.md),
 the [coding note](../../../_ref/algorithms-matrixModem/Fable-5.2/coding-and-message-structure.md)
-and the message format of the [FSK specification draft](../../matrixModem-FSK.md). They are
+and the message format in the [FSK specification](../../matrixModem-FSK.md). The detailed historical sizing assumptions are in the [dated design study](../../../_ref/algorithms-matrixModem/fsk-design-study.md). They are
 analysis aids, not modem code, and use only the standard library.
 
 **Purpose and retention.** These are theoretical calculations. `short_message_energy.cpp` holds the

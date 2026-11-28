@@ -5,7 +5,7 @@
 26 November 2026 · Fable-5.2 pass · synthesis of the coding review, the lattice calculations and the GPU run
 
 This note gives the reasoning behind the message format of the
-[FSK specification draft](../../../_appraisal/matrixModem-FSK.md). The evidence is in the
+[FSK specification](../../../_appraisal/matrixModem-FSK.md) and the historical proposal in its [dated design study](../fsk-design-study.md). The evidence is in the
 [coding and interleaving review](reviews/review-coding-interleaving.md), with its exact energy
 tables in [`short-message-energy/`](../../../_appraisal/algorithms-matrixModem/short-message-energy/README.md),
 in the [lattice design note](fsk-lattice-design.md) and in the
@@ -185,7 +185,8 @@ bit:
 By the Gaussian deflection of the sizing rule the 10-bit ratio is 1.20 to 1.30 and the 24-bit
 ratio 1.50 to 1.73. On message error alone the exact ratios of this note stand: 2.48, 2.01 and
 1.77 at 10⁻², 10⁻³ and 10⁻⁴, so "less than twice" then needs an error rate stricter than about
-10⁻³. The brief does not state the expectation; the specification now does, in section 1.
+10⁻³. The [later sizing comparison](../fsk-design-study.md#10-sizing-and-expected-duration)
+uses separate admission budgets for the two receiver branches.
 
 **Is the short-block code well chosen.** For 10 to 24 bits, yes on the evidence of this note:
 within 0.2 dB of ideal orthogonal signalling at 10 bits and 0.3 to 0.7 dB at 20 bits; no sync, CRC

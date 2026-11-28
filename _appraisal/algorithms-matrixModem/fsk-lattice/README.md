@@ -1,6 +1,6 @@
 # FSK lattice calculations and GPU stage benchmarks (Fable-5.2 pass, 26–27 November 2026)
 
-Standalone programs behind the [FSK specification draft](../../matrixModem-FSK.md). They support
+Standalone programs for calculations retained in the [dated FSK design study](../../../_ref/algorithms-matrixModem/fsk-design-study.md). They support
 the [lattice design note](../../../_ref/algorithms-matrixModem/Fable-5.2/fsk-lattice-design.md) and
 the [computation note](../../../_ref/algorithms-matrixModem/Fable-5.2/computation-and-simulation-speed.md).
 They are analysis aids, not modem code: nothing here is linked into the application or depends on
@@ -61,7 +61,7 @@ scores. The table gives idealized energy and duration ratios before dwell floors
 agreed transmit schedule.
 
 Section 20 applies the spread-matched per-tone model of section 13b to the HF geometry in
-[the specification](../../../_appraisal/matrixModem-FSK.md#10-sizing-and-expected-duration).
+[the historical sizing calculation](../../../_ref/algorithms-matrixModem/fsk-design-study.md#10-sizing-and-expected-duration).
 It compares the earlier per-tone allowance of 10⁻⁶ with 10⁻⁴ and 5 × 10⁻⁵ using identical
 block and hop rounding in all three columns. The last allowance reserves the other half of
 the attended target for coherent attempts, matching the split in the

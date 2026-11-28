@@ -4,7 +4,7 @@
 
 26 November 2026 · Fable-5.2 pass · GPU measurement on a full RTX PRO 6000 Blackwell, with reconciliation
 
-This note answers three questions for the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md).
+This note answers three questions for the receiver proposals in the [FSK specification](../../../_appraisal/matrixModem-FSK.md) and the [dated design study](../fsk-design-study.md).
 Can a direct DFT outperform an FFT? Where do Tensor Cores earn their place in this receiver? How
 fast can the waveform be simulated? It reports one bounded GPU run and reconciles it with the
 [DFT/FFT literature review](reviews/review-dft-fft-computation.md) and the earlier

@@ -4,7 +4,7 @@
 
 26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: measured simulation speed, and an audited specification
 
-This pass supports the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md). It
+This pass supports the [current FSK format and receiver requirements](../../../_appraisal/matrixModem-FSK.md) and the detailed calculations in the [dated FSK design study](../fsk-design-study.md). References below to specification section numbers use the original draft numbering preserved in that study. It
 builds on the [Sol-6.2](../Sol-6.2/README.md) and [Opus-5.5](../Opus-5.5/README.md) passes and
 does not replace them; the directory name records provenance. Read each finding with its evidence
 label. Nothing here is a qualified receiver: no end-to-end simulation of the proposed format
@@ -175,7 +175,7 @@ A cross-check of the repository's own earlier research, not a literature review:
     interleaver does not spread a short block across hops, which is a gap (closed by finding 21).
     The provisional attended ten-bit target is 10⁻⁴ per quiet block. The updated comparison gives
     separate airtime ratios for equal and different admission targets. The short-code comparison
-    remains specific to the codes and channels studied. [Updated sizing](../../../_appraisal/matrixModem-FSK.md#10-sizing-and-expected-duration) · [Evidence for the code](../../../_appraisal/matrixModem-FSK.md#6-message-format-and-error-correction)
+    remains specific to the codes and channels studied. [Historical sizing calculations](../fsk-design-study.md#10-sizing-and-expected-duration) · [Block format requirements](../../../_appraisal/matrixModem-FSK.md#block-coding-and-calendar) · [Historical code discussion](../fsk-design-study.md#6-message-format-and-error-correction)
 21. **A block spans at least 32 hops so that losing half of them acts only as a worse noise
     floor.** Half the hops cost 3 dB of time, about 1.5 dB of power for weak tones. At a failure
     probability of 10⁻³ a block needs 33 hops at 6 dB of margin, 18 at 10 dB and 14 at 13 dB or

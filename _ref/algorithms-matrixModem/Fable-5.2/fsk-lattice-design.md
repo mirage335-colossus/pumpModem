@@ -4,8 +4,8 @@
 
 26 November 2026, extended 27 November · Fable-5.2 pass · calculations and Monte Carlo, with reconciliation
 
-This note gives the reasoning behind the waveform part of the
-[FSK specification draft](../../../_appraisal/matrixModem-FSK.md). The numbers come from
+This note gives the reasoning behind the waveform choices in the
+[FSK specification](../../../_appraisal/matrixModem-FSK.md) and its [dated design study](../fsk-design-study.md). The numbers come from
 [`lattice_receiver.cpp`](../../../_appraisal/algorithms-matrixModem/fsk-lattice/README.md)
 ([full output](../../../_appraisal/algorithms-matrixModem/fsk-lattice/results/lattice_receiver.md)),
 which reuses the method of the earlier

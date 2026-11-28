@@ -1,6 +1,6 @@
 # What survives the loss of FSK tones
 
-The short block can identify a payload even when individual coded bytes are ambiguous. Its tolerance of lost tones depends on which symbols survive, their usable energy, and how long the path stays unusable. This audit concerns the fixed-calendar short-block proposal in [§§5–10 of the FSK draft](../../_appraisal/matrixModem-FSK.md#5-alphabet-and-keyed-placement). It uses noiseless labels to find ambiguities that greater transmit power cannot resolve. The exact calculations and a separate check against the existing C++ generator are [reproducible locally](../../_appraisal/algorithms-matrixModem/code-identifiability/README.md).
+The short block can identify a payload even when individual coded bytes are ambiguous. Its tolerance of lost tones depends on which symbols survive, their usable energy, and how long the path stays unusable. This audit concerns the fixed-calendar short-block format in the [FSK specification](../../_appraisal/matrixModem-FSK.md#block-coding-and-calendar). The calculations concern the former specification's alphabet and placement proposal, preserved with its original numbering in the [dated design study, §§5–10](fsk-design-study.md#5-alphabet-and-keyed-placement). It uses noiseless labels to find ambiguities that greater transmit power cannot resolve. The exact calculations and a separate check against the existing C++ generator are [reproducible locally](../../_appraisal/algorithms-matrixModem/code-identifiability/README.md).
 
 ## What two 16-position observations convey
 

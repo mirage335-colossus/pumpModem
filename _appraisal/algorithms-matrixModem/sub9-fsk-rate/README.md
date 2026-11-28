@@ -2,7 +2,8 @@
 
 Standalone programs behind the
 [sub-9 kHz rate and spacing note](../../../_ref/algorithms-matrixModem/Fable-5.2/sub9khz-fsk-rate-and-spacing.md)
-and section 12.2 of the [FSK specification draft](../../matrixModem-FSK.md). They are analysis
+and the [sub-9 kHz waveform profile](../../matrixModem-FSK.md#waveform-profiles).
+The [sub-9 kHz design study](../../../_ref/algorithms-matrixModem/fsk-design-study.md#122-phase-stable-paths-below-9-khz) gives the assumptions behind the measurements. These programs are analysis
 aids, not modem code: nothing here is linked into the application or depends on repository
 sources.
 
@@ -267,8 +268,8 @@ time) and a better one may exist.
 
 Hypotheses whose evidence differs per hypothesis (spread bank, timing offsets of per-tone
 reception, fine timing steps of a wide-band coherent attempt) scored in one pass over all 2²⁴
-messages with vector table entries, against one pass per hypothesis. It tests rule 2 of the
-specification's section 13.1 for the dimensions that are not a transform. For 7, 56 and 350
+messages with vector table entries, against one pass per hypothesis. This tests the
+[work-reuse argument](../../../_ref/algorithms-matrixModem/fsk-design-study.md#131-rules-that-bind-every-implementation) for hypotheses that require separate evidence tables. For 7, 56 and 350
 hypotheses, with real and with complex entries; the planted message has to win for every
 hypothesis.
 

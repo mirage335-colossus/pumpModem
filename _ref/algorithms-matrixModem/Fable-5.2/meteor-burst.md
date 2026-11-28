@@ -628,7 +628,7 @@ Third delegated search, to check my recalled "170 to 180 dB at 300 km". Same tag
 
 What 100 mW gets, median, galactic noise (−161.1 dBm/Hz), no antenna gain [calc]:
 
-| Distance | Loss range | C/N₀ | 10-bit block by section 10 of the specification |
+| Distance | Loss range | C/N₀ | 10-bit block by the [historical sizing model](../fsk-design-study.md#10-sizing-and-expected-duration) |
 | ---: | --- | ---: | --- |
 | 150 km | 154–168 dB | +13 to +27 dB-Hz | seconds |
 | 300 km | 170–183 dB | −2 to +11 dB-Hz | 15 s to about 20 min |

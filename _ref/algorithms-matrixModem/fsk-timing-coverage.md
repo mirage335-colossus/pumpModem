@@ -74,6 +74,16 @@ shifted-window matching and from acquisition of an unknown calendar.
 
 ## Literature cross-check and alternatives
 
+Ji and Wu observed the dominant correlation peak move as the first arriving path
+faded on a 12.36 MHz HF link carrying repeated 8PSK. Absolute path delay was
+unknown in that field recording. In a later simulation with two paths 0.4 ms
+apart, the composite peak stayed biased as signal-to-noise ratio increased.
+Tracking the individual paths reduced delay error in that model. Both studies
+measured timing on known signals. For Matrix FSK the design consequence is to
+retain the configured timing range and the per-tone decision even when one peak
+is strong. How often a Matrix word would be lost by locking to that peak remains
+unmeasured. [Ji and Wu, 2025, §4.2](https://doi.org/10.3390/s25144246) · [Ji and Wu, 2026, §4.1.4](https://doi.org/10.3390/s26051640)
+
 - **Long coherent integration has more than one synchronization limit.** Majoral,
   Arribas and Fernández-Prades (2024) discuss data transitions, residual carrier
   error and oscillator instability, and implement a high-sensitivity Galileo

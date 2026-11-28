@@ -15,9 +15,12 @@ only at the user's explicit request.
 
 ## Matrix Modem research
 
-The [Matrix FSK specification](../_appraisal/matrixModem-FSK.md) gives the current
-experimental waveform and receiver decisions. The [receiver design review](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
-links each decision to its measurements, calculations and known limits.
+The [Matrix FSK specification](../_appraisal/matrixModem-FSK.md) gives the
+concise format and receiver requirements. The [receiver design review](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
+links those requirements to measurements, calculations and known limits. The
+[dated FSK design study](../_ref/algorithms-matrixModem/fsk-design-study.md)
+preserves the calculations and alternatives
+from the former specification draft.
 The [fractional-timing study](../_ref/algorithms-matrixModem/fsk-timing-coverage.md)
 separates arrivals matched to a search grid from coverage between its points,
 including the cost of a denser search and its finite-window approximation.
@@ -33,11 +36,10 @@ These studies inform future design; their calculations and isolated experiments
 do not qualify a complete Matrix Modem. The current application's operating
 contracts and validation remain in the component guides below.
 
-When adding findings, follow the [research and evidence placement guide](../_ref/algorithms-matrixModem/fsk-reconciliation.md#keeping-findings-outside-the-specification):
-scientific explanations and literature belong in the relevant `_ref/` topic note,
-while experiment methods, outcomes and provenance belong with their `_appraisal/`
-experiment. Reconcile the design consequence and link it from the specification;
-do not leave the substantive lesson only in that specification or a chat.
+Keep scientific explanations and literature in the relevant Matrix research note.
+Keep experiment methods, outcomes and provenance with the experiment. Update the
+FSK specification when a finding changes a waveform setting, receiver requirement,
+selected algorithm or its implementation status. [Research and evidence placement guide](../_ref/algorithms-matrixModem/fsk-reconciliation.md#keeping-findings-outside-the-specification)
 
 ## Current Robust modem
 

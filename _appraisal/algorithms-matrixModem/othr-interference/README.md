@@ -1,6 +1,6 @@
 # OTHR interference calculations and tolerance simulation (Fable-5.2 pass, 26 November 2026)
 
-Standalone programs behind the OTHR requirement of the [FSK specification draft](../../matrixModem-FSK.md).
+Standalone programs for the OTHR analysis retained in the [dated FSK design study](../../../_ref/algorithms-matrixModem/fsk-design-study.md#9-margin-interference-and-lost-hops).
 They support the [interference note](../../../_ref/algorithms-matrixModem/Fable-5.2/othr-and-interference-tolerance.md)
 and the [OTHR literature review](../../../_ref/algorithms-matrixModem/Fable-5.2/reviews/review-othr-interference.md).
 They are analysis aids, not modem code, and use only the standard library.

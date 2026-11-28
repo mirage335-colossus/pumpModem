@@ -6,7 +6,7 @@
 delegated literature searches · The configuration was adopted in the specification on 28 November
 
 This note answers one question for the
-[FSK specification draft](../../../_appraisal/matrixModem-FSK.md): which FSK tone rate and tone
+sub-9 kHz profile in the [current FSK specification](../../../_appraisal/matrixModem-FSK.md), against the detailed assumptions and calculations in the [dated design study](../fsk-design-study.md): which FSK tone rate and tone
 spacing suit a link below 9 kHz on which coherent reception across tones is necessary, some spread
 is expected, and the total bandwidth is set by a practical 200 ft (61 m) vertical antenna fed with
 10 kW, and what that rate does to the receiver's computational ceiling. The programs and outputs

@@ -1,6 +1,6 @@
 # Matrix FSK receiver design review
 
-The original brief asks for a one-way modem that can keep up when reception is difficult. Keep the one-tone lattice as an experimental reference. A fast transform, a high score at the true frequency, and successful decoding on a Gaussian channel answer different questions. For a configuration to be usable, the receiver must also score absent blocks, search its full public uncertainty, and finish processing before input accumulates. The FSK specification defines the current receiver. This review traces its choices to the measurements and calculations below. [Original brief](../../_appraisal/matrixModem.md) · [FSK specification](../../_appraisal/matrixModem-FSK.md) · [earlier evidence map](Sol-6.2/research-pass-index.md)
+The original brief asks for a one-way modem that can keep up when reception is difficult. Keep the one-tone lattice as an experimental reference. A fast transform, a high score at the true frequency, and successful decoding on a Gaussian channel answer different questions. For a configuration to be usable, the receiver must also score absent blocks, search its full public uncertainty, and finish processing before input accumulates. The concise FSK specification defines the current format and receiver requirements. This review traces their choices to measurements and calculations. The [dated design study](fsk-design-study.md) preserves detailed calculations under the original section numbering cited by older research and experiment records. [Original brief](../../_appraisal/matrixModem.md) · [FSK specification](../../_appraisal/matrixModem-FSK.md) · [earlier evidence map](Sol-6.2/research-pass-index.md)
 
 | Decision | Evidence and scope |
 | --- | --- |
@@ -9,7 +9,7 @@ The original brief asks for a one-way modem that can keep up when reception is d
 | Count distinct received codewords after placement and erasures. A minimum number of tone slots is a length constraint. The arrangement of symbols across lost hops matters. | [Finite code and burst losses](fsk-code-identifiability.md) |
 | Give the per-tone and coherent families half the block’s false-word budget each. Calibrate the maximum within each family separately. An admitted per-tone word takes priority. Evaluate the combined rule on quiet, active words and sequences through physical completion. | [Presence and quiet decisions](fsk-presence-calibration.md) · [native block experiment](../../_appraisal/algorithms-matrixModem/block-reception/README.md) |
 | For operator-read short words, size initially to 10⁻⁴ raw false admissions per quiet block. Express the achieved rate per listening day and measure wrong active words separately. | [Listening exposure and interpretation of decrypted words](fsk-presence-calibration.md#how-often-an-operator-sees-a-false-word) · [one-bit and ten-bit sizing](../../_appraisal/algorithms-matrixModem/fsk-lattice/results/admission_tradeoff.md) · [frozen-threshold experiment](../../_appraisal/algorithms-matrixModem/block-reception/README.md#one-false-admission-per-ten-thousand-quiet-blocks) |
-| For an intact signal weakened by antenna mispointing, size the profile for off-axis received power. Compare waterfall visibility and ordinary word recovery on the same samples. Keep distortion searches opt-in so weak or quiet blocks retain the full ordinary receiver budget. | [Specification §8.1](../../_appraisal/matrixModem-FSK.md#81-reception-after-antenna-pointing-loss) · [Pointing loss and optional fault searches](fsk-visible-signal-recovery.md) · [Paired pointing-loss test](../../_appraisal/algorithms-matrixModem/block-reception/pointing-loss.md) · [Optional fault experiments](../../_appraisal/algorithms-matrixModem/block-reception/fault-tests.md) |
+| For an intact signal weakened by antenna mispointing, size the profile for off-axis received power. Compare waterfall visibility and ordinary word recovery on the same samples. Keep distortion searches opt-in so weak or quiet blocks retain the full ordinary receiver budget. | [Receiver search](../../_appraisal/matrixModem-FSK.md#receiver-search) · [Pointing-loss research and historical §8.1 method](fsk-visible-signal-recovery.md) · [Paired pointing-loss test](../../_appraisal/algorithms-matrixModem/block-reception/pointing-loss.md) · [Optional fault experiments](../../_appraisal/algorithms-matrixModem/block-reception/fault-tests.md) |
 
 ## Keeping findings outside the specification
 
@@ -31,9 +31,10 @@ specification.
   carries the configuration, frozen decisions, controls, positive and negative
   outcomes, uncertainty, source identity and reproduction commands. Link the
   interpretation to that record; a favorable count alone is not the finding.
-- **Current design consequences:** reconcile the result into this review and its
-  topic guide, then link the specification's requirement or open decision to that
-  explanation. Update the existing indexes when a new research topic needs a
+- **Current design consequences.** Reconcile the result with the native implementation
+  and its topic guide. Update the specification when the waveform, receiver requirement,
+  selected algorithm or implementation status changes. Keep unresolved alternatives
+  and their evidence in the research note. Update the existing indexes when a new topic needs a
   discovery path. New research documents belong under
   `_ref/algorithms-matrixModem/`; `docs/` continues to distinguish experimental
   Matrix findings from the application's qualified operating contracts.
@@ -105,7 +106,7 @@ one-cell table quoted 13–14 s. At −10 dB-Hz and 0.1 Hz full Doppler width, t
 takes 58,428 s with one-cell tones and 3,712 s with held tones in this model. The 32-hop
 floor, actual active samples and exactly 32L transmitted tones enter both comparisons.
 These are estimated transmit periods for threshold crossing. An isolated word requires
-another two scored quiet periods for physical closure. [Current specification](../../_appraisal/matrixModem-FSK.md#10-sizing-and-expected-duration) · [Repetition, periods and per-tone metric](../../_appraisal/algorithms-matrixModem/fsk-lattice/results/attended_hf_durations.md)
+another two scored quiet periods for physical closure. [Block calendar and physical completion](../../_appraisal/matrixModem-FSK.md#block-coding-and-calendar) · [Historical sizing calculations](fsk-design-study.md#10-sizing-and-expected-duration) · [Repetition, periods and per-tone metric](../../_appraisal/algorithms-matrixModem/fsk-lattice/results/attended_hf_durations.md)
 
 On the sixteen-position, 10.24 s tone profile below 9 kHz, ideal whole-block coherence at
 −37 dB-Hz gives 3.17 days for transmission. Combining for at most 128 tones at a time
