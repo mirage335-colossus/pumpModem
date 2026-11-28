@@ -15,6 +15,10 @@ only at the user's explicit request.
 
 ## Matrix Modem research
 
+The [Matrix FSK specification](../_appraisal/matrixModem-FSK.md) gives the current
+experimental waveform and receiver decisions. The [receiver design review](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
+links each decision to its measurements, calculations and known limits.
+
 Start with the [Matrix research overview](../_ref/algorithms-matrixModem/Sol-6.2/README.md)
 for the proposed standalone modem, then use its
 [evidence map](../_ref/algorithms-matrixModem/Sol-6.2/research-pass-index.md#evidence-map)

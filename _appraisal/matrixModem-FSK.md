@@ -22,10 +22,12 @@ choices from evidence about their performance.
   peak power throughout that interval. Hopping has ramps and quiet guards. Bandwidth, oscillator
   error, antenna response and channel nulls can independently limit reception. Use conducted,
   radiated or received power consistently in each link budget.
-- **The configured payload sizes start at 10 bits.** At the original 10⁻⁶ false-admission
-  target, the historical presence-limited calculation gave 1.10–1.30 times the one-bit
-  duration. The comparison changes with the admission target and the required payload
-  accuracy. Section 10 gives both criteria and their limits.
+- **The smallest configured payload is 10 bits.** For short words read by an operator,
+  use a provisional target of one false admission per 10,000 quiet public blocks (10⁻⁴).
+  In the weak-tone model with 400 nuisance hypotheses per word and a 10⁻³ true-template
+  miss rate, ten bits at this target take 5.9% more unrounded airtime than one bit at
+  the historical 10⁻⁶ target. If both use 10⁻⁴, ten bits take 27.5% more. One bit is a
+  theoretical comparison. [Receiver evidence](#8-receiver-requirements) · [Sizing assumptions](#10-sizing-and-expected-duration)
 - **The transmitter assumes a diffuse path; the receiver also tries a specular one.** The
   transmitter sends FSK suited to the expected Doppler spread of its configured path class, using one tone per 160 ms cell on 6.25 Hz spacing as the reference configuration.
   Select a held-tone profile before transmission when one-cell tones miss the deadline on the
@@ -62,8 +64,11 @@ choices from evidence about their performance.
   machine, reuse shared work within the workspace limit, and measure simulation throughput
   on the stated CPU and GPU reference classes. A candidate route needs to finish the full
   public search, including quiet periods. [Scheduling rules](#131-rules-that-bind-every-implementation)
-- A general solution without drastic failure is preferred over one that is slightly better in the
-  cases it handles. A theoretical weakness is listed, not dismissed.
+- **Prefer a profile that can receive through the difficult cases.** A modest increase in
+  airtime or processing cost is acceptable when it avoids a severe sensitivity loss or lets
+  the complete receiver keep up with incoming samples across the intended configurations.
+  Record theoretical failure cases with their assumptions even when their field frequency
+  is unknown.
 
 ## 2. Terms
 
@@ -76,6 +81,8 @@ choices from evidence about their performance.
 | Hop | With FHSS, the radio's stay on one hop frequency. **Hop length** includes its edges. |
 | Held tone | A tone longer than one cell. With FHSS it is as long as the flat part of its hop: one tone per hop. |
 | Block | 10, 16 or 24 information bits sent as 32 symbols. |
+| Quiet-block false admission | The receiver reports a word in a physically quiet public block after searching all configured hypotheses. One reported block counts once. |
+| Wrong active word | The wanted transmission is present and the receiver admits a payload different from the transmitted one. |
 | Phase key | The keyed phase of 0°, 90°, 180° or 270° that every tone is sent with. |
 | Phase interval | The stretch sent with one keyed phase: the tone, or a part of it. |
 | Phase ramp | Below 9 kHz, the 80 ms at the start of a phase interval in which the phase moves evenly from the previous keyed phase to the new one. |
@@ -163,8 +170,11 @@ compared 64 one-cell tones with 32 two-cell tones. In the 0.5 Hz diffuse fixture
 tones raised correct per-tone admissions from 81 to 98 out of 120 and joint admissions from
 90 to 101. The formats used their respective repeat counts and separately calibrated
 thresholds. At 20 Hz spread, joint reception recovered 0 and 3 of 120 at that energy.
-At 22 dB it recovered 81 and 85. This supports testing a held-tone profile on a slow path.
-Neither profile covered the fast path at the lower energy. [Matched experiment](algorithms-matrixModem/block-reception/README.md#one-cell-versus-two-cell-hf-tones)
+At 22 dB it recovered 81 and 85. These counts support testing held tones on a slow path.
+The 32-component fading model closely reproduced the continuous Gaussian spectrum's
+variation in block-average received power at 0.5 Hz. At 20 Hz it produced much more
+block-to-block variation, so the fast-path counts apply to that finite model.
+[Matched experiment and channel-model check](algorithms-matrixModem/block-reception/README.md#one-cell-versus-two-cell-hf-tones)
 
 The reference rate costs sensitivity on slow weak paths. Profile selection is open decision 1 of
 [section 14](#14-decisions).
@@ -241,7 +251,7 @@ steady path and for spreads of 0.1 / 1 / 3 / 10 / 30 Hz:
   attempts a 40 s window, and asks the oscillators for 25 mHz. With one-cell tones a longer hop
   adds no sensitivity by itself; hops longer than about 40 s are worth having only with held
   tones.
-- **A block spans at least 32 hops** ([section 6](#6-message-format-and-error-correction)).
+- **With FHSS, a block spans at least 32 hops** ([section 6](#6-message-format-and-error-correction)).
 
 ### 4.4 Phase key
 
@@ -437,7 +447,10 @@ each sent on `L` tones: 32·`L` tones per block.
 
 - It ends when two consecutive block periods are scored absent. A received length never selects
   geometry or completion. If the schedule resumes, the message reopens and the gap is erased
-  blocks. An unobserved, wholly erased or unscored slot provides no evidence of quiet.
+  blocks. An unobserved, wholly erased or unscored slot breaks the consecutive-quiet
+  count. The receiver needs two newly consecutive scored absences to close. A false
+  admission in trailing quiet can therefore postpone closure even when the operator
+  recognizes the word as gibberish.
   An *observed* slot in which propagation completely suppresses the signal can score as
   quiet even while the transmitter continues sending. Count a premature closure even if
   later reception reopens. Keep the public ordinal through closure.
@@ -591,10 +604,14 @@ each sent on `L` tones: 32·`L` tones per block.
    observations. For short messages read by an operator, use **10⁻⁴ per quiet public block**
    as a provisional design target. If achieved on one continuously monitored calendar, it
    gives about 0.84 raw false blocks per quiet day at 10.24 s per block, or about one every
-   76 quiet days at 655.36 s per block. Choose the operating threshold with the listening time, all monitored calendars
-   and the number of false indications the operator can tolerate in view. Ten bits give
-   the operator more context when only a few words make sense. Count every false admission,
-   including words the operator dismisses.
+   76 quiet days at 655.36 s per block. Select the threshold using the planned listening
+   time, the calendars monitored and the number of false indications the operator can tolerate.
+   If only eight of the 1,024 values make sense in context and words admitted from noise
+   are uniformly distributed, one in 128 false words will look plausible. Decryption
+   preserves any bias among the winning words (section 7). Count every false admission,
+   including words a reader dismisses. Operator recognition remains unmeasured. This
+   rationale applies to attended reading. File integrity and the two-quiet-slot end decision
+   are evaluated from the received data.
    Freeze thresholds on training data and evaluate fresh quiet blocks, interference,
    wrong-schedule traffic and outage sequences. Decoy keys on one capture share noise.
    Report missed active blocks, admitted wrong payloads, premature or delayed ends and
@@ -616,13 +633,15 @@ on the same draws. On a path resetting phase every tone, the corresponding count
 sensitivity. The joint rule admitted 3/400 quiet blocks. These thresholds target a nominal
 1% family false-admission rate. [Full fixture, grids, calibration and uncertainty](algorithms-matrixModem/block-reception/README.md#coherent-branch-and-protected-per-tone-fallback)
 
-At the new **10⁻⁴ target**, a fresh calibration and 30,000 independent Gaussian-noise
-holdouts on the one-cell HF fixture produced **one false admission**. The one-sided 95%
-upper bound was **1.58 × 10⁻⁴**, above the design target. On the same fresh signal blocks,
-the 10⁻⁴ and 1% cuts recovered 50 and 93 of 120 correct words at 0.5 Hz and 18 dB.
-At 20 Hz and 18 dB the looser cut recovered only two more words and also admitted two
-wrong ones. A lower threshold can help at the edge of reception, with little benefit
-when the channel has lost most of the payload evidence. [Frozen thresholds, signal and wrong-schedule results](algorithms-matrixModem/block-reception/README.md#one-false-admission-per-ten-thousand-quiet-blocks)
+On the one-cell HF fixture, 19,999 quiet blocks set the thresholds. At the nominal
+**10⁻⁴ target**, the receiver admitted **one of 30,000** independent Gaussian-noise
+holdouts. The exact one-sided 95% upper bound was **1.58 × 10⁻⁴**, above the design
+target. At the 1% setting it admitted 287 of the same 30,000. On paired signal trials
+at 0.5 Hz and 18 dB, the two settings recovered 50 and 93 correct words out of 120.
+At 20 Hz and 18 dB, the looser setting gained two correct words and admitted two wrong
+ones. On a 36 dB transmission using another schedule, it admitted six of 160 blocks,
+compared with zero of 160 at the 10⁻⁴ setting. All trials used 10.24 s blocks and the
+same search. Repeating the run with the same seeds reproduced the counts. [Frozen thresholds, signal and wrong-schedule results](algorithms-matrixModem/block-reception/README.md#one-false-admission-per-ten-thousand-quiet-blocks)
 
 Properties to test:
 
@@ -714,7 +733,9 @@ airtime ratio at the common 10⁻⁴ target is **1.412×**.
 On the steady-path model with 400 hypotheses, the ten-bit energy saving against the old
 target ranges from 7.4% to 12.4% for 1,024 down to one independent look. These calculations
 cover crossing the threshold on the true template. Another word can still win the search.
-The duration table below retains the original target and rounding. [Reproducible comparison](algorithms-matrixModem/fsk-lattice/results/admission_tradeoff.md)
+The 13.3% saving assumes a transmitter sized for the new target. Changing only the receiver
+threshold leaves the scheduled airtime fixed. The duration table below retains the original
+target and rounding. [Reproducible comparison](algorithms-matrixModem/fsk-lattice/results/admission_tradeoff.md)
 
 The separate codebook comparison in section 6 gives a scale for the coding cost. The
 400-hypothesis Gaussian-deflection example gives about 27% longer for 24 bits, before template
@@ -1463,9 +1484,9 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 | The HF reference uses one cell per tone. Tone length and hop length are configured separately | 4.1, 4.2 |
 | FHSS is optional; nothing carries over between hops; no setting depends on Helper | 1, 4.3 |
 | The transmitter is formatted for a diffuse path; the receiver always makes coherent attempts, over the whole band | 1, 8 |
-| A block spans at least 32 hops. Erasure budgets require the assumed hop correlation and symbol coverage | 6, 9 |
+| With FHSS, a block spans at least 32 hops. Erasure budgets require the assumed hop correlation and symbol coverage | 6, 9 |
 | 40 s is the recommended alternate hop length for one-cell tones | 4.3 |
-| The duration comparison with one bit depends on the chosen false-admission and payload-error criteria | 1, 10 |
+| Size operator-read ten-bit words at a provisional 10⁻⁴ raw false admissions per quiet public block. Count erroneous active words and physical completion separately | [8](#8-receiver-requirements), [10](#10-sizing-and-expected-duration) |
 | 256 values with a keyed placement over all positions, where earlier notes suggested 64 with wide spacing | 5 |
 | Low-precision operands are the design target after conditioning. Size accumulators for each admitted block | 8 |
 | The spread bank reaches 500 Hz; EME needs a predicted-Doppler input | 8, 12.1 |
@@ -1506,9 +1527,10 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 6. **Symbols per block.** On a steady path with long held tones, 16 or 8 symbols instead of 32
    would save 0.8 or 1.4 dB, and would shorten the shortest block. Fading paths need the
    diversity of 32. Not adopted.
-7. **Attended false admissions.** Use the provisional 10⁻⁴ quiet-block target in section 8.
-   Establish the achieved rate and useful-word recovery on each intended channel, and measure
-   how many distinct false messages reach the operator during the expected listening time.
+7. **Qualification of the attended target.** Establish the achieved quiet-block rate and
+   correct-word recovery on each intended channel. During the expected listening time,
+   measure how many distinct false messages are displayed and how many a reader accepts as
+   plausible. The Gaussian-noise test in section 8 fell short of its confidence criterion.
 8. **Overload limit** of 2 dB on what the scheduler may trade is a placeholder.
 9. **Without FHSS.** Whether scoring with one phase per position is on by default, and the
    coherence window a sub-9 kHz block is sized for. The ladder itself is settled below 9 kHz:
@@ -1569,8 +1591,10 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 
 - **Complete-format performance is open.** A native 10-bit experiment now connects samples,
   the modeled schedule, exhaustive codeword search, calibrated admission and two-quiet closure.
-  Its configured calendar, finite search, channel laws and 1% diagnostic threshold bound the
-  evidence. Durations in section 10 remain model estimates.
+  The 1% diagnostic exercised physical closure on a configured calendar. The 10⁻⁴ trial
+  measured individual quiet, active and wrong-schedule blocks within its finite search and
+  channel models. Qualification of continuous message completion at the attended target
+  remains open. Durations in section 10 remain model estimates.
   [Experiment design and holdouts](algorithms-matrixModem/block-reception/README.md)
 - **One cell per tone is the slower choice for weak signals with per-tone reception.** Against
   the bound it stands at 14.2, 5.7 and 1.2 dB at 0.1, 1 and 10 Hz of spread (−10 dB-Hz, 4 s
@@ -1635,7 +1659,7 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
   periodic hop envelope, a noise-uncertain energy detector and real observers were not
   evaluated; the earlier
   [observer notes](../_ref/algorithms-matrixModem/Sol-6.2/observer-and-interference.md) apply.
-- **Hop spanning lengthens strong-signal blocks.** A block has to fill 32 hops: 13 s with 0.4 s
+- **Hop spanning lengthens strong-signal blocks.** With FHSS the 32-hop floor is 13 s with 0.4 s
   hops, 21 minutes with 40 s hops, whatever the level. The per-hop weighting and the lost-hop
   cases were calculated as erasures, not simulated with real interference.
 - **Strong incoherent swept interference:** loss grows without bound above about 20 dB over the

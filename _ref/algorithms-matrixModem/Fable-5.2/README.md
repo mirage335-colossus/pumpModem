@@ -167,19 +167,24 @@ A cross-check of the repository's own earlier research, not a literature review:
     measured. Decided: they always run over the whole configured band. 40 s is the recommended alternate hop length for one-cell tones: it costs 0.02 dB,
     keeps the hopping benefit for 50 channels, and gives coherent attempts a 40 s window; many
     channels at −10 dB-Hz want shorter hops and steady paths below −10 dB-Hz want longer windows.
-20. **Ten bits take 1.1 to 1.3 times as long as one bit under the specification's sizing.** The
+20. **Ten bits take 1.1 to 1.3 times as long as one bit under the original 10⁻⁶ false-admission target for both block sizes.** The
     expectation of "less than twice" holds comfortably with the presence test (24 bits: 1.25 to
     1.7 times); on message error alone it needs a rate stricter than about 10⁻³. Short blocks
     use the keyed random code, not a convolutional one, and nothing better is known for 10 to 24
     bits; a better code is needed at 30 to 300 bits and the candidates are not compared. The
     interleaver does not spread a short block across hops, which is a gap (closed by finding 21).
+    The provisional attended ten-bit target is 10⁻⁴ per quiet block. The updated comparison gives
+    separate airtime ratios for equal and different admission targets. The short-code comparison
+    remains specific to the codes and channels studied. [Updated sizing](../../../_appraisal/matrixModem-FSK.md#10-sizing-and-expected-duration) · [Evidence for the code](../../../_appraisal/matrixModem-FSK.md#6-message-format-and-error-correction)
 21. **A block spans at least 32 hops so that losing half of them acts only as a worse noise
     floor.** Half the hops cost 3 dB of time, about 1.5 dB of power for weak tones. At a failure
     probability of 10⁻³ a block needs 33 hops at 6 dB of margin, 18 at 10 dB and 14 at 13 dB or
     more; 3 dB of margin needs about 500. The receiver weights each hop by the inverse of its
     own noise level and erases a hop beyond range. The shortest block becomes 32 hops long.
     Settled: 32 hops stands. One or two hops lost in 32 cost 0.14–0.28 dB; 3 dB of margin
-    covers a quarter lost and 6 dB half.
+    covers a quarter lost and 6 dB half. These loss estimates assume equal hop exposure, and
+    the probability calculations assume independent erasures. A burst can erase every copy of
+    a symbol. [Hop-loss assumptions and counterexample](../fsk-code-identifiability.md#erasure-count-and-duration)
     An observer then needs 12–14 dB more C/N₀ than the link at a 40 s dwell and 17–19 dB at
     400 s, against 1.6–5.7 dB for a plain tone, so the long dwell is best for sensitivity and
     concealment together. Four phases are needed; squaring undoes two. On few positions without
