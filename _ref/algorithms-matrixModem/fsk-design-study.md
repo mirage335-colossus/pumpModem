@@ -6,6 +6,17 @@ Section numbers follow the original design draft so earlier citations still reso
 Use the [FSK specification](../../_appraisal/matrixModem-FSK.md) for the current waveform and receiver requirements
 and the [original brief](../../_appraisal/matrixModem.md) for overall modem goals.
 
+The numbered sections preserve the design record from
+`_appraisal/matrixModem-FSK.md` at commit
+`8c29b6549d4d8695c971571fd54cbfbfbf52f5e5`, including the original settings,
+decision tables and qualification conditions. Dates in that record use UTC.
+Imperative wording within those sections records the proposal at that revision.
+Current format and receiver requirements are maintained in the
+[concise specification](../../_appraisal/matrixModem-FSK.md). The native reference
+uses a configured calendar and ordinal. Acquisition of an unknown calendar or ordinal,
+interoperable waveform and file formats, target-hardware sustained service and
+field sensitivity remain open.
+
 ## Research map
 
 - Research on the [lattice and finite windows](fsk-lattice-validity.md), [tone timing](fsk-timing-coverage.md), [code identifiability](fsk-code-identifiability.md), [presence calibration](fsk-presence-calibration.md), and [visible-signal recovery](fsk-visible-signal-recovery.md) is cross-referenced in those topic notes and experiment records.
@@ -14,13 +25,73 @@ and the [original brief](../../_appraisal/matrixModem.md) for overall modem goal
 
 ## 1. Scope and fixed decisions
 
-The HF study considered a 2–100 mW transmitter, high path loss and received C/N₀ from
-+10 to −20 dB-Hz. The −37 dB-Hz sub-9 kHz comparison assumed a phase-stable path.
-These are design inputs. Received signal level also depends on antenna gain, pointing
-loss and noise density. At a given deadline a modest airtime or processing penalty is
-preferable when it preserves service on a credible path where the more efficient
-profile loses the word or the full search falls behind. The [rounded durations](#10-sizing-and-expected-duration)
-and [known weaknesses](#15-known-weaknesses) give examples and their assumptions.
+- One-way, one tone at a time at full peak power, fixed configuration per purpose, no feedback,
+  no length fields.
+- The HF design target uses 2–100 mW and high path loss. Received C/N₀ also depends on
+  antenna gains and noise density. The +10 to −20 dB-Hz study points, and the −37 dB-Hz
+  coherent sub-9 kHz comparison, are research inputs. The proposed format has no field
+  sensitivity measurement at these limits.
+- **Receive through transmit-antenna pointing loss.** If an intact transmission from a
+  misdirected high-gain antenna produces visible data tones on the receiving station's
+  waterfall, the design goal is for the ordinary receiver to deliver the message. Choose
+  payload rate, tone duration, bandwidth and repetitions for the expected off-axis C/N₀,
+  path coherence and delivery deadline. [How to measure this goal](#81-reception-after-antenna-pointing-loss)
+- **Constant amplitude on the active flat interval.** The proposed transmitter uses its available
+  peak power throughout that interval. Hopping has ramps and quiet guards. Bandwidth, oscillator
+  error, antenna response and channel nulls can independently limit reception. Use conducted,
+  radiated or received power consistently in each link budget.
+- **The smallest configured payload is 10 bits.** For short words read by an operator,
+  use a provisional target of one false admission per 10,000 quiet public blocks (10⁻⁴).
+  When a single detection statistic gets the entire budget, the weak-tone model gives
+  5.9% more unrounded airtime for ten bits at 10⁻⁴ than for one bit at the historical
+  10⁻⁶ target (400 nuisance hypotheses per word, 10⁻³ true-template miss). One bit is a
+  theoretical comparison. The reference receiver divides its budget between two searches.
+  Use section 10's rounded block periods to choose a transmit profile.
+  [Receiver evidence](#8-receiver-requirements) · [Sizing assumptions](#10-sizing-and-expected-duration)
+- **Choose the transmit profile before sending.** The HF comparison starts with 160 ms
+  tones on a 6.25 Hz grid. Compare one-cell and held-tone profiles at the intended power,
+  path spread and deadline. Longer tones can substantially shorten a weak, slowly fading
+  link. They also impose a longer minimum block. A phase-stable profile below 9 kHz needs
+  an explicit assumption about how long the received phase stays coherent.
+- **Keep a per-tone decision available on the same samples.** The receiver also combines
+  tones coherently within the configured windows when the waveform supplies a common phase
+  reference. With FHSS that span ends at each retune. A hop containing one held tone supplies
+  no additional inter-tone observation. Section 8 sets the joint admission and word-selection
+  rule. A receiver can exploit extra coherence, but cannot recover energy the transmitted
+  profile never collected.
+- **Below 9 kHz the same format runs on a slower lattice.** FHSS off, a 1.28 s cell, sixteen
+  positions 0.78125 Hz apart in 12.5 Hz, tones of 10.24 s, and a keyed phase reached by an 80 ms
+  ramp instead of a step. The code still produces 8-bit symbols. With sixteen physical
+  positions their scheduled repetitions can share position labels. Correct recovery depends
+  on the resulting whole codeword and the channel. Coherent windows can supply sensitivity
+  ([12.2](#122-phase-stable-paths-below-9-khz)).
+- **Below 9 kHz, preserve complete receiver capacity.** The profile disables hopping
+  and uses one scheduled phase per tone. Include that phase operation, its timing
+  search and its workspace in the receiver cost. Pursue additional concealment only
+  where it adds no processing cost to this profile. The research profile assumes a
+  separately authorized experiment. Assess interference at the receiving site, and
+  test both HF and sub-9 kHz scheduling with the complete search and workspace admitted.
+- **Every tone has a scheduled phase.** Successive draws can be equal. The common-phase
+  calculation assumes a private schedule, while the published zero-key profile is reproducible
+  by any receiver ([4.4](#44-phase-key)).
+- **FHSS is optional.** The hopping profile allocates time for ramps and guards and allows an
+  unknown phase and frequency error on each retune. Each public ordinal and codeword extends
+  across its scheduled hops. Without hopping, tones run back to back. The receiver knows
+  their keyed transmit phases and must still account for oscillator and propagation phase.
+- **Helper Carrier is a separate, diagnostic system.** It stands in for more stable oscillator
+  hardware. Its two-pilot frequency, phase and timing estimates are used, if at all, as standalone
+  search narrowing with a benefit similar to a GPSDO. There is no joint detection between Helper
+  tones and modem signals. No setting of this specification depends on it.
+- **Measure the complete receiver.** Compare qualified CPU and GPU routes on the available
+  machine, reuse shared work within the workspace limit, and measure simulation throughput
+  on the stated CPU and GPU reference classes. A candidate route needs to finish the full
+  public search, including quiet periods. [Scheduling rules](#131-rules-that-bind-every-implementation)
+- **Prefer a profile that can receive through the difficult cases.** A modest increase
+  in airtime or work per word is acceptable when it avoids a severe sensitivity loss
+  on an intended path and the receiver can still keep up with incoming samples.
+  Pointing loss is an ordinary link-budget case. Dedicated searches for transmitter
+  faults are opt-in under [section 8](#8-receiver-requirements). Record theoretical
+  failures with their assumptions even when their field frequency is unknown.
 
 ## 2. Terms
 
@@ -99,10 +170,14 @@ This chapter preserves the proposal's research comparisons. See the current spec
 
 ### 4.1 Settings
 
-The HF comparisons include experimental phase intervals of eight, four, two or one cell
-within a held tone, and half or quarter of a cell. They start at a tone boundary
-and truncate at its end. The sub-9 kHz comparisons use one phase per tone.
-The [waveform profiles](../../_appraisal/matrixModem-FSK.md#waveform-profiles) specify the selected settings.
+| Setting | HF reference | Other values | Chosen from |
+| --- | --- | --- | --- |
+| Lattice scale | `j` = 0: 160 ms cell, 6.25 Hz spacing | `j` = 3 below 9 kHz (1.28 s, 0.78125 Hz); `j` = 2 or 4 there for other antennas | Transmit antenna bandwidth and the receiver's interference ([section 3](#3-lattice), [12.2](#122-phase-stable-paths-below-9-khz)) |
+| Tone length | 1 cell (160 ms) | A whole number of flat cells. With FHSS the tone must fit inside one hop. Below 9 kHz use 8 cells (10.24 s), with 1 or 32 cells as alternatives at `j = 3` | Expected Doppler spread and level ([4.2](#42-tone-length)) |
+| FHSS | On where the radio hops | Off | The radio; off below 9 kHz |
+| Hop length | 0.4 s including 80 ms of edges | 40 s is the named alternate. The longer HF examples use a whole number of cells including 160 ms of edges | Hop channels, level, regulation ([4.3](#43-hop)) |
+| Phase key | One scheduled phase per tone | Experimental HF candidates shorten the phase interval to 8, 4, 2 or 1 cells of a held tone, or to half or one quarter of a cell. The below-9 kHz profile uses one phase per tone. | [Phase reference and timing cost](#44-phase-key) |
+| Phase ramp | None: the keyed phase is stepped | 80 ms below 9 kHz; 160 ms for a transmit antenna narrower than about 40 Hz | The transmit antenna's Q ([4.4](#44-phase-key)) |
 
 ### 4.2 Tone length
 
@@ -239,7 +314,7 @@ steady path and for spreads of 0.1 / 1 / 3 / 10 / 30 Hz:
 **Mandatory in all cases: every tone is sent with a keyed phase of 0°, 90°, 180° or 270°, with a fresh scheduled value per tone. Consecutive values can coincide.** Tone, envelope and lattice are unchanged. The phase
 carries no information and depends only on the key and the time, not on the position.
 
-**Experimental HF intervals.** The shorter intervals in section 4.1 start at the
+**Experimental HF intervals.** The shorter intervals in the settings table start at the
 tone boundary. If the tone ends before an interval would finish, end the interval there.
 Whether to offer these settings in an HF operating profile is open decision 2 of
 [section 14](#14-decisions). The below-9 kHz profile uses one scheduled phase per tone.
@@ -599,11 +674,18 @@ select the geometry of the next public block.
    1/(8 × band span) where that is finer: 10 ms for the 12.5 Hz used below 9 kHz, whatever the
    tone length. Coherent windows add frequency bins half the window's reciprocal apart and
    drift-rate hypotheses ([12.2](#122-phase-stable-paths-below-9-khz)).
-8. **Coherent attempts and the per-tone fallback.** The comparison ran both branches
-   on each scorable block. Its decision detected ordinary data on the configured
-   sideband even with no pilot lock. Extra searches for inversion, spacing errors
-   and damaged tones changed the search cost and calibration. [Optional fault experiments and their measured costs](../../_appraisal/algorithms-matrixModem/block-reception/fault-tests.md)
-
+8. **Coherent attempts and the per-tone fallback.** Evaluate the configured coherent
+   windows over all used positions and the per-tone branch on every scorable block, including
+   quiet blocks. Both count towards the receiver deadline. Use item 9 to make one decision.
+   Score the data in the configured sideband across the supported timing and frequency
+   ranges without waiting for pilot lock, a Helper indication or a visible trace. After a
+   miss, score the next eligible public block. Dedicated searches for a reversed spectrum,
+   mis-set tone spacing or damaged tones require explicit selection. In ordinary operation,
+   neither a miss nor a persistent bright trace triggers these searches. The format may accommodate
+   optional recovery without extra airtime or redundancy. With the option off, preserve
+   the ordinary receiver's sensitivity, false-word performance, available DSP workspace
+   and maximum sustained throughput, including during prolonged unsuccessful acquisition.
+   [Optional fault experiments and their measured costs](../../_appraisal/algorithms-matrixModem/block-reception/fault-tests.md)
    - **Span.** Undo the phase key first. Without FHSS the maximum span is the block. With
      FHSS, allow an unknown phase for each retune, combine coherently only inside each hop,
      then add hop energies. A held tone occupying the entire active hop has no second
@@ -659,11 +741,20 @@ select the geometry of the next public block.
      or a multimodal Doppler spectrum at the same quoted width can give a different result.
      Reserve a stated false-admission budget for the per-tone branch and test its sensitivity
      after combining decisions.
-9. **Presence and word selection.** The test gave half the public block's false-admission
-   budget to each family and priority to an accepted per-tone word. The sum of valid
-   branch budgets bounds the union even when the two maxima share noise. Changing
-   the search, budget split, priority or conditioning changes the joint decision.
-   At the proposed attended rate of 10⁻⁴ per quiet block, one continuously monitored calendar
+9. **Presence and word selection.** The reference decision reserves half of the public
+   block's false-admission budget for the maximum over the per-tone search and half for the
+   maximum over the coherent search. Each maximum includes all that branch's messages,
+   alignments and other configured hypotheses on the same samples. Freeze a deterministic
+   tie order for equal scores. Train a separate strict-exceedance cutoff for each maximum.
+   Check availability first. Unusable input or an unavailable required branch produces
+   an unscored block and breaks the consecutive-quiet count. When both branches have
+   scores, return the per-tone word if it crosses its cutoff, including on a disagreement.
+   Otherwise return the coherent word if it crosses its cutoff. If neither crosses,
+   return a scored absence. The sum of valid branch budgets bounds the union without
+   assuming independence. Changing the split, winner priority, search or conditioning
+   requires evaluating the resulting joint decisions again. For short messages read by an
+   operator, use **10⁻⁴ per quiet public block**
+   as a provisional design target. If achieved on one continuously monitored calendar, it
    gives about 0.84 raw false blocks per quiet day at 10.24 s per block, or about one every
    76 quiet days at 655.36 s per block. Select the threshold using the planned listening
    time, the calendars monitored and the number of false indications the operator can tolerate.
@@ -1362,17 +1453,41 @@ competes with meteor burst at short range.
 
 This section records the historical proposal and measurements. Current requirements are in the specification.
 
-1. **Whole-job service.** The comparison holds the search coverage fixed across
-   routes. Full single-stream service includes preparation, transfers, search and
-   ordered decisions through closure, even during prolonged unsuccessful reception.
-   The historical matrix product beat cuFFT by seven on the sub-9 kHz search and
-   lost by a factor of 2.1 on small first-transform batches. The best tested fixed
-   assignment is a useful comparator only on the same device, workload, admissible
-   portion sizes and memory budget. Both profiles assume a shared worker budget of
-   twice the effective logical CPU count unless explicitly limited. [Ordinary receiver](#8-receiver-requirements)
-   · [Automatic-mode contract](../../docs/gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
-   · [CPU allocation](../../docs/development.md#receiver-cpu-allocation)
+Three rules bind the receiver and the simulator alike. A figure for the computational ceiling
+counts only if it was obtained under them.
 
+1. **Measure and rebalance.** Use the fastest qualified routes for the full configured search
+   within the device's admitted memory and the receiver's deadline. Qualify their public
+   decisions, sensitivity and actual arithmetic before comparing service. For a live capacity
+   claim, feed one stream through preparation, transfers, search, calibration as incurred, ordered
+   decisions and two-quiet closure. Include unsuccessful search, report sustained backlog change
+   over a stated interval and account for peak live workspace. Freeze the enabled searches
+   before comparing routes. For ordinary reception this means the configured per-tone and
+   coherent branches, including on quiet blocks. Report explicitly selected fault searches
+   under their own workload and admission thresholds. Independent simulation trials measure
+   experiment turnaround. [Ordinary receiver](#8-receiver-requirements) · [Automatic-mode contract](../../docs/gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
+   - The routes to be held and timed are those of [13.4](#134-routes-and-scheduling-rule):
+     above all CPU FFT against GPU FFT against a Tensor Core matrix-product DFT, for the first
+     transform and for the transform across tone sums.
+   - What is measured is processing time per unit of work, for every stage, route, portion size
+     and device, taken while the real work runs.
+   - The criterion is the completion of the whole job: backlog cleared by a live receiver,
+     trials finished by a simulation. It is never one stage's rate or one unit's utilization.
+   - No fixed assignment is specified, because the best one changes with configuration, batch
+     and machine. The matrix product beat cuFFT by 7 in the sub-9 kHz search and lost to it by
+     2.1 on small batches of the first transform ([13.2](#132-measured)).
+   - Every run records the times it measured and the assignment it chose.
+   - **Use the same scheduling policy on both reference profiles.** Record the limiting stage
+     on each device with the entire configured work running. The HF workload can shift between
+     transforms, evidence formation and message search.
+   - **Reference for the test of section 8.** Compare with the fastest fixed assignment
+     actually tested on the same recorded workload and device. Declare the qualified routes,
+     feasible portion sizes and memory limits first. Include an independent challenging
+     workload before extrapolating from a kernel or a single block.
+   - **Workers.** Resolve the default once as `W = 2H`, where `H` is the effective logical
+     CPU count after affinity and quota. Honour explicit allocations, share the budget across
+     stages, and charge scratch, retained results and worker stacks over their lifetimes.
+     [CPU allocation](../../docs/development.md#receiver-cpu-allocation)
 2. **Reuse common work within the admitted workspace.** Compute shared inputs once when storage,
    traffic and synchronization permit. Bounded tiling or measured recomputation can raise
    complete service when materializing all intermediates would exhaust memory. When possible,
@@ -1706,9 +1821,33 @@ trials where practical while preserving the physical model and decision under te
 
 ## 14. Decisions
 
-The original open questions retain their numbers. Their tested alternatives, requirements
-for qualification and unresolved operating limits are part of the design record.
-The adopted choices are in the [FSK specification](../../_appraisal/matrixModem-FSK.md).
+**Design choices for the experimental profiles**
+
+| Decision | Where |
+| --- | --- |
+| Size the HF profile for the expected off-axis power, path and deadline, counting whole blocks and hop periods. One-cell tones are the reference and held tones an alternative | 4.1, 4.2, [8.1](#81-reception-after-antenna-pointing-loss), 10 |
+| FHSS is optional. The receiver allows a phase discontinuity on retuning and preserves the codeword and public calendar across hops. Helper is optional and independent | 1, 4.3 |
+| On each scorable block of the configured calendar, search the selected sideband with the per-tone and coherent branches. Per-tone acceptance takes priority. Extra fault searches require explicit selection | [8](#8-receiver-requirements), [8.1](#81-reception-after-antenna-pointing-loss) |
+| With FHSS, a block spans at least 32 hops. Erasure budgets require the assumed hop correlation and symbol coverage | 6, 9 |
+| 40 s is the recommended alternate hop length for one-cell tones | 4.3 |
+| Size operator-read ten-bit words at a provisional 10⁻⁴ raw false admissions per quiet public block. Count erroneous active words and physical completion separately | [8](#8-receiver-requirements), [10](#10-sizing-and-expected-duration) |
+| Each code symbol has 256 possible values. A per-tone placement uses physical positions from the configured grid. When fewer than 256 are available, verify the distinctions preserved by the complete codeword | 5, 6 |
+| Low-precision operands are the design target after conditioning. Size accumulators for each admitted block | 8 |
+| The proposed spread bank extends to 500 Hz where the usable capture band supports it. The EME study assumes predicted Doppler | 3, 8, 12.1 |
+| "Dwell" is replaced by tone, hop and held tone | 2 |
+| Each tone gets a scheduled quarter-turn phase, which can equal the preceding phase | 1, 4.4 |
+| Tones shorter than one cell and three phases per cell are not offered | 4.2, 4.4 |
+| The format uses constant amplitude on flat cells and tone labels carry the payload | 1, 4.2 |
+| Meteor burst is outside this draft; if pursued it is an FSK path class on overdense trails, not a PSK mode | 12.3 |
+| Below 9 kHz: FHSS off, lattice scale `j` = 3 (1.28 s cell, 0.78125 Hz), sixteen positions in 12.5 Hz, tones of 8 cells (10.24 s), with `j` = 2 and 4 and tones of 1 and 32 cells as alternatives | 3, 4.1, 4.2, 12.2 |
+| Below 9 kHz the keyed phase is reached by an 80 ms ramp, not a step; the receiver's reference follows it | 4.4, 12.2 |
+| Below 9 kHz the window ladder runs from two tones to the block, with the tone and the cells inside it below; references are taken as GPS-locked at both ends | 8, 12.2 |
+| Below 9 kHz, prioritize complete receiver service and include the cost of the keyed phase. The reference profile has one phase assignment per tone | 1, 4.4, 12.2, 13 |
+| Frequency and drift hypotheses are a transform across a message's tone sums, routed between CPU FFT, GPU FFT and a Tensor Core matrix product; a decode per hypothesis is kept for a few hypotheses only | 8, 12.2, 13 |
+| Compare qualified routes on whole-job time, reuse shared work within memory limits, and measure simulation speed on both reference machine classes | 1, 8, 13.1, 13.5 |
+| Apply one scheduling policy to HF and sub-9 kHz and measure the bottleneck separately on each device | 1, 8, 13.1 |
+
+**Open questions, qualification and alternatives**
 
 1. **Choosing between the HF profiles.** Size the one-cell and held-tone candidates against
    the credible diffuse path, signal level, uncertainty and deadline. Section 4.2 predicts

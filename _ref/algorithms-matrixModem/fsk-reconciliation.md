@@ -31,9 +31,10 @@ specification.
   carries the configuration, frozen decisions, controls, positive and negative
   outcomes, uncertainty, source identity and reproduction commands. Link the
   interpretation to that record; a favorable count alone is not the finding.
-- **Current design consequences.** Reconcile the result with the native implementation
-  and its topic guide. Update the specification when the waveform, receiver requirement,
-  selected algorithm or implementation status changes. Keep unresolved alternatives
+- **Current design consequences.** Reconcile the result with the native implementation,
+  this review and its topic guide. Update the specification when the waveform, receiver
+  requirement, selected algorithm or implementation status changes, linking the changed
+  requirement to its supporting explanation. Keep unresolved alternatives
   and their evidence in the research note. Update the existing indexes when a new topic needs a
   discovery path. New research documents belong under
   `_ref/algorithms-matrixModem/`; `docs/` continues to distinguish experimental

@@ -16,7 +16,8 @@ unknown-epoch or ordinal acquisition, field sensitivity and sustained service re
   Position `n` has centre
   `f₀ + n/T` for `0 ≤ n < N`, `N ≥ 2`. Hold the position for `C ≥ 1` whole cells.
 - Schedule a fresh phase of 0°, 90°, 180° or 270° per tone, keyed independently of position
-  and payload. Successive phases may coincide.
+  and payload. Successive phases may coincide. Below 9 kHz, additional concealment
+  must add no receiver processing cost.
 
 | Setting | HF | Below 9 kHz |
 | --- | --- | --- |
@@ -73,7 +74,8 @@ unknown-epoch or ordinal acquisition, field sensitivity and sustained service re
   Search the configured sideband, timing, offset, drift and spread directly from data,
   without waiting for pilot lock or a visible trace.
   Helper Carrier may only narrow the search independently. Reversed-spectrum, spacing-error
-  and damaged-tone searches are opt-in, with no ordinary work or workspace cost when off.
+  and damaged-tone searches require explicit selection. When disabled, they must preserve
+  ordinary sensitivity, false-word performance, workspace and maximum sustained throughput.
 - **Projections.** Match rectangular apertures at the required physical frequencies,
   including intermediate bins for held tones. Follow the phase ramp. Use a coarse timing
   step of one eighth of the phase interval, or finer where coherent timing requires
@@ -121,8 +123,12 @@ unknown-epoch or ordinal acquisition, field sensitivity and sustained service re
   direct scoring on small banks with dechirping and a transform across tone sums on broad
   banks. Time qualified CPU FFT, GPU FFT and matrix-product DFT routes at actual batch sizes.
 - Select routes by complete single-stream service through ordered decisions and closure,
-  including unsuccessful search, transfers, backlog and peak workspace. Preserve every
-  configured hypothesis. If full-fidelity service falls behind, report overload. Identify
+  including unsuccessful search, transfers, recurring calibration and peak workspace.
+  Measure sustained backlog over a stated interval. Use the same scheduling policy for
+  HF and sub-9 kHz and record each run's timings, assignment and limiting stage per device.
+  Qualify decisions, sensitivity and arithmetic before timing comparisons, and test an
+  independent challenging workload before extrapolating. Preserve every configured
+  hypothesis. If full-fidelity service falls behind, report overload. Identify
   any reduced-work route and use it only with recalibrated decisions and demonstrated
   sensitivity and deadline margin over its operating range.
 - Target four-bit input, evidence and stored complex-bin components after conditioning.

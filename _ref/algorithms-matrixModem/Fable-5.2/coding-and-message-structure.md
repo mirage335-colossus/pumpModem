@@ -185,7 +185,10 @@ bit:
 By the Gaussian deflection of the sizing rule the 10-bit ratio is 1.20 to 1.30 and the 24-bit
 ratio 1.50 to 1.73. On message error alone the exact ratios of this note stand: 2.48, 2.01 and
 1.77 at 10⁻², 10⁻³ and 10⁻⁴, so "less than twice" then needs an error rate stricter than about
-10⁻³. The [later sizing comparison](../fsk-design-study.md#10-sizing-and-expected-duration)
+10⁻³. The original brief left the ten-bit/one-bit expectation unquantified.
+Section 1 of the November FSK draft supplied a presence-based comparison, retained
+in the [design record](../fsk-design-study.md#1-scope-and-fixed-decisions).
+The [later sizing comparison](../fsk-design-study.md#10-sizing-and-expected-duration)
 uses separate admission budgets for the two receiver branches.
 
 **Is the short-block code well chosen.** For 10 to 24 bits, yes on the evidence of this note:
