@@ -1,6 +1,6 @@
 # Matrix Modem FSK research pass (Fable-5.2)
 
-26–27 November 2026 · Research, calculations, one GPU run and four literature reviews
+26–28 November 2026 · Research, calculations, two GPU runs and four literature reviews
 
 This pass supports the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md). It
 builds on the [Sol-6.2](../Sol-6.2/README.md) and [Opus-5.5](../Opus-5.5/README.md) passes and
@@ -17,6 +17,7 @@ exists yet.
 | [Coding and message structure](coding-and-message-structure.md) | Is the 10-bit minimum sound, and which code for short and long blocks? | Exact finite-length energy tables ([`short-message-energy/`](../../../_appraisal/algorithms-matrixModem/short-message-energy/README.md)) and the coding review |
 | [Computation and simulation speed](computation-and-simulation-speed.md) | Can a DFT beat an FFT, where do Tensor Cores help, how fast is simulation? | One run on a full RTX PRO 6000 Blackwell ([`fsk-lattice/results/gpu/`](../../../_appraisal/algorithms-matrixModem/fsk-lattice/README.md#gpu-run)) and the DFT/FFT review |
 | [Meteor burst](meteor-burst.md) | Is meteor burst a usable path at 2–100 mW, and which modulation suits it? | ITU-R P.843 and P.372 formulas, one measured 500 W link, a delegated literature search with verified DOIs, and a link calculation |
+| [Sub-9 kHz FSK rate and spacing](sub9khz-fsk-rate-and-spacing.md) | Which tone rate and spacing for a coherent sub-9 kHz link through a 61 m antenna at 10 kW, and what does the rate do to the computational ceiling? | Antenna calculation, a block Monte Carlo with phase and frequency wander, CPU and GPU decode timings ([`sub9-fsk-rate/`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/README.md)), and four delegated literature searches |
 
 Literature reviews written by delegated agents, kept in full with their own source lists,
 verification marks and not-accessed lists:
@@ -241,6 +242,53 @@ verification marks and not-accessed lists:
     troposcatter method is validated at 50 MHz. My hand estimates were too low for the unaided
     meteor link and about right for troposcatter.
 
+31. **Below 9 kHz the appropriate spacing is 0.78125 Hz with sixteen positions in 12.5 Hz, and
+    the appropriate tone is held for about 10 s** (28 November, for a 61 m antenna fed with
+    10 kW). The span fits an antenna of 64 Hz or more for 0.1 dB and a 24 Hz one for 0.7 dB, and
+    sits between the wandering 50 Hz and 60 Hz mains harmonics. A 10.24 s tone equals the best
+    coherent window under the worst sub-9 kHz spread bound. See
+    [the sub-9 kHz note](sub9khz-fsk-rate-and-spacing.md).
+32. **At 10 kW a 61 m antenna is voltage-limited, and the power buys bandwidth.** The bandwidth
+    that uses the power is `P / (2π·C·V²)`: 64 to 176 Hz at 100 kV, more at lower voltage. It is
+    the quotient of two classical handbook formulas. Radiated power is fixed by the voltage, 5.5
+    to about 325 mW at 8.27 kHz. The antenna limits the span, not the tone rate. The lower Q
+    also divides the phase wander from wind and sag.
+33. **Sensitivity does not depend on the tone rate when the receiver uses the right coherent
+    window; the floor and the work do.** The formats with eight or more positions, with tones
+    from 0.16 s to 41 s, needed the same block energy within the simulation's scatter on every
+    channel up to the worst spread bound. Per-tone reception alone needs 27.4, 24.5, 21.7 and
+    19.2 dB for 0.64, 2.56, 10.24 and 41 s tones against 12.9 dB coherent. The best window ran
+    from 10 s (±50 mHz of wander, +9.6 dB) to the whole block.
+34. **The specification's default ladder depth leaves a gap for short tones.** With windows of
+    1/64 of an 87-minute block and per-tone reception only, tones of 0.16 to 1.28 s lost 3.6 to
+    4.0 dB under the worst spread bound. A ladder from two tones up closes it at one lookup per
+    message and tone.
+35. **The computational ceiling follows the tone rate.**
+    Measured: a 24-bit decode on the full ladder takes 166 s with 32,768 tones and 2.5 s with
+    512 on the 12-thread laptop CPU, 4.4 s and 0.07 s on an RTX PRO 6000 Blackwell. The 64-window
+    ladder runs 36.9 times a second on that GPU as a direct kernel (65 was the estimate) and 5.9
+    as an FP16 matrix product. With logged GPS references every device keeps up at any rate; for
+    a ±1 ppm reference with ±0.1 s of timing and 24 bits the laptop is 430 times too slow at
+    0.16 s tones and seven times too slow at 10.24 s, and the GPU keeps up from 2.56 s tones.
+    Coherent sums across positions need the timing to 1/(8 × span), 10 ms at 12.5 Hz, which the
+    earlier search count had left out.
+36. **A keyed phase jump into a high-Q antenna is the transient VLF practice forbids.**
+    MIL-STD-188-140A excludes PSK at VLF for it. At 10 kW and 86 Hz a quarter or half turn
+    exchanges two or four times the 18.5 J stored. A slew of 50 to 100 ms is proposed; it is
+    affordable only with tones of seconds.
+37. **Spacing at the reciprocal of a long tone has no fallback.** Sixteen positions 0.098 Hz
+    apart decode as well as the others up to the worst spread bound, and not at all at ten
+    times it, where 0.78 Hz spacing loses 5 dB and decodes.
+
+38. **The quiet sub-9 kHz path is a steady carrier with 5 to 20° of slow phase wander, and the
+    Sub9 presets overstate its spread by 50 times and more.** Direct amateur measurements at
+    8.8 kHz over 6,194 km show about 15° rms through a night, nightly mean phases repeat within
+    1.5 to 7°, and one constant phase has served decodes of 9.7 and 12.2 h. The largest rates
+    are brief: 0.03 to 0.3 mHz at the terminator, 0.35 to 2.3 mHz in flares and one great storm
+    (scaled from 13 to 40 kHz). Night echoes of 0.2 to 1.9 ms on short and medium paths are a
+    further reason for a span near 12.5 Hz. No phase spectrum for seconds to minutes exists at
+    any VLF frequency in the sources found.
+
 ## State of the specification
 
 The specification was rewritten as one consistent document on 27 November 2026, after the
@@ -298,6 +346,14 @@ separately for underdense trails, overdense trails and HF, noted in section 3 th
 is the one path that would want a shorter cell, and split the meteor-burst weakness into its
 four parts.
 
+On 28 November the sub-9 kHz rate and spacing work was added (findings 31 to 38). Section 12.2
+was rewritten around a recommended configuration, the antenna at 10 kW, the Monte Carlo and the
+measured decode rates. Sections 3, 4.2, 8 (item 8), 9, 13, 14 (open decisions 9, 12 and 18 to 20)
+and 15 were brought into line. Three statements left the specification and remain in the lattice
+design note and calculation 18: the antenna roll-off with 4 to 16 positions on the default
+lattice, the comparison of the search volume with 8,400 and 65 decodes a second, and the 422,000
+hypotheses of a 5.8 h window with unseen slewing.
+
 ## Corrections to earlier Matrix Modem documents
 
 Found by the reviews of this pass. The first four are annotated where they occur.
@@ -312,7 +368,8 @@ Found by the reviews of this pass. The first four are annotated where they occur
 | [Opus-5.5 decoding review](../Opus-5.5/reviews/review-gemm-decoding.md) | WSPR at −28 dB | The WSJT-X threshold is −31 dB; in data energy WSPR's K = 32 code equals FST4W's LDPC code |
 | Sol-6.2 practice review, STANAG 4415 | −7 dB, 40 Hz, approaching 12 ms | The documented test points are 10 ms and 0.5–50 Hz at −1 to 0 dB; no source contains 16 ms |
 | Earlier guidance on impulsive noise | "Clip or blank before the transform" | Insufficient for OTHR: 7–35% duty with long filter tails; a 3σ clipper loses 8 dB at 28% duty ([OTHR review](reviews/review-othr-interference.md)) |
-
+| [Lattice design note](fsk-lattice-design.md), "Without FHSS" | "The lattice scale is worth at most 1.6 dB, and only for an antenna narrower than about 50 Hz" | Holds for antenna loss alone at 4 to 16 positions. The scale is also what lets sixteen positions fit the mains slot and a 10 s tone keep a wide spacing ([sub-9 kHz note](sub9khz-fsk-rate-and-spacing.md)) |
+| Specification section 13 and finding 10 above | "About 65" coherent-ladder decodes a second, by extrapolation from 8,400 | Measured 36.9 for 64 windows and the specification's block shape; the per-tone decode measures 5,900, the 8,400 was for 24 symbols of 64 tones |
 ## Open questions carried forward
 
 1. An end-to-end block-error simulation of the proposed code, placement, 4-bit evidence, presence
@@ -330,18 +387,27 @@ Found by the reviews of this pass. The first four are annotated where they occur
 7. Coherent attempts without FHSS: the window ladder under real phase wander and at the day–night
    transitions, a drift search for undisciplined references, conditioning against sferics and
    mains harmonics, per-dwell reception with few positions, and the attempts running in a
-   receiver.
+   receiver. (The ladder is now simulated under constructed wander, and per-tone reception with
+   2 to 16 positions; measured wander, the drift search and the conditioning remain.)
 8. Observer detection on fading paths, from the periodic dwell envelope and by a noise-uncertain
    energy detector; which observer the LPI goal is set against.
 9. The phase key: the observer's best statistic and the cell-rate feature, phase steps through
    transmitter filters and narrow antennas, the timing loss at sample level, and its bearing on
    emission classification.
 
+10. Below 9 kHz: the top-voltage limit of a real 61 m installation; a transmitter's tolerance
+    of the keyed phase and the slew that avoids the transient; mains-harmonic amplitudes near
+    8 kHz at a receiving site; a measured phase spectrum of a sub-9 kHz carrier; the transform
+    across tone sums and tiered screening as ways to cut the frequency search; a tuned GPU
+    kernel for the full ladder.
+
 ## Cost and provenance of the GPU run
 
 Three on-demand RTX PRO 6000 Blackwell pods, 0.135 h, 0.061 h and 0.090 h, about 0.77 USD
 together, all verified removed, no persistent volume. The calculations of 27 November used no
-remote compute. The text of 47 CFR 15.247 was read once through a delegated web fetch (Cornell LII
+remote compute. The sub-9 kHz decode timings of 28 November (UTC) used two more pods of the same
+type for 0.076 h and 0.095 h, about 0.46 USD together, both verified removed. The second reran
+the timings after an independent check found that the first CPU benchmark had left threads idle. The text of 47 CFR 15.247 was read once through a delegated web fetch (Cornell LII
 and the GovInfo 2023 annual edition). Device, software, hashes and method are in the
 [computation note](computation-and-simulation-speed.md#the-run). All other calculations ran on the
 local 12-thread Ryzen 5 PRO 5650U.

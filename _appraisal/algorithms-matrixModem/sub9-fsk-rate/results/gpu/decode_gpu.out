@@ -1,0 +1,20 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+
+energy (per-tone) decode, 32 symbols of 256 values, 16 hypotheses per call
+verify energy: planted message found in 16 of 16 hypotheses
+energy                     2.7125 ms/call        5898.6 decodes/s  3.17e+12 lookups/s
+
+full ladder over tones (one lookup per message and tone)
+ladder    128 tones         18.17 ms/decode       55.031 decodes/s  1.18e+11 message-tones/s  rungs 7  planted on the whole-block rung: yes
+ladder    512 tones         70.39 ms/decode       14.207 decodes/s  1.22e+11 message-tones/s  rungs 9  planted on the whole-block rung: yes
+ladder   2048 tones        285.28 ms/decode        3.505 decodes/s  1.2e+11 message-tones/s  rungs 11  planted on the whole-block rung: yes
+ladder   8192 tones       1105.76 ms/decode        0.904 decodes/s  1.24e+11 message-tones/s  rungs 13  planted on the whole-block rung: yes
+ladder  32768 tones       4376.17 ms/decode        0.229 decodes/s  1.26e+11 message-tones/s  rungs 15  planted on the whole-block rung: yes
+
+table ladder with W windows (32 W lookups per message), CUDA cores against one FP16 matrix product
+table  W =  16 (direct)       7.22 ms/decode      138.554 decodes/s  1.19e+12 lookups/s  rungs 5  planted: yes
+gemm   W =  16 (FP16)        30.59 ms/decode       32.693 decodes/s  build 2.14 ms, product 22.49 ms (391.0 nominal TFLOP/s), rungs and maxima 6.73 ms  planted: yes
+table  W =  64 (direct)      27.10 ms/decode       36.898 decodes/s  1.27e+12 lookups/s  rungs 7  planted: yes
+gemm   W =  64 (FP16)       169.01 ms/decode        5.917 decodes/s  build 8.55 ms, product 90.26 ms (389.8 nominal TFLOP/s), rungs and maxima 74.65 ms  planted: yes
+table  W = 128 (direct)      53.63 ms/decode       18.646 decodes/s  1.28e+12 lookups/s  rungs 8  planted: yes
+gemm   W = 128 (FP16)       418.22 ms/decode        2.391 decodes/s  build 17.08 ms, product 181.08 ms (388.6 nominal TFLOP/s), rungs and maxima 226.78 ms  planted: yes

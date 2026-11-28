@@ -412,6 +412,13 @@ So the lattice scale is worth at most 1.6 dB, and only for an antenna narrower t
 The outer-position phase is static. A transmitter that locks the antenna current's phase removes
 it; otherwise the per-position form above or a fixed correction covers it.
 
+(28 November 2026: that judgement weighed antenna loss alone, on four loss cases without a
+voltage limit. The [sub-9 kHz rate and spacing note](sub9khz-fsk-rate-and-spacing.md) redoes the
+antenna with 10 kW and a voltage limit, adds the mains-harmonic slot, the keyed phase through the
+antenna, the per-tone floor and the measured decode work, and recommends scale `j` = 3 with
+sixteen positions in 12.5 Hz and 10.24 s tones below 9 kHz. The table above stands as a
+calculation.)
+
 **Block duration** [estimate, section 10e]. Presence test at a false-presence rate of 10⁻⁶ over
 4,000 hypotheses and a miss rate of 10⁻³, exact chi-square tails, 16 positions, phase-stable path,
 one 10-bit block (24 bits take about 25% longer):

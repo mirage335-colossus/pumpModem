@@ -1,6 +1,7 @@
 # Matrix Modem FSK: specification draft
 
-Draft of 26 November 2026, last reconciled 27 November (fourth pass), for review. It extends the
+Draft of 26 November 2026, last reconciled 27 November (fourth pass), with the sub-9 kHz rate and
+spacing work of 28 November added, for review. It extends the
 [Matrix Modem brief](matrixModem.md) with a concrete keyed MFSK waveform, optionally frequency
 hopped, and the receiver behaviour it requires. No implementation exists. Every number is a
 calculation, a model simulation or a stage measurement on one GPU. The supporting research is
@@ -79,8 +80,10 @@ indexed in
 - These rules give exact orthogonality over a cell, one transform plan, and bin statistics that a
   simulator may draw without forming samples.
 - **Lattice scale.** The cell may be set to 160 ms × 2^j with positions 6.25 Hz / 2^j apart.
-  `j` = 0 is the default and serves every supported path. A larger `j` only refits the tones to
-  a transmit antenna narrower than about 50 Hz, where it recovers up to 1.6 dB. Shorter cells
+  `j` = 0 is the default and serves every supported path. A larger `j` puts more positions into
+  a band that the transmit antenna or the receiver's interference keeps narrow. Below 9 kHz the
+  recommended scale is `j` = 3: a 1.28 s cell and positions 0.78125 Hz apart, sixteen of them in
+  12.5 Hz ([12.2](#122-phase-stable-paths-below-9-khz)). Shorter cells
   are not offered: a 40 ms cell is never better than 160 ms for weak signals on a continuous
   path, at any spread up to 100 Hz ([4.2](#42-tone-length) gives the cost of faster tone
   rates). Meteor burst, which this draft does not support, is the one path that would want a
@@ -108,11 +111,13 @@ one tone per cell, with one keyed phase per tone. Two cases depart from it:
 - **Paths where specular reception can be expected.** The receiver's wide-band coherent attempt
   then carries the load, with its 57 µs timing and a delay-rate search
   ([section 8](#8-receiver-requirements), item 8).
-- **Hardware limited to an extremely narrow band**, in practice below 9 kHz. Tones are long
-  because the antenna passes little bandwidth, and the load is the search in millihertz bins
-  through oscillator, clock and path drift. It exceeds the computational ceiling for
-  free-running references and long windows, at any tone or phase rate
-  ([12.2](#122-phase-stable-paths-below-9-khz)).
+- **Hardware limited to an extremely narrow band**, in practice below 9 kHz. Tones are held
+  for about 10 s. A 61 m antenna fed with 10 kW would pass a faster rate; the reasons are the
+  receiver's: the tone is the one coherent window that costs no search and no coherence between
+  tones, and the work of the coherent attempts follows the tone rate, as does the timing search
+  of per-tone reception. The search in millihertz bins through oscillator, clock and path drift still exceeds
+  the computational ceiling for free-running references and long windows, at any tone or phase
+  rate ([12.2](#122-phase-stable-paths-below-9-khz)).
 
 The preference costs sensitivity on slow paths, which is open decision 1 of
 [section 14](#14-decisions).
@@ -395,7 +400,11 @@ each sent on `L` tones: 32·`L` tones per block.
    - **Window ladder.** The whole span, its halves, quarters and so on down to a configured
      shortest window (default 1/64 of the block). A message's score at one rung is the sum over
      that rung's windows of |sum over symbols of the table entries|². Only the shortest windows
-     are looked up; longer ones are sums of neighbours.
+     are looked up; longer ones are sums of neighbours. With held tones and no FHSS the ladder
+     should start at two tones, at one lookup per message and tone, and the cells inside a tone
+     are further rungs below it: under the worst sub-9 kHz spread bound the best window was
+     about 10 s, and a ladder stopping at 1/64 of an 87-minute block lost 3.6 to 4.0 dB with
+     tones of 0.16 to 1.28 s ([12.2](#122-phase-stable-paths-below-9-khz)).
    - **Frequency.** A transform across a message's window sums gives the frequency-offset
      hypotheses. With FHSS each hop's frequency error is common to its tones and is searched
      inside that hop.
@@ -461,7 +470,9 @@ Properties that tests must show:
 - **Below 9 kHz** the interference is sferics and mains harmonics, not radar. The conditioning of
   section 8 is of the same kind as established practice there (wideband blanking or clipping worth
   about 20 dB at 8 kHz, hum removal) but has not been run on that noise. Harmonics near 8 kHz
-  wander by 2.5–10 Hz rms; four positions fit between two 50 Hz harmonics on the steadier grids.
+  wander by 2.5–10 Hz rms; on the steadier grids about 13 Hz stays clear of the 50 Hz and 60 Hz
+  families together, which holds sixteen positions 0.78125 Hz apart
+  ([12.2](#122-phase-stable-paths-below-9-khz)).
 - **Block span.** At least ten times the longest burst to be bridged, and at least 1.3 to 1.8
   times the longest outage to be survived. Outages of hours need repeated blocks, which is a
   layer above this format.
@@ -616,12 +627,83 @@ transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s 
 
 ### 12.2 Phase-stable paths below 9 kHz
 
-- **Phase-stable paths use the default lattice with FHSS off**, few positions, and the receiver's
-  coherent windows. In the records gathered by the
+Sources, calculations and limits are in the
+[sub-9 kHz rate and spacing note](../_ref/algorithms-matrixModem/Fable-5.2/sub9khz-fsk-rate-and-spacing.md).
+The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
+
+- **Phase-stable paths use FHSS off, a narrow band, held tones and the receiver's coherent
+  windows.** In the records gathered by the
   [earlier research](../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/10-sub9khz-propagation.md),
   a path below 9 kHz held phase within about ±10° for hours around midday, wandered by tens of
   degrees at night and stepped by about 40° at sunrise. Coherent amateur links there run at −15 to
-  −37 dB-Hz with references locked to GPS at both ends.
+  −37 dB-Hz with references locked to GPS at both ends. A later search sharpened this: within
+  one day or night state the rms phase is about 5 to 10° by day and 15 to 20° at night on 5 to
+  10 Mm at 8 to 10 kHz, one constant phase has served decodes of 9.7 and 12.2 hours, and the
+  largest phase rates are brief and deterministic (0.03 to 0.3 mHz at the terminator, 0.35 to
+  2.3 mHz in flares and one great storm, scaled from higher frequencies). The Sub9 presets of
+  1, 5 and 50 mHz are stress values 50 times and more above the quiet path.
+- **Recommended configuration** (open decision 18 of [section 14](#14-decisions)):
+
+  | Setting | Recommended | Alternatives |
+  | --- | --- | --- |
+  | Lattice scale | `j` = 3: 1.28 s cell, positions 0.78125 Hz apart | `j` = 2 (1.5625 Hz) where one mains family matters and the antenna is 86 Hz or wider; `j` = 4 (0.39 Hz) for an antenna of 20 Hz or less |
+  | Positions and span | 16 positions in 12.5 Hz | 16 in 25 Hz (`j` = 2); 16 in 6.25 Hz (`j` = 4) |
+  | Tone length | 8 cells = 10.24 s (0.098 tones per second) | 1 cell (1.28 s) as the fastest; 32 cells (41 s) for blocks longer than about 3 h |
+  | Phase key | One per tone, slewed over 50–100 ms | – |
+  | Receiver | Cells inside a tone, per-tone reception, and windows from two tones to the block | – |
+  | References | GPS-locked at both ends, corrections logged or the audio re-timed from the PPS | – |
+
+- **At 10 kW the antenna is voltage-limited, and the power buys bandwidth.** The top voltage `V`
+  fixes the current and the radiated power: 5.5 mW (thin-wire T at 29 kV) to about 0.3 W (a
+  2.5 nF tower at 100 kV) at 8.27 kHz. The −3 dB bandwidth that uses all 10 kW is
+  `P / (2π·C·V²)`: 64 to 176 Hz at 100 kV for 2.5 to 0.9 nF, 189 to 525 Hz at 58 kV, and 16 to
+  44 Hz only at 200 kV. A lower-loss antenna cannot take the power: under the earlier antenna
+  note's loss cases a 61 m antenna passes 18.5 to 620 Hz at 8.27 kHz (6 Hz at 2.97 kHz), and its
+  low-loss cases would stand at 111 to 309 kV with 10 kW. Theoretical; the voltage limit of a real 61 m installation is the
+  largest unknown.
+- **The antenna limits the span, not the tone rate.** Coherent loss with one phase for all
+  positions, antenna unknown to the receiver:
+
+  | Format | Antenna 86 Hz | 57 Hz | 24 Hz |
+  | --- | ---: | ---: | ---: |
+  | Default lattice, 0.16 s tone, 8 positions in 50 Hz | 1.0 dB | 1.9 dB | 5.6 dB |
+  | Default lattice, 0.16 s tone, 4 positions in 25 Hz (plus 0.8 dB for four positions) | 0.4 dB | 0.8 dB | 2.6 dB |
+  | `j` = 2, 16 positions in 25 Hz | 0.3 dB | 0.6 dB | 2.4 dB |
+  | `j` = 3, 16 positions in 12.5 Hz, 10.24 s tone | 0.1 dB | 0.1 dB | 0.7 dB |
+  | `j` = 4, 16 positions in 6.25 Hz | 0.0 dB | 0.1 dB | 0.2 dB |
+
+  Slow detuning (wind, sag, temperature) turns all positions by nearly the same phase,
+  `atan(2d/B)` for a resonance shift `d`: 5° and 21° at 86 Hz for capacitance changes of 10⁻³
+  and 4×10⁻³, 19° and 54° at 24 Hz. The receiver sees it as path wander.
+- **A keyed phase jump is a transient the transmitter may not tolerate.** VLF practice keys
+  phase-continuously for that reason. At 10 kW and 86 Hz the antenna stores 18.5 J, and a step
+  of 90° or 180° exchanges two or four times that within about 11 ms. Slewing the keyed phase
+  over 50 to 100 ms costs 0.02 to 0.04 dB of a 10.24 s tone and most of a 0.16 s tone. Derived;
+  no transmitter was examined (open decision 19).
+- **Mains harmonics leave about 13 Hz.** Near 8.27 kHz the 50 Hz harmonics (8,250 and 8,300 Hz)
+  and the 60 Hz harmonics (8,220, 8,280, 8,340 Hz) wander by about 3 Hz rms on the steadier
+  grids. Three standard deviations from both leaves 8,259 to 8,272.5 Hz. From grid-frequency
+  statistics; no line amplitude near 8 kHz was measured.
+- **The tone length does not change the sensitivity; it sets the floor and the work.** Block
+  `E/N₀` at 1% wrong decodes for the 10-bit block over 87 minutes, the same within the
+  simulation's scatter in every format with eight or more positions and tones from 0.16 s to
+  41 s (simulated, known timing and frequency):
+
+  | Path | Block `E/N₀` | Best coherent window |
+  | --- | ---: | --- |
+  | Steady | 12.9 dB | whole block |
+  | Phase wander 30° rms, 1 h correlation | 13.4 dB | whole block |
+  | Frequency wander within ±1 mHz (Sub9 best) | 16.2 dB | 5.5 min |
+  | Within ±5 mHz (Sub9 moderate) | 18.4 dB | 82 s |
+  | Within ±50 mHz (Sub9 worst) | 22.5 dB | 10 s |
+
+  Per-tone reception alone needs 27.4, 24.5, 21.7 and 19.2 dB on the steady path with tones of
+  0.64, 2.56, 10.24 and 41 s. A 10.24 s tone is the best window under the worst bound, so that
+  case needs no coherence between tones.
+- **Spacing equal to the reciprocal of a long tone is not offered.** Positions 0.098 Hz apart
+  for 10.24 s tones decode as well up to the worst spread bound but have no shorter window: at
+  0.5 Hz of spread they did not decode at any energy, where 0.78125 Hz spacing decoded at
+  27.4 dB. They also tolerate only ±6 ppm of frequency error.
 - **Below 9 kHz the search volume, not the sample rate, is the computational load.** Each
   frequency bin, drift-rate bin and timing offset is a block decode. Bins are half of 1 ÷ window
   apart (0.9 dB worst loss) and drift-rate hypotheses 3.9 bins of drift apart. Frequency ×
@@ -639,24 +721,39 @@ transmit time against the bound at −10 dB-Hz, held tone of 2 cells in a 0.4 s 
 
   - The volume grows with the cube of the window: frequency bins with the window, drift-rate
     bins with its square.
-  - Timing multiplies it by the timing uncertainty over an eighth of the phase interval: 100
-    offsets for ±1 s with a phase per 160 ms cell, 2 with a 10 s phase interval.
-  - Against the measured 8,400 decodes a second, with ±1 s of timing and a phase per cell: the
-    crystal passes at 1 h and fails at 5.8 h; the sound-card clock fails from 1 h; ±5 Hz fails
-    from 22 min. With a 10 s phase interval only the 5.8 h window fails, for the last two.
-  - Against the 65 a second estimated for the coherent ladder, the crystal already fails at
-    1 min with a phase per cell.
-  - A disciplined reference with logged corrections needs one hypothesis throughout. The same
-    reference with unseen slewing needs 422,000 per 5.8 h window.
+  - Timing multiplies it. Per-tone reception needs offsets an eighth of the phase interval
+    apart. Coherent sums over tones on different positions need 1/(8 × span), which is 10 ms
+    for a 12.5 Hz span and governs below 9 kHz: 20 offsets for ±0.1 s and 200 for ±1 s,
+    whatever the tone length, and twice as many for 25 Hz.
   - A sample clock not tied to the carrier reference multiplies these by up to 200 at 1 h.
+- **The ceiling follows the tone rate.** A decode on the full ladder costs one lookup per
+  message and tone (measured: 3.3 thousand million message-tones a second on the 12-thread
+  Ryzen 5 PRO 5650U, 120 on the RTX PRO 6000 Blackwell). The number of 24-bit decodes that fit
+  into a block's own duration is therefore the same for any block length:
+
+  | Device | 0.16 s tone | 0.64 s | 2.56 s | 10.24 s | 41 s |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Ryzen 5 PRO 5650U, 12 threads | 32 | 129 | 513 | 2,067 | 8,044 |
+  | RTX PRO 6000 Blackwell | 1,198 | 4,741 | 18,378 | 74,483 | 288,546 |
+
+  On the laptop a 16-bit block fits 8,180 to 2.1 million and a 10-bit block 459,000 to
+  130 million (measured; the GPU was timed for 24 bits only). Against the
+  hypotheses an 87-minute whole-block window needs at 8.27 kHz in a 12.5 Hz span (1 with logged
+  GPS references; 5,742 with unseen slewing; 13,920 for a TCXO with ±0.1 s of timing;
+  23 million for a crystal and 570 million for a sound-card clock with ±1 s):
+  - With logged GPS references every device keeps up at every tone length.
+  - For a TCXO and 24 bits the laptop is 430 times too slow at 0.16 s tones and seven times
+    too slow at 10.24 s; the GPU keeps up from 2.56 s tones.
+  - For 10 bits the laptop keeps up with a TCXO at every tone length and with a crystal from
+    10.24 s tones.
+  - A 24-bit block with a free-running crystal or sound card is out of reach on both devices at
+    any tone length, and a 5.8 h window needs 53 to 64 times more.
 - **Clock corrections must not add unknown drift or steps.** A GPS correction slewed at 1 ppm
   moves a 9 kHz carrier by 9 mHz, about 32 one-hour bins, and a correction stepped by 10 µs is a
   32° phase jump at 9 kHz. Proposed rule: no clock or phase steps inside a block at either end;
   corrections are slewed smoothly within a stated bound, or measured, logged and removed in the
-  receiver's processing as a known trajectory. The bound is open.
-- **The antenna sets the number of positions.** Practical sub-9 kHz antennas pass 6–620 Hz. Antenna
-  roll-off and few-position loss together cost 0.1 dB with 16 positions in 458 Hz, 0.4 dB with 8
-  in 174 Hz, 1.0 dB with 4 in 57 Hz and 2.4 dB with 4 in 18.5 Hz (0.8 dB there with `j` = 2).
+  receiver's processing as a known trajectory. The bound is open. Re-timing the recorded audio
+  from a recorded GPS pulse, as the amateur links below 9 kHz do, leaves under 50 ns.
 
 ### 12.3 Meteor burst and troposcatter at 50 MHz
 
@@ -746,7 +843,15 @@ competes with meteor burst at short range.
     times faster for the 352 positions and ran at 70% Tensor Core activity; at 4,096 per call,
     which fits the GPU's cache, cuFFT is 2.1 times faster (200 million per second).
   - A full 24-bit decode (16.7 million messages) ran 8,400 times a second as a direct kernel,
-    5,000 as an FP16 matrix product and 2,000 as a fast Hadamard transform.
+    5,000 as an FP16 matrix product and 2,000 as a fast Hadamard transform. That test used 24
+    symbols of 64 tones; for the specification's 32 symbols of 256 values the direct kernel ran
+    5,900 times a second (a later run on the same GPU type).
+  - The coherent ladder over 64 windows ran 36.9 times a second as a direct kernel and 5.9
+    times as an FP16 matrix product with 45% Tensor Core activity. A ladder over every window
+    from two tones to the block costs one lookup per message and tone: 0.07 s for a block of
+    512 tones and 4.4 s for 32,768. On the 12-thread Ryzen 5 PRO 5650U the same decodes take
+    2.5 s and 166 s, and the per-tone decode runs 12 times a second
+    ([12.2](#122-phase-stable-paths-below-9-khz)).
   - A sample-level simulation, noise generation included, ran at 7–12 million times real time: a
     day of signal in about 10 ms.
   - With a search running on the same GPU, every GPU transform route fell to the same 7–14
@@ -769,9 +874,10 @@ competes with meteor burst at short range.
   - Below 9 kHz the work is the frequency, drift-rate and timing search of
     [12.2](#122-phase-stable-paths-below-9-khz), not the transform.
   - Coherent attempts add two table columns per window: 128 times the decode work for a ladder
-    down to 1/64 of the block (about 65 full 24-bit decodes a second by extrapolation). Over
-    2.2 kHz the specular search adds about 350 fine timing steps for each coarse one. Neither
-    is measured.
+    down to 1/64 of the block (about 65 full 24-bit decodes a second by extrapolation, 36.9
+    measured for the specification's block shape). A ladder from two tones up follows the tone
+    count instead. Over 2.2 kHz the specular search adds about 350 fine timing steps for each
+    coarse one, which is not measured.
 - **Scheduling rule.** No fixed routing table is specified. The receiver chooses its routes while
   it runs:
   1. Work is cut into portions (batches of tones, batches of hypotheses) whose results do not
@@ -851,11 +957,15 @@ competes with meteor burst at short range.
 8. **Overload limit** of 2 dB on what the scheduler may trade is a placeholder.
 9. **Without FHSS.** The default window ladder (down to 1/64 of the block), whether scoring with
    one phase per position is on by default, and the coherence window a sub-9 kHz block is sized
-   for.
+   for. With tones shorter than about 10 s the 1/64 default leaves a gap below it; a ladder from
+   two tones up closes it at one lookup per message and tone
+   ([12.2](#122-phase-stable-paths-below-9-khz)).
 10. **Long messages.** Which long-block code, and whether to extend the exhaustive search past
     24 bits at double the decode work per added bit.
 11. **The brief's "40x alternative"** is read here as the 40 s hop.
-12. **Measuring the always-on coherent attempts** against the computational ceiling.
+12. **Measuring the always-on coherent attempts** against the computational ceiling. Done for a
+    narrow band without FHSS (sections 12.2 and 13). The wide-band specular search is still
+    unmeasured.
 13. **Search volume below 9 kHz.** State the oscillator and clock quality a configuration
     assumes, and decide what is narrowed by hardware and what by shorter windows (section 12.2
     sizes the volume for assumed classes).
@@ -870,6 +980,18 @@ competes with meteor burst at short range.
 17. **Troposcatter at 50 MHz** (section 12.3) as a path class for up to about 300 km, with a
     held tone for its slow fading. It competes with meteor burst at short range and needs no
     array.
+18. **Sub-9 kHz path class.** Whether to adopt the configuration of section 12.2 (scale `j` = 3,
+    sixteen positions in 12.5 Hz, 10.24 s tones) in place of the default lattice with a few
+    positions. It departs from the preference for the fastest tone rate, adds a second cell
+    length, and makes the shortest block 11 minutes (82 s with one-cell tones at that scale).
+19. **Slewed keyed phase.** Whether the keyed phase of a tone may be reached by a stated slew of
+    50 to 100 ms where the transmit antenna is high-Q, and what the transmitter tolerates.
+    Without it the mandatory keyed phase conflicts with VLF keying practice.
+20. **Value-dependent phase with few positions.** Whether the keyed map may send each value to a
+    position and one of four quarter turns when fewer than sixteen positions fit. It removes
+    the few-position loss of coherent reception and leaves per-tone reception as it is, but it
+    puts information into the phase, which section 1 rules out
+    ([sub-9 kHz note](../_ref/algorithms-matrixModem/Fable-5.2/sub9khz-fsk-rate-and-spacing.md#7-positions-and-a-value-dependent-phase)).
 
 ## 15. Known weaknesses
 
@@ -885,19 +1007,27 @@ competes with meteor burst at short range.
   2.2 kHz needs timing to 57 µs, about 350 times the accumulation and decode work of the per-tone
   search, and raises the presence threshold by about 0.7 dB of block time.
 - **The search below 9 kHz exceeds the computational ceiling for free-running references and
-  long windows** (section 12.2). The reference classes there are assumptions, not measurements,
-  and the count is hypotheses per window against decode rates measured for other block shapes.
+  long windows**, at any tone length (section 12.2). The decode rates are now measured for the
+  specification's block shape with synthetic tables; the reference classes are assumptions, not
+  measurements, and the counting grid is rectangular.
   A specular HF path adds a delay-rate dimension to the 57 µs timing of the wide-band coherent
   attempt as the ionosphere's height changes; that is not sized.
 - **Coherent attempts are calculated, not built.** Their gains rest on large-alphabet
   calculations for two-cell tones, a 10-bit Monte Carlo with ideal frequency and timing, and a
   threshold estimate. Attempts inside a hop with FHSS are derived, not computed. No receiver,
-  drift-rate search or sub-9 kHz noise was run.
+  drift-rate search or sub-9 kHz noise was run. A block Monte Carlo with phase and frequency
+  wander now covers the sub-9 kHz formats (section 12.2), with known timing and frequency,
+  Gaussian noise and constructed wander: no phase spectrum of a carrier below 9 kHz was found.
 - **A block sized for a coherence window depends on that coherence.** If the path or either
   reference is less steady than the window, the block fails; per-tone reception would have
   needed 6 to thousands of times as long. Night-time wander and the sunrise and sunset steps
   below 9 kHz are the known cases. Sizing for 22-minute windows instead of a coherent block
   costs 1.3 to 9 times the block time.
+- **The sub-9 kHz configuration rests on an assumed antenna.** The bandwidth at 10 kW goes with
+  the inverse square of a top-voltage limit that is known only within 30 to 100 kV for a 61 m
+  installation, the mains slot rests on grid statistics without a measured line amplitude near
+  8 kHz, and the keyed phase step into a high-Q antenna is a transient that VLF practice
+  forbids; the slew that would avoid it is a proposal (section 12.2).
 - **Held tones and frequency.** A held tone needs both oscillators steady to a fraction of its
   reciprocal while it lasts (2.5 mHz for 400 s, 0.25 mHz for 4,000 s) and a hop-to-hop frequency
   error no wider than the path's spread. An error of ±1 Hz per hop costs 6 to 11 times the block

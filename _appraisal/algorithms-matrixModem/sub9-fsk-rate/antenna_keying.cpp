@@ -1,0 +1,179 @@
+// Matrix Modem FSK below 9 kHz: what a 61 m (200 ft) top-loaded vertical fed with up to 10 kW does
+// to the tone rate and the total FSK span.
+//
+// Part 1 (closed form). Lumped short-monopole model of the earlier antenna note
+//   ../../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/11-sub9khz-antennas-links-and-practice.md
+// (capacitance C, effective height he, Rr = 160 pi^2 (he/lambda)^2, series loss R). With a top
+// voltage limit V the current is I = V w C whatever the loss, so the radiated power is fixed; a
+// transmitter that may spend P of real power can afford R = P / I^2, and the -3 dB bandwidth of the
+// series circuit is then B* = f R / Xc = P / (2 pi C V^2), independent of frequency. A narrower
+// antenna cannot use the power; a wider one radiates less (P_rad = P f Rr / (Xc B)).
+//
+// Part 2 (exact recursion, Monte Carlo over the key). Keyed MFSK through a single-tuned circuit
+// driven by a constant-amplitude source: every tone starts with a keyed phase of 0/90/180/270
+// degrees on a keyed position; the antenna current is the exact solution of the first-order
+// envelope equation; the receiver takes whole-cell bins on the lattice with a plain tone as its
+// template. Reported: energy captured per tone, coherent sum over tones with one phase for all
+// positions, the same with the static response known, and the energy left in other positions.
+//
+// Part 3. Slow detuning of the resonance: common phase and loss, and what is left across the span.
+//
+// Part 4. Stored energy and what a keyed phase step asks of the transmitter.
+//
+// Theoretical calculation. No antenna was measured; the geometries and loss cases are the assumed
+// ones of the earlier note, plus the 206 ft top-loaded tower of the DECO scaling table appended to
+// NBS Report 9725 (2.5 nF, 40 m effective height; read through a delegated search).
+//
+// Build: g++ -O2 -std=c++20 antenna_keying.cpp -o antenna_keying
+// Run:   ./antenna_keying > results/antenna_keying.md
+#include <cmath>
+#include <complex>
+#include <cstdint>
+#include <cstdio>
+#include <vector>
+
+using cd = std::complex<double>;
+static const double PI = 3.14159265358979323846, C0 = 299792458.0;
+static double db(double x) { return 10 * std::log10(x); }
+
+struct Geo { const char* name; double c_pf, he, v_onset_kv; };
+static const Geo GEOS[] = {
+    {"bare 2 mm wire", 340, 29.8, 27},
+    {"lattice tower, 0.3 m equivalent radius", 814, 28.5, 0},
+    {"T, 122 m top wire of 2 mm", 902, 49.8, 29},
+    {"wire with six 30 m flat radials", 999, 51.2, 0},
+    {"umbrella, 8 x 45 m wires of 4 mm", 1850, 38.4, 58},
+    {"heavily top-loaded 63 m tower (DECO scaling table)", 2500, 40.0, 0},
+};
+struct Loss { const char* name; double qcoil, rground, tand; };
+static const Loss LOSSES[] = {{"S1 engineered", 1000, 5, 0.001}, {"S2 good fixed", 400, 30, 0.003}, {"S3 typical", 250, 150, 0.01}, {"S4 adverse", 150, 400, 0.03}};
+
+struct Rng { uint64_t s; uint64_t next() { s += 0x9E3779B97F4A7C15ull; uint64_t z = s; z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull; z = (z ^ (z >> 27)) * 0x94D049BB133111EBull; return z ^ (z >> 31); } };
+
+struct KeyOut { double e_tone, coh_plain, coh_known, leak, edge_phase_deg, static_power; };
+// tc cell (s), nc cells per tone, P positions spaced 1/tc, antenna -3 dB bandwidth bw (Hz),
+// resonance at the centre of the positions plus detune (Hz), keyed phase on or off
+static KeyOut keyed(double tc, int nc, int P, double bw, double detune, bool phasekey, int ntones = 40000) {
+    double delta = 1 / tc, tau = 1 / (PI * bw), dres = 0.5 * (P - 1) * delta + detune, T = nc * tc;
+    cd s0(-1 / tau, 2 * PI * dres);
+    std::vector<cd> H(P);
+    double sp = 0; for (int p = 0; p < P; ++p) { H[p] = 1.0 / cd(1.0, 2 * PI * (p * delta - dres) * tau); sp += std::norm(H[p]); }
+    Rng r{12345}; cd y = H[0];
+    double e_tone = 0, leak = 0; cd coh = 0, cohk = 0;
+    for (int k = 0; k < ntones; ++k) {
+        int p = (int)(r.next() % (uint64_t)P); double th = phasekey ? 0.5 * PI * (double)(r.next() & 3) : 0;
+        cd ek = std::polar(1.0, th), A = y - H[p] * ek, btone = 0;
+        for (int n = 0; n < nc; ++n) for (int q = 0; q < P; ++q) {
+            cd sq = s0 - cd(0, 2 * PI * q * delta);
+            cd tr = std::conj(ek) * A * (std::exp(sq * ((n + 1) * tc)) - std::exp(sq * (n * tc))) / (sq * tc);
+            cd b = (q == p ? H[p] : cd(0, 0)) + tr;
+            if (q == p) btone += b / (double)nc; else leak += std::norm(b) / nc;
+        }
+        e_tone += std::norm(btone); coh += btone; cohk += btone * std::conj(H[p]);
+        y = H[p] * ek + A * std::exp(s0 * T);
+    }
+    KeyOut o; o.e_tone = e_tone / ntones; o.coh_plain = std::norm(coh / (double)ntones); o.coh_known = std::norm(cohk / (double)ntones) / (sp / P); o.leak = leak / ntones;
+    o.edge_phase_deg = std::arg(H[P - 1] / H[P / 2]) * 180 / PI; o.static_power = sp / P; return o;
+}
+
+int main() {
+    const double Pin = 10000;
+    printf("# Sub-9 kHz FSK rate and spacing: the 61 m antenna at 10 kW\n\n");
+    printf("Generated by `antenna_keying.cpp`. Lumped short-monopole model with the geometries and loss cases of the\n");
+    printf("earlier antenna note. Voltages are rms at the antenna top. Theoretical; no antenna was measured.\n\n");
+
+    printf("## 1. Bandwidth that 10 kW buys at the voltage limit\n\n");
+    printf("At a top voltage V the current is I = V w C and the radiated power (V w C)^2 Rr, whatever the loss. A\n");
+    printf("transmitter with 10 kW to spend can afford a series resistance R = P / I^2, which gives the -3 dB\n");
+    printf("bandwidth B* = P / (2 pi C V^2). It does not depend on frequency. Below B* the 10 kW cannot be used;\n");
+    printf("above it the radiated power falls as 1/B.\n\n");
+    printf("### 1a. B* and the envelope time constant 1/(pi B*)\n\n");
+    printf("| antenna | C (pF) | V = 20 kV | 29 kV | 40 kV | 58 kV | 75 kV | 100 kV | 150 kV | 200 kV |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    const double VS[] = {20, 29, 40, 58, 75, 100, 150, 200};
+    for (const Geo& g : GEOS) { printf("| %s | %.0f |", g.name, g.c_pf); for (double v : VS) { double b = Pin / (2 * PI * g.c_pf * 1e-12 * v * v * 1e6); printf(" %.0f Hz, %.1f ms |", b, 1000 / (PI * b)); } printf("\n"); }
+    printf("\n### 1b. Radiated power at the voltage limit (mW), and the current\n\n");
+    printf("| antenna | f (Hz) | Xc (kOhm) | Rr (mOhm) | 29 kV | 58 kV | 100 kV | 150 kV | amperes at 100 kV |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    const double FS[] = {2970, 5170, 8270};
+    for (const Geo& g : GEOS) for (double f : FS) {
+        double w = 2 * PI * f, c = g.c_pf * 1e-12, xc = 1 / (w * c), lam = C0 / f, rr = 160 * PI * PI * (g.he / lam) * (g.he / lam);
+        printf("| %s | %.0f | %.1f | %.3f |", g.name, f, xc / 1000, rr * 1000);
+        for (double v : {29.0, 58.0, 100.0, 150.0}) { double i = v * 1000 * w * c; printf(" %.3g |", i * i * rr * 1000); }
+        printf(" %.2f |\n", 100e3 * w * c);
+    }
+    printf("\n### 1c. The assumed loss cases against 10 kW (8,270 Hz)\n\n");
+    printf("Natural total resistance R, its bandwidth f R / Xc, the top voltage 10 kW would produce in it, and the\n");
+    printf("input power at which each voltage limit is reached. Where 10 kW would exceed the limit, the antenna is\n");
+    printf("voltage-limited and the unused power can be spent in added resistance up to B* of table 1a.\n\n");
+    printf("| antenna | loss case | R (Ohm) | natural bandwidth (Hz) | top voltage at 10 kW (kV) | power at 29 kV (W) | at 58 kV (W) | at 100 kV (W) |\n|---|---|---:|---:|---:|---:|---:|---:|\n");
+    for (int gi : {2, 4}) for (const Loss& l : LOSSES) {
+        const Geo& g = GEOS[gi]; double f = 8270, w = 2 * PI * f, c = g.c_pf * 1e-12, xc = 1 / (w * c), lam = C0 / f, rr = 160 * PI * PI * (g.he / lam) * (g.he / lam);
+        double R = rr + xc / l.qcoil + l.rground + xc * l.tand, i10 = std::sqrt(Pin / R);
+        printf("| %s | %s | %.1f | %.1f | %.0f |", g.name, l.name, R, f * R / xc, i10 * xc / 1000);
+        for (double v : {29.0, 58.0, 100.0}) { double i = v * 1000 / xc; printf(" %.0f |", i * i * R); }
+        printf("\n");
+    }
+    printf("\n### 1d. Radiated power against bandwidth at 10 kW input (8,270 Hz), power-limited branch\n\n");
+    printf("P_rad = P f Rr / (Xc B), capped by the voltage limit. Shown for 100 kV.\n\n");
+    printf("| antenna | 6 Hz | 12.5 Hz | 25 Hz | 50 Hz | 100 Hz | 200 Hz | 400 Hz | 800 Hz |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    for (int gi : {2, 4}) { const Geo& g = GEOS[gi]; double f = 8270, w = 2 * PI * f, c = g.c_pf * 1e-12, xc = 1 / (w * c), lam = C0 / f, rr = 160 * PI * PI * (g.he / lam) * (g.he / lam), cap = std::pow(100e3 / xc, 2) * rr;
+        printf("| %s |", g.name); for (double b : {6.0, 12.5, 25.0, 50.0, 100.0, 200.0, 400.0, 800.0}) { double pr = Pin * f * rr / (xc * b); printf(" %.3g mW%s |", 1000 * std::min(pr, cap), pr > cap ? " (V)" : ""); } printf("\n"); }
+
+    printf("\n## 2. Keyed MFSK through the single-tuned antenna\n\n");
+    printf("Constant-amplitude drive, resonance at the centre of the positions, a keyed phase of 0/90/180/270\n");
+    printf("degrees on every tone, positions drawn at random, 40,000 tones. Losses in dB against an antenna of\n");
+    printf("unlimited bandwidth carrying the same on-resonance current. `per tone`: energy in the tone's own bin\n");
+    printf("(per-tone reception). `coherent`: sum over tones with one phase for all positions, receiver unaware of\n");
+    printf("the antenna. `known`: the same with the static amplitude and phase of each position known.\n");
+    printf("`leak`: energy left in the other positions, relative to the tone (dB). `edge`: static phase of the\n");
+    printf("outermost position against the centre.\n\n");
+    struct F { const char* name; double tc; int nc, P; };
+    const F FM[] = {{"6.25 Hz, 0.16 s tone, 4 positions (25 Hz)", 0.16, 1, 4}, {"6.25 Hz, 0.16 s tone, 8 positions (50 Hz)", 0.16, 1, 8}, {"6.25 Hz, 2.56 s held tone, 4 positions", 0.16, 16, 4},
+                    {"1.5625 Hz, 0.64 s tone, 16 positions (25 Hz)", 0.64, 1, 16}, {"1.5625 Hz, 0.64 s tone, 8 positions (12.5 Hz)", 0.64, 1, 8}, {"1.5625 Hz, 2.56 s held tone, 16 positions", 0.64, 4, 16}, {"1.5625 Hz, 10.24 s held tone, 16 positions", 0.64, 16, 16},
+                    {"0.78125 Hz, 1.28 s tone, 16 positions (12.5 Hz)", 1.28, 1, 16}, {"0.78125 Hz, 10.24 s held tone, 16 positions", 1.28, 8, 16}, {"0.390625 Hz, 2.56 s tone, 16 positions (6.25 Hz)", 2.56, 1, 16}, {"0.0977 Hz, 10.24 s tone, 16 positions (1.56 Hz)", 10.24, 1, 16}};
+    const double BW[] = {6.2, 18.5, 24, 57, 86, 174, 256, 458};
+    for (int metric = 0; metric < 5; ++metric) {
+        const char* mn[] = {"per tone (dB)", "coherent, antenna unknown (dB)", "coherent, static response known (dB)", "leak into other positions (dB relative to the tone)", "edge phase (degrees)"};
+        printf("### 2%c. %s\n\n| format |", 'a' + metric, mn[metric]); for (double b : BW) printf(" %.4g Hz |", b); printf("\n|---|"); for (size_t i = 0; i < sizeof BW / sizeof BW[0]; ++i) printf("---:|"); printf("\n");
+        for (const F& f : FM) { printf("| %s |", f.name); for (double b : BW) { KeyOut o = keyed(f.tc, f.nc, f.P, b, 0, true);
+            double v = metric == 0 ? -db(o.e_tone) : metric == 1 ? -db(o.coh_plain) : metric == 2 ? -db(o.coh_known) : metric == 3 ? db(o.leak) : o.edge_phase_deg; printf(metric == 4 ? " %.0f |" : " %.2f |", v); } printf("\n"); }
+        printf("\n");
+    }
+    printf("### 2f. What the keyed phase costs through the antenna\n\n");
+    printf("Coherent loss (antenna unknown) with the keyed phase, and without it (phase-continuous tone changes\n");
+    printf("only), in dB. The difference is the price of the mandatory keyed phase on a narrow antenna.\n\n");
+    printf("| format |"); for (double b : BW) printf(" %.4g Hz |", b); printf("\n|---|"); for (size_t i = 0; i < sizeof BW / sizeof BW[0]; ++i) printf("---:|"); printf("\n");
+    for (const F& f : FM) { printf("| %s |", f.name); for (double b : BW) { KeyOut o = keyed(f.tc, f.nc, f.P, b, 0, true), n = keyed(f.tc, f.nc, f.P, b, 0, false); printf(" %.2f / %.2f |", -db(o.coh_plain), -db(n.coh_plain)); } printf("\n"); }
+    printf("\nRule of thumb: with a keyed phase the coherent loss from the transients is 2/(pi B T) of the power for a\n");
+    printf("tone of length T (0.1 dB at B T = 28, 0.25 dB at 11, 1 dB at 3), on top of the static roll-off.\n");
+
+    printf("\n## 3. Slow detuning of the resonance\n\n");
+    printf("The resonance moves by d (wind, sag, temperature, rain). Every position then turns by nearly the same\n");
+    printf("phase and loses nearly the same power; the receiver sees that as path phase wander and fading. Shown:\n");
+    printf("that common phase (degrees) and loss (dB) at the centre of the span, and the coherent loss across the\n");
+    printf("span for a receiver that uses one phase for all positions and does not know the antenna (dB; the\n");
+    printf("d = 0 column is the static value).\n\n");
+    for (double b : {86.0, 24.0}) {
+        printf("### Antenna bandwidth %.0f Hz\n\n| format | d = 0 | B/16 | B/8 | B/4 | B/2 |\n|---|---|---|---|---|---|\n", b);
+        for (const F& f : FM) { if (f.nc != 1) continue; printf("| %s |", f.name);
+            for (double fr : {0.0, 1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0 / 2}) {
+                double d = fr * b, delta = 1 / f.tc, tau = 1 / (PI * b); cd m1 = 0; double p1 = 0;
+                for (int p = 0; p < f.P; ++p) { double off = (p - 0.5 * (f.P - 1)) * delta; cd h1 = 1.0 / cd(1, 2 * PI * (off - d) * tau); m1 += h1; p1 += std::norm(h1); }
+                cd hc = 1.0 / cd(1, -2 * PI * d * tau);
+                printf(" %.0f deg, %.2f dB, %.3f dB |", std::arg(hc) * 180 / PI, -db(std::norm(hc)), -db(std::norm(m1 / (double)f.P) / (p1 / f.P)));
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+    printf("A detuning of d = f dC / (2 C): dC/C of 1e-4, 1e-3 and 4e-3 (the earlier note's sideways bow, thermal or\n");
+    printf("rain drift, and sag with a shortened down-lead) is 0.4, 4.1 and 16.5 Hz at 8,270 Hz.\n");
+
+    printf("\n## 4. Stored energy and the keyed phase step at 10 kW\n\n");
+    printf("Stored energy Q P / w. A keyed phase step of theta leaves a current component |1 - e^(j theta)| times the\n");
+    printf("steady one at the old phase, which the circuit has to dissipate while the new one builds: 2 times the\n");
+    printf("stored energy for 90 degrees, 4 times for 180, 2 times on average over the four phases, within about\n");
+    printf("three time constants. During that time the transmitter works into a load that is not matched.\n\n");
+    printf("| antenna bandwidth at 10 kW (Hz) | loaded Q at 8,270 Hz | stored energy (J) | time constant (ms) | mean exchanged per tone change (J) | as power at 6.25 / 1.5625 / 0.39 / 0.098 tones per second (W) |\n|---:|---:|---:|---:|---:|---|\n");
+    for (double b : {24.0, 57.0, 86.0, 174.0, 256.0, 458.0}) { double q = 8270 / b, e = q * Pin / (2 * PI * 8270); printf("| %.0f | %.0f | %.1f | %.1f | %.1f | %.0f / %.0f / %.1f / %.1f |\n", b, q, e, 1000 / (PI * b), 2 * e, 2 * e * 6.25, 2 * e * 1.5625, 2 * e * 0.390625, 2 * e * 0.09765625); }
+    return 0;
+}
