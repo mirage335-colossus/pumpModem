@@ -19,6 +19,7 @@ a program only with a corrected or extended calculation that carries its values 
 
 | Program | What it computes | Output | Runtime (12-thread 5650U) |
 | --- | --- | --- | --- |
+| [visible_carrier.py](visible_carrier.py) | Finite-energy gap between waterfall detection and ten-bit word recovery with a strong, message-independent carrier. [Derivation and fault model](../../../_ref/algorithms-matrixModem/fsk-visible-signal-recovery.md#a-visible-line-with-too-little-message-dependent-energy) | [visible_carrier.txt](results/visible_carrier.txt) | < 1 s |
 | `bound_shapes.cpp` | Independent reproduction of the bound `P − ∫ln(1+P·S)`; universal curve in energy per coherence interval; Eb/N0 versus C/N0; time per 100 bits; Doppler-spectrum shape sensitivity including the worst spectrum for a fixed RMS spread (KKT solution); Rician and mixed narrow/wide spectra; receive branches; transmitter peak-to-average; power splitting | `results/bound_shapes.md` | < 1 s |
 | `wideband_receivers.cpp` | Exact large-alphabet GMI of quadratic FFT receivers (weighted periodogram, exact estimator-correlator, FT8-like single bin, multi-bin segments, fully coherent) for arbitrary second-order channels; spread-mismatch matrix; tone versus chirp in two-path fading | `results/wideband_receivers.md` | ≈ 10 s |
 | `finite_alphabet_mc.cpp` | Monte Carlo GMI in a 2.2 kHz band with M = 11–352 tones, actual leakage between tones, and four receivers including a per-symbol spread GLRT | `results/finite_alphabet_mc.md` | ≈ 21 min at 10,000 trials |

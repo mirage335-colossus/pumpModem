@@ -2,6 +2,8 @@
 
 This bounded sample-level experiment tests whether a 10-bit block survives the combination of quantization, correlated timing and frequency-width trials, exhaustive message scoring and a presence threshold. It exercises the default HF **lattice** with the draft's FHSS-off option. One block has 64 contiguous tones of 160 ms (32 symbols, two repeats), 352 positions on 6.25 Hz spacing and 1,024 candidate words. The known public calendar selects the block ordinal. [FSK draft](../../matrixModem-FSK.md)
 
+The same native driver also compares waterfall visibility with correct word recovery on reversed spectra, mis-set tone spacing and unmodulated carriers. Build it as shown below. The fault experiments have their own command lines, frozen thresholds, wrong-word controls and measured limits. [Waterfall and receiver fault tests](fault-tests.md)
+
 ## Fixed protocol before sampling
 
 - Use eight distinct reproducible public schedule fixtures. Select one uniformly for each isolated trial. For each fixture draw the 32 binary matrices and masks, a shuffled repeated symbol assignment, an independent 256-of-352 injection and a quarter-turn for each tone. Use the repository's research RNG to reproduce schedule structure. Payloads are uniformly selected post-encryption bits. A second independent set of schedules supplies the wrong-schedule check.

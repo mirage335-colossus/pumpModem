@@ -1,0 +1,8 @@
+False waterfall detection per quiet block <= 9.97543324e-05
+Sufficient line energy/N0 for 90% detection = 57.434037
+Necessary modulation energy/N0 for 90% correct = 5.913339
+Modulation share | Visibility sufficient (dB) | Word recovery necessary (dB) | Gap lower bound (dB)
+       0.1 | 18.0493 | 17.7183 | -0.3309
+      0.01 | 17.6353 | 27.7183 | 10.0830
+     0.001 | 17.5960 | 37.7183 | 20.1223
+    0.0001 | 17.5921 | 47.7183 | 30.1262

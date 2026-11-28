@@ -256,19 +256,77 @@ void held_energy(std::span<const Sample> codes, const Schedule& schedule, const 
     score_energy<2>(energy, schedule, false, result);
 }
 
-BankResult score_banks(std::span<const Sample> samples, const Schedule& schedule,
-                       const FloatPlan& plan, bool include_pairs, bool include_coherent = false,
-                       const FloatPlan* held_plan = nullptr) {
+struct RidgeRow {
+    int signed_bin{};
+    double peak_over_median = -INFINITY;
+};
+using Ridge = std::array<RidgeRow, tones>;
+constexpr int ridge_edge = 230;
+using RidgeEnergyRow = std::array<uint8_t, 2 * ridge_edge + 1>;
+using RidgeEnergy = std::array<RidgeEnergyRow, tones>;
+
+// Both observers use the same unnormalized, nominal-time FFT. The waterfall
+// covers the union of the two guarded orientation banks. The wider ridge
+// extractor also includes positions reached by the trial's affine frequency faults.
+void observe_row(const std::array<Sample, nfft>& spectrum, double* waterfall_sum, RidgeRow* ridge,
+                 RidgeEnergyRow* evidence = nullptr) {
+    constexpr int waterfall_edge = positions / 2 + 2;
+    const int edge = (ridge || evidence) ? ridge_edge : waterfall_edge;
+    std::array<float, 2 * ridge_edge + 1> power;
+    std::array<float, 2 * ridge_edge + 1> frequency_order;
+    float waterfall_peak = 0.f, ridge_peak = -1.f;
+    int peak_bin = 0;
+    for (int k = -edge; k <= edge; ++k) {
+        float value = std::norm(spectrum[(nfft + k) % nfft]);
+        power[k + edge] = value;
+        if (waterfall_sum && std::abs(k) <= waterfall_edge)
+            waterfall_peak = std::max(waterfall_peak, value);
+        if (ridge && value > ridge_peak) {
+            ridge_peak = value;
+            peak_bin = k;
+        }
+    }
+    if (evidence) frequency_order = power;
+    if (waterfall_sum) {
+        auto inner = std::span(power).subspan(edge - waterfall_edge, 2 * waterfall_edge + 1);
+        float median = quantile(inner, waterfall_edge);
+        *waterfall_sum += median > 0 ? double(waterfall_peak) / median : -INFINITY;
+    }
+    if (ridge || evidence) {
+        // Rearranging the inner entries above preserves the full order statistic.
+        float median = quantile(power, ridge_edge);
+        if (ridge)
+            *ridge = median > 0 ? RidgeRow{peak_bin, double(ridge_peak) / median} : RidgeRow{};
+        if (evidence) {
+            double step = median > 0 ? std::log(2.) * 15. / (6. * median) : 0.;
+            for (size_t i = 0; i < evidence->size(); ++i)
+                (*evidence)[i] = static_cast<uint8_t>(std::min(15., std::round(step * frequency_order[i])));
+        }
+    }
+}
+
+template <size_t orientations>
+std::array<BankResult, orientations> search_banks(std::span<const Sample> samples,
+        const Schedule& schedule, const FloatPlan& plan, bool include_pairs, bool include_coherent,
+        const FloatPlan* held_plan, double* waterfall, Ridge* ridge, RidgeEnergy* ridge_energy) {
+    static_assert(orientations == 1 || orientations == 2);
     // Include both guard bins on each side in each normalization.
     constexpr int bins = positions + 4;
+    if (waterfall) *waterfall = -INFINITY;
+    if (ridge) ridge->fill({});
     const auto codes = sample_codes(samples);
-    BankResult result;
-    if (codes.empty()) return result;
-    std::optional<ProjectionBlock> coherent_bins;
+    std::array<BankResult, orientations> result{};
+    if (codes.empty()) {
+        if (ridge_energy) ridge_energy->fill({});
+        return result;
+    }
+    std::optional<std::array<ProjectionBlock, orientations>> coherent_bins;
     if (include_coherent) coherent_bins.emplace();
-    std::array<std::array<float, bins>, tones> energy{};
+    using Energy = std::array<std::array<float, bins>, tones>;
+    std::array<Energy, orientations> energy{};
     std::array<Sample, nfft> spectrum{};
     for (int offset : offsets) {
+        double waterfall_sum = 0.;
         for (int t = 0; t < tones; ++t) {
             std::copy_n(codes.begin() + pad + offset + t * nfft, nfft, spectrum.begin());
             float component_step = 0;
@@ -278,28 +336,59 @@ BankResult score_banks(std::span<const Sample> samples, const Schedule& schedule
                 component_step = float(.45 * std::sqrt(squared / 2.));
             }
             fft(spectrum, false, plan);
-            if (include_coherent) {
-                auto quant = [component_step](float x) {
-                    return component_step > 0 ? std::clamp(std::round(x / component_step), -7.f, 7.f) : 0.f;
+            if ((waterfall || ridge || ridge_energy) && offset == 0)
+                observe_row(spectrum, waterfall ? &waterfall_sum : nullptr, ridge ? &(*ridge)[t] : nullptr,
+                            ridge_energy ? &(*ridge_energy)[t] : nullptr);
+            for (size_t orientation = 0; orientation < orientations; ++orientation) {
+                // DFT(conj(x))[k] = conj(DFT(x)[-k]). A reversal of the
+                // 352 placement indices alone would instead reflect about -1/2 bin.
+                auto bin_at = [orientation](int position) {
+                    int k = fft_bin(position);
+                    return orientation == 0 ? k : (nfft - k) % nfft;
                 };
-                for (int p = 0; p < positions; ++p) {
-                    Sample z = spectrum[fft_bin(p)];
-                    (*coherent_bins)[t][p] = {quant(z.real()), quant(z.imag())};
+                if (include_coherent) {
+                    auto quant = [component_step](float x) {
+                        return component_step > 0 ? std::clamp(std::round(x / component_step), -7.f, 7.f) : 0.f;
+                    };
+                    for (int p = 0; p < positions; ++p) {
+                        Sample z = spectrum[bin_at(p)];
+                        if (orientation != 0) z = std::conj(z);
+                        (*coherent_bins)[orientation][t][p] = {quant(z.real()), quant(z.imag())};
+                    }
                 }
+                if (!held_plan)
+                    for (int p = 0; p < bins; ++p)
+                        energy[orientation][t][p] = std::norm(spectrum[bin_at(p - 2)]);
             }
-            if (!held_plan)
-                for (int p = 0; p < bins; ++p) energy[t][p] = std::norm(spectrum[fft_bin(p - 2)]);
         }
-        if (include_coherent) {
-            coherent_search(*coherent_bins, schedule, offset, offset, result.coherent);
-            if (offset == 0)
-                for (int fine : {-32, 32})
-                    coherent_search(*coherent_bins, schedule, 0, fine, result.coherent);
+        if (waterfall && offset == 0) *waterfall = waterfall_sum / tones;
+        for (size_t orientation = 0; orientation < orientations; ++orientation) {
+            auto& bank = result[orientation];
+            if (include_coherent) {
+                const auto& projections = (*coherent_bins)[orientation];
+                coherent_search(projections, schedule, offset, offset, bank.coherent);
+                if (offset == 0)
+                    for (int fine : {-32, 32})
+                        coherent_search(projections, schedule, 0, fine, bank.coherent);
+            }
+            if (held_plan) held_energy(codes, schedule, *held_plan, offset, bank);
+            else score_energy<1>(energy[orientation], schedule, include_pairs, bank);
         }
-        if (held_plan) held_energy(codes, schedule, *held_plan, offset, result);
-        else score_energy<1>(energy, schedule, include_pairs, result);
     }
     return result;
+}
+
+BankResult score_banks(std::span<const Sample> samples, const Schedule& schedule,
+                       const FloatPlan& plan, bool include_pairs, bool include_coherent = false,
+                       const FloatPlan* held_plan = nullptr) {
+    return search_banks<1>(samples, schedule, plan, include_pairs, include_coherent,
+                           held_plan, nullptr, nullptr, nullptr)[0];
+}
+
+std::array<BankResult, 2> score_orientations(std::span<const Sample> samples,
+        const Schedule& schedule, const FloatPlan& plan, double* waterfall = nullptr,
+        Ridge* ridge = nullptr, RidgeEnergy* ridge_energy = nullptr) {
+    return search_banks<2>(samples, schedule, plan, false, true, nullptr, waterfall, ridge, ridge_energy);
 }
 
 Best decode(std::span<const Sample> samples, const Schedule& schedule, const FloatPlan& plan) {
@@ -599,6 +688,9 @@ bool compare_coherent(const FloatPlan& plan, const std::vector<Schedule>& fixtur
     return pass;
 }
 #include "held_tones.hpp"
+#include "orientation_trial.hpp"
+#include "affine_trial.hpp"
+#include "fault_admission.hpp"
 } // namespace
 
 int main(int argc, char** argv) {
@@ -608,6 +700,24 @@ int main(int argc, char** argv) {
         fixtures.emplace_back(ordinal, 0xaa6218f2);
         other.emplace_back(ordinal, 0xd3d65011);
     }
+    if (argc == 2 && std::string_view(argv[1]) == "--orientation")
+        return check_orientation(plan, fixtures, other) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--orientation-waterfall") {
+        dump_orientation_waterfall(plan, fixtures);
+        return 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--affine")
+        return check_affine(plan, fixtures, other) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--affine-all-pairs")
+        return check_affine_all_pairs(plan, fixtures, other) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--affine-contamination")
+        return check_affine_contamination(plan, fixtures, other) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--affine-refine")
+        return check_affine_refinement(plan, fixtures, other) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--fault-admission")
+        return check_fault_admission(plan, fixtures, other) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--fault-refinement")
+        return check_fault_refinement(plan, fixtures, other) ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "--rare") {
         check_rare_admission(plan, fixtures, other);
         return 0;
