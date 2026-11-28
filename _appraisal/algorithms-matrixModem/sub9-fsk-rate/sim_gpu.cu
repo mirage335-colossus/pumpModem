@@ -25,10 +25,14 @@
 //
 // Build: nvcc -O3 -std=c++17 -arch=sm_120 sim_gpu.cu -lcublas -o sim_gpu
 // Run:   ./sim_gpu [trials per level, default 40960]
+//        ./sim_gpu smoke       (one strong 128-trial batch)
+//        ./sim_gpu two-point   (8192 trials each at 13 and 15 dB, whole block)
 //        ./sim_gpu sustain SECONDS          (the simulation loop, for telemetry)
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <cublas_v2.h>
+
+#include "search_geometry.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -57,14 +61,25 @@ __global__ void gen_k(const uint8_t* sym, const uint8_t* pmap, const uint8_t* va
     long idx = blockIdx.x * (long)blockDim.x + threadIdx.x;
     if (idx >= total) return;
     int trial = (int)(idx / N), t = (int)(idx % N);
-    const float gdk[ND] = {-5.82f, -1.94f, 1.94f, 5.82f};
     int pp = pmap[t * NV + val10[sym[t] * NM + pm[trial]]];
-    float x = (float)t / N, ph = (float)PI * (pf[trial] - NB0 / 2) * x + (float)PI * gdk[pd[trial]] * x * x * 0.5f;
+    const double x = search_geometry::midpoint(t, N);
+    const double f = search_geometry::frequency(pf[trial], NB0);
+    const double drift = search_geometry::drift(pd[trial]);
+    const double ph = search_geometry::phase(x, f, drift);
+    const double local_cycles = (f + drift * x) / N;
+    // Rectangular projections at 8 cycles of spacing per 10.24 s tone.
+    // Holding the within-tone frequency at its midpoint omits at most
+    // pi * abs(drift) / (4*N*N) radians of quadratic phase.
+    const double numerator = sin(PI * local_cycles) / PI;
+    const float sr = amp * cos(ph), si = amp * sin(ph);
     for (int p = 0; p < POS; ++p) {
         uint64_t r = mix(mix(seed) + (uint64_t)(idx * POS + p));
         float u1 = ((float)(uint32_t)(r >> 32) + 0.5f) * 2.3283064e-10f, u2 = ((float)(uint32_t)r + 0.5f) * 2.3283064e-10f;
         float rad = 2.2f * sqrtf(-2.f * logf(u1)), zr = rad * cosf(6.2831853f * u2), zi = rad * sinf(6.2831853f * u2);
-        if (p == pp) { zr += amp * cosf(ph); zi += amp * sinf(ph); }
+        const double cycles = 8.0 * (pp - p) + local_cycles;
+        const float gain = cycles == 0 ? 1.0f : static_cast<float>(numerator / cycles);
+        zr += gain * sr;
+        zi += gain * si;
         zpos[(idx * POS + p) * 2] = (int8_t)fminf(7.f, fmaxf(-7.f, rintf(zr)));
         zpos[(idx * POS + p) * 2 + 1] = (int8_t)fminf(7.f, fmaxf(-7.f, rintf(zi)));
     }
@@ -127,7 +142,9 @@ __global__ void one_k(const int16_t* tb, const uint8_t* ghi, const uint8_t* glo,
 int main(int argc, char** argv) {
     std::string mode = argc > 1 ? argv[1] : "all";
     const double ssecs = mode == "sustain" && argc > 2 ? atof(argv[2]) : 0;
-    const long want = (mode != "sustain" && argc > 1 && atol(argv[1]) > 0) ? atol(argv[1]) : 40960;
+    const bool smoke = mode == "smoke";
+    const bool two_point = mode == "two-point";
+    const long want = two_point ? 8192 : (mode != "sustain" && argc > 1 && atol(argv[1]) > 0) ? atol(argv[1]) : 40960;
     cudaDeviceProp pr; CK(cudaGetDeviceProperties(&pr, 0));
     std::mt19937_64 rng(2026);
 
@@ -139,7 +156,6 @@ int main(int argc, char** argv) {
     for (int t = N - 1; t > 0; --t) std::swap(sym[t], sym[rng() % (uint64_t)(t + 1)]);
     std::vector<uint8_t> pmap((size_t)N * NV);
     for (int t = 0; t < N; ++t) { uint8_t map[NV]; for (int v = 0; v < NV; ++v) map[v] = (uint8_t)(v % POS); for (int v = NV - 1; v > 0; --v) std::swap(map[v], map[rng() % (uint64_t)(v + 1)]); for (int v = 0; v < NV; ++v) pmap[(size_t)t * NV + v] = map[v]; }
-    const double gd[ND] = {-5.82, -1.94, 1.94, 5.82};
     int R = 0; while ((2 << R) <= N) ++R;
     std::vector<int> nb(R), rowoff(R + 1, 0);
     for (int r = 0; r < R; ++r) { nb[r] = std::max(1, (NB0 + (1 << r) - 1) >> r); rowoff[r + 1] = rowoff[r] + (r == 0 ? ND : 1) * (1 << r) * nb[r]; }
@@ -147,7 +163,7 @@ int main(int argc, char** argv) {
         rows = rowoff[RG]; std::vector<float> af((size_t)2 * N * 2 * rows, 0.f);
         for (int r = 0; r < RG; ++r) { const int W = 1 << r, L = N >> r, nbr = nb[r];
             for (int d = 0; d < (r == 0 ? ND : 1); ++d) for (int w = 0; w < W; ++w) for (int b = 0; b < nbr; ++b) { const size_t row = (size_t)rowoff[r] + ((size_t)d * W + w) * nbr + b;
-                for (int i = 0; i < L; ++i) { const int n = w * L + i; const double x = (double)n / N, a = -PI * (b - nbr / 2) * i / L - (r == 0 ? PI * gd[d] * x * x / 2 : 0.0), ar = std::cos(a), ai = std::sin(a);
+                for (int i = 0; i < L; ++i) { const int n = w * L + i; const double x = search_geometry::midpoint(i, L), a = -search_geometry::phase(x, search_geometry::frequency(b, nbr), r == 0 ? search_geometry::drift(d) : 0), ar = std::cos(a), ai = std::sin(a);
                     af[(2 * row) * (size_t)(2 * N) + n] = (float)ar; af[(2 * row) * (size_t)(2 * N) + N + n] = (float)-ai; af[(2 * row + 1) * (size_t)(2 * N) + n] = (float)ai; af[(2 * row + 1) * (size_t)(2 * N) + N + n] = (float)ar; } } }
         float* daf; __half* dah; CK(cudaMalloc(&daf, sizeof(float) * af.size())); CK(cudaMemcpy(daf, af.data(), sizeof(float) * af.size(), cudaMemcpyHostToDevice));
         CK(cudaMalloc(&dah, sizeof(__half) * af.size())); f2h<<<(unsigned)((af.size() + 255) / 256), 256>>>(daf, dah, (long)af.size()); CK(cudaDeviceSynchronize()); CK(cudaFree(daf)); return dah;
@@ -171,6 +187,7 @@ int main(int argc, char** argv) {
         printf("\n# Monte Carlo of the 10-bit block, cell mode, %d tones on %d positions, %d trials per batch\n", N, POS, TB);
     }
     for (int variant = 0; variant < 2; ++variant) {
+        if (variant != 0 && (smoke || two_point)) break;
         const int RG = variant == 0 ? 1 : R; int rows; __half* dah = build(RG, rows);
         if (mode == "sustain" && variant == 0) { cudaFree(dah); continue; }
         CK(cudaMalloc(&dc, sizeof(__half) * (size_t)B * 2 * rows));
@@ -190,17 +207,27 @@ int main(int argc, char** argv) {
             if (timed) tepi += now() - t0;
             for (int t = 0; t < TB; ++t) for (int kind = 0; kind < 2; ++kind) { float bv = -2; int bm = -1; for (int q = 0; q < 4; ++q) { const int blk = t * 4 + q; if (hout[(size_t)blk * 2 + kind] > bv) { bv = hout[(size_t)blk * 2 + kind]; bm = harg[(size_t)blk * 2 + kind]; } } if (bm != pm[t]) (kind == 0 ? errs : errk)++; }
         };
+        if (smoke) {
+            long searched = 0, known = 0;
+            batch(2.5f, searched, known, false);
+            std::printf("Strong-signal block errors over %d trials: known %ld, searched %ld\n", TB, known, searched);
+            return known == 0 && searched == 0 ? 0 : 1;
+        }
         if (mode == "sustain") { long e1 = 0, e2 = 0, n = 0; const double t0 = now(); while (now() - t0 < ssecs) { batch(0.6f, e1, e2, false); n += TB; } printf("sustain sim: %ld trials in %.1f s\n", n, now() - t0); return 0; }
         printf("\n## %s: %d complex rows in the matrix operand\n\n", variant == 0 ? "whole-block window only (4 drift hypotheses x 174 bins)" : "every rung of the ladder in the product, decision on the whole block", rows);
         { long e1 = 0, e2 = 0; batch(0.6f, e1, e2, false); }                 // warm up
         printf("| Block E/N0 | Trials | Wrong, frequency and drift known | Wrong, searched over %d hypotheses | Wall time | Trials per second |\n| ---: | ---: | ---: | ---: | ---: | ---: |\n", ND * nb[0]);
         const long nbatch = (want + TB - 1) / TB; double rate = 0;
-        for (double db : {11.0, 12.0, 13.0, 14.0, 15.0, 16.0}) {
+        const std::vector<double> levels = two_point ? std::vector<double>{13.0, 15.0}
+                                                     : std::vector<double>{11, 12, 13, 14, 15, 16};
+        for (double db : levels) {
             const float amp = 2.2f * (float)std::sqrt(2.0 * std::pow(10.0, db / 10) / N); long es = 0, ek = 0; const double t0 = now();
             for (long i = 0; i < nbatch; ++i) batch(amp, es, ek, false);
             const double dt = now() - t0, trials = (double)nbatch * TB; rate = trials / dt;
+            if (two_point) std::printf("errors at %.0f dB: known %ld, searched %ld, trials %ld\n", db, ek, es, nbatch * TB);
             printf("| %.0f dB | %.0f | %.4f | %.4f | %.2f s | %.0f |\n", db, trials, ek / trials, es / trials, dt, rate);
         }
+        if (two_point) return 0;
         { long e1 = 0, e2 = 0; for (int i = 0; i < 50; ++i) batch(0.6f, e1, e2, true); const double tot = tgen + tgat + tpro + tepi;
           printf("\nshare of a batch: generation %.0f%%, gather %.0f%%, product %.0f%% (%.0f nominal TFLOP/s), epilogue and read-back %.0f%%; %.2f ms per batch of %d trials when each stage is waited for\n", 100 * tgen / tot, 100 * tgat / tot, 100 * tpro / tot, 2.0 * B * (2.0 * rows) * (2.0 * N) / (tpro / 50) / 1e12, 100 * tepi / tot, tot / 50 * 1e3, TB);
           printf("one trial stands for a block of 5,242.88 s: %.3g times real time\n", rate * 5242.88); }

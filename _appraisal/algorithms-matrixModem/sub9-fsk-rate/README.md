@@ -15,6 +15,13 @@ search figures. `decode_bench.cpp`, `decode_gpu.cu`, `search_bench.cpp`, `search
 the delegated literature searches. Keep them as research material under the
 [research-material rule](../../../docs/development.md#research-material).
 
+**Physical search coordinates.** The section 12.2 timing and Monte Carlo receipts predate the corrected
+drift scale and centred frequency grid. The CPU and GPU generated and removed the same half-size chirp.
+The corrected sources use [explicit units](search_geometry.hpp). Use the
+[search-geometry study](../../../_ref/algorithms-matrixModem/fsk-search-validity.md) and
+[bounded checks](../search-validity/README.md) when interpreting the historical commands and
+results below. Revision `396b47e1` contains the historical sources.
+
 ## `antenna_keying.cpp`
 
 The 61 m (200 ft) antenna of the
@@ -77,11 +84,21 @@ block.
   60° with 10 min); frequency wander inside ±1, ±5 and ±50 mHz with knots 1/bound apart (the
   bounded Doppler law of the Sub9 presets, common wander only); Rayleigh fading with a Gaussian
   Doppler spectrum of 1, 5, 50 and 500 mHz.
-- The channel is sampled 16 times per cell when the spread is not small against the spacing, so
-  energy leaking into neighbouring positions is included.
+- For a channel varying appreciably within a cell, the current simulator integrates each of
+  the 48 sinusoidal Rayleigh-model components analytically. For phase or frequency wander
+  it uses `16 × P` quadrature points to resolve leakage across `P` positions. The nearly flat-gain
+  shortcut assigns the sampled gain to the emitting bin. An optional final argument (2–4096)
+  sets the quadrature resolution for convergence checks.
+- The original 16-point varying-channel results are retained. At 16 positions those samples
+  wrap leakage from one band edge to the other. Read the [resolution check](quadrature-check.md)
+  before using those figures.
 - Arguments: blocks per row; format letters or `all`; channel digits or `all`; antenna −3 dB
   bandwidth in hertz (static response only) or 0; `1` to make the keyed map send every value to a
   position and one of four quarter turns (value-dependent phase).
+
+The following commands describe the historical campaign at revision `396b47e1`.
+Use that source revision to reproduce the retained tables. The bounded comparison above uses
+the corrected source.
 
 ```bash
 g++ -O3 -march=native -std=c++20 -fopenmp coherent_block_mc.cpp -o /tmp/coherent_block_mc

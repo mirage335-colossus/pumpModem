@@ -1,0 +1,25 @@
+P  L   expected distinct/256   optimal uniform byte error
+  2 8   163.496011            0.361344
+  4 4   164.252280            0.358390
+  8 3   204.809806            0.199962
+ 16 2   167.770328            0.344647
+ 32 2   232.537597            0.091650
+ 64 2   251.506044            0.017555
+128 2   255.498039            0.001961
+256 1   256.000000            0.000000
+
+24-bit payload, P=16, expected number of other matching messages
+32 symbols twice  8.9428264e-62
+6 symbols once    0.99999994
+3 symbols twice   6.6696515
+
+Independent loss, probability of losing >77%
+32 hops: 0.001051201
+33 hops: 0.000659364
+34 hops: 0.000410698
+
+Stationary symmetric loss, 32 hops, probability of losing >77% and all 32
+mean bad run  2 hops: 0.001051201  2.3283064e-10
+mean bad run  4 hops: 0.037618185  6.6968284e-05
+mean bad run 10 hops: 0.159271614  0.019076021
+mean bad run 50 hops: 0.369853743  0.26728732

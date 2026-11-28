@@ -1,5 +1,7 @@
 # Coding and message structure for the FSK lattice
 
+**Later correction.** The subsequent [finite-code and erasure audit](../fsk-code-identifiability.md) checks the mapped code on actual schedule fixtures, distinguishes a byte ambiguity from a message ambiguity, and supplies a counterexample to transferring independent-hop margins to persistent loss.
+
 26 November 2026 · Fable-5.2 pass · synthesis of the coding review, the lattice calculations and the GPU run
 
 This note gives the reasoning behind the message format of the

@@ -1,5 +1,7 @@
 # Matrix Modem FSK research pass (Fable-5.2)
 
+**Subsequent receiver review.** The [FSK reconciliation](../fsk-reconciliation.md) corrects the physical drift covered by the historical search, the independence assumed in burst-loss estimates, the conditions for exact cell statistics and the interpretation of a common presence threshold. It also links the first bounded sample-to-message experiment. The reports below retain the original numerical results.
+
 26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: measured simulation speed, and an audited specification
 
 This pass supports the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md). It

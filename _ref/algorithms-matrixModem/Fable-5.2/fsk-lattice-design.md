@@ -1,5 +1,7 @@
 # FSK lattice design: dwell, alphabet, four-bit evidence and block size
 
+**Later correction.** The subsequent [finite-window checks](../fsk-lattice-validity.md) and [presence study](../fsk-presence-calibration.md) qualify the timing, narrow-band diversity and threshold assumptions used below. The [receiver review](../fsk-reconciliation.md) connects these checks to measured block decisions.
+
 26 November 2026, extended 27 November · Fable-5.2 pass · calculations and Monte Carlo, with reconciliation
 
 This note gives the reasoning behind the waveform part of the

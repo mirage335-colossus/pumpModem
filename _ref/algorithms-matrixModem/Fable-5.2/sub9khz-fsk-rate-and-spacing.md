@@ -1,5 +1,7 @@
 # Sub-9 kHz FSK rate and spacing for a 61 m antenna at 10 kW
 
+**Later correction.** The later [physical search audit](../fsk-search-validity.md) corrects the oscillator coordinates and identifies which reported times were projections. The [tone projection check](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/quadrature-check.md) corrects an edge alias in the tight-spacing H fixture. Its high-spread trial failed to reach the target over the sampled energy grid. Its performance above that grid is unknown.
+
 27–28 November 2026 · Calculations, a block Monte Carlo, CPU and GPU decode measurements, and four
 delegated literature searches · The configuration was adopted in the specification on 28 November
 
@@ -64,7 +66,7 @@ measured. Nothing here is a qualified receiver.
 5. **Spacing equal to the reciprocal of a long tone is the wrong economy here.** A 0.098 Hz
    spacing for 10.24 s tones fits 16 positions in 1.6 Hz and decodes as well as the others up to
    the worst spread bound. It has no shorter window to fall back on: at ten times that bound it
-   did not decode at any energy, where the 0.78 Hz spacing still decoded 5 dB down. It also
+   did not reach the target in the tested 6–44 dB range, where the 0.78 Hz spacing still decoded 5 dB down. It also
    tolerates only ±6 ppm of frequency error.
 6. **Disadvantages of the recommendation.** The shortest block is 11 minutes; a strong link is
    not served faster. A 10 s tone is a narrow line to an observer with a filter bank, which is

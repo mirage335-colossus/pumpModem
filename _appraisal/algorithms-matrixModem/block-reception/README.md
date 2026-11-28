@@ -1,0 +1,110 @@
+# One-cell HF FSK block reception
+
+This bounded sample-level experiment tests whether a 10-bit block survives the combination of quantization, correlated timing and frequency-width trials, exhaustive message scoring and a presence threshold. It exercises the default HF **lattice** with the draft's FHSS-off option. One block has 64 contiguous tones of 160 ms (32 symbols, two repeats), 352 positions on 6.25 Hz spacing and 1,024 candidate words. The known public calendar selects the block ordinal. [FSK draft](../../matrixModem-FSK.md)
+
+## Fixed protocol before sampling
+
+- Use eight distinct reproducible public schedule fixtures. Select one uniformly for each isolated trial. For each fixture draw the 32 binary matrices and masks, a shuffled repeated symbol assignment, an independent 256-of-352 injection and a quarter-turn for each tone. Use the repository's research RNG to reproduce schedule structure. Payloads are uniformly selected post-encryption bits. A second independent set of schedules supplies the wrong-schedule check.
+- At 3,200 complex samples/s, add independent circular Gaussian noise of mean sample energy one. The block energy in each table is transmitted energy divided by the complex noise variance. A one-path block has exactly this pre-noise energy. The adverse fixture uses two equal-power paths, one delayed 8 samples (2.5 ms) and shifted by 12.5 Hz, with a random relative phase. This is a two-ray stress case. Report it separately from a measured or Gaussian-spread HF channel.
+- Estimate noise scale from the lower quartile of subsampled input powers. Quantize both components at 0.45 estimated component standard deviations, with levels −7 through +7. Erase the whole sample if either rounded component exceeds that range. For each timing alignment (−64, 0, +64 samples), apply the repository's 512-point FFT to each tone of the **same** observed buffer. Use median normalization per frequency over the block, then across positions per tone. Compare single-bin energy with the mean of five adjacent bins. Quantize each to 0–15 over six times unit noise energy. For each alignment and width, sum the chosen entries for each candidate. Standardize these 1,024 sums using their observed mean and standard deviation to compare widths. Pick the single largest standardized score over all six hypotheses and all messages. These are experimental scores with a data-dependent normalization.
+- Freeze the threshold at the 396th smallest of 399 noise-only block maxima (rank 396/400 for a fresh exchangeable draw, with strict exceedance). Use 400 independent noise holdouts, 160 wrong-schedule blocks at 24 dB and 160 independent signal blocks per row. Signal rows are 18, 22 and 24 dB in the single-path model and the same three energies with two rays. True timing is randomly −32 or +32 samples, between grid points. Share underlying noise, data, phase and schedule between signal rows to isolate the comparison. Count correct acceptance, wrong acceptance and absence; report two-sided 95% Wilson intervals for individual proportions. Stop after these fixed draws even if inconclusive. The 1% diagnostic threshold does not measure a one-in-a-million false-presence rate.
+- Exercise a continuous public calendar stream with different schedules at successive ordinals. Plant a strong block, one fully extinguished block, then a strong block followed by two quiet periods. Repeat with two consecutive extinguished transmitted blocks before the resumed strong block to test premature completion. Use the same threshold and scorer as for the trials. Require exact reported payloads, trailing quiet closure on the second scored absence, and retention of a single interior gap. Report any failure and the actual output. Silence has received Gaussian noise throughout. Transport end never supplies quiet.
+- The original and separated-bin energy experiments assume a known block calendar, two spectral widths, three timing offsets, constant clocks and no hopping, drift, inter-tone coherent search, radar conditioning, or frontend filtering. Isolated trials have noise padding outside the block. The stream checks use the actual adjacent blocks. These tests supply neither device throughput nor probability of success outside their cases.
+
+## Bounded comparison after the first result
+
+The primary 18 dB holdout exposed a large loss with the delayed, +2-bin ray. Before taking any further samples, freeze a follow-on comparison. Add two equal-weight apertures, (0, +2 bins) and (0, −2 bins), to the existing one- and five-bin bank. This is informed by the constructed counterexample. It searches the sign and includes the original widths; it has no channel estimate, continuous Doppler search, channel inversion or new transmitter feature. Quantize and normalize all four scores by the original rules. Score both banks on the same IQ and candidates. Compare the six- and twelve-hypothesis maxima at separate 396th-of-399 noise thresholds, with 400 new common noise holdouts. Use newly seeded, matched 160-block sets at 18 dB for one ray, two rays separated by +2 or −2 bins, and a mismatch of +1.5 bins (9.375 Hz). The +2-bin case is primary. Retain counts of paired gains/losses in correct admission. For that one primary outcome, use the exact two-sided binomial test on discordant pairs. Report wrong payload separately. Stop after these prespecified cells. Original trials stay reported with their original threshold.
+
+## Reproduce
+
+From the repository root with a C++20 compiler, build the two-source experimental binary and run each fixed experiment.
+
+```sh
+g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -Isrc -Iinclude \
+  _appraisal/algorithms-matrixModem/block-reception/block_reception.cpp \
+  src/search_fft.cpp -o /tmp/matrix-block-reception
+/tmp/matrix-block-reception
+/tmp/matrix-block-reception --apertures
+/tmp/matrix-block-reception --coherent
+/tmp/matrix-block-reception --held
+```
+
+Tested on an AMD Ryzen 5 PRO 5650U with Debian GCC 14.2.0. Repository FFT and research RNG from revision `396b47e1`; all signal generation, FFT, scoring and decisions run natively on the CPU. The FFT uses floating-point coefficients and results. The 4-bit restrictions tested here apply to the input and evidence codes. [Native experiment](block_reception.cpp)
+
+## Original six-hypothesis bank
+
+The 396th calibration score was 5.3561. A correct admission requires the threshold crossing and the correct word on the same block. For the two null rows every acceptance is false. The 95% intervals condition on the frozen calibration and the eight-schedule mixture. Rows at different energies or on different channels are paired, and margins are pointwise.
+
+| Signal or null | Trials | Correct admissions (95% interval) | Wrong or false admissions | Absent |
+|---|---:|---:|---:|---:|
+| Noise | 400 | — | 5 (0.54–2.89%) | 395 |
+| Wrong schedule, 24 dB | 160 | — | 0 (0–2.34%) | 160 |
+| Single path, 18 dB | 160 | 125 (71.10–83.83%) | 0 | 35 |
+| Single path, 22 dB | 160 | 160 (97.66–100%) | 0 | 0 |
+| Single path, 24 dB | 160 | 160 (97.66–100%) | 0 | 0 |
+| Two rays, 18 dB | 160 | 12 (4.34–12.65%) | 0 | 148 |
+| Two rays, 22 dB | 160 | 159 (96.55–99.89%) | 0 | 1 |
+| Two rays, 24 dB | 160 | 160 (97.66–100%) | 0 | 0 |
+
+The three energy points correspond to approximately +7.90, +11.90 and +13.90 dB-Hz over 10.24 s, using nominal transmitted energy and unit ensemble channel power. No row with 160 draws resolves a 10⁻³ miss target. At the weakest tested level the two-ray loss shows up in presence decisions even though every accepted payload was correct.
+
+Both continuous stream assertions passed. With one extinguished interior block the accepted words were 113, absence, 889, absence, absence. The first gap counted as an erasure. The receiver closed only after the second trailing absence, ordinal 4. With two extinguished interior words it closed prematurely at ordinal 2, reopened at ordinal 3 with the correct 889, and closed again at ordinal 5. Total extinction gives the receiver exactly the same sample law as silence. A second scored absence can establish a receiver boundary while the transmitter is still active. These deliberately constructed streams do not measure how often that happens in nature.
+
+## Adding two separated frequency bins
+
+The original six-hypothesis search and expanded twelve-hypothesis search used thresholds of 5.23393 and 5.53567 respectively on the **new** calibration. False presence was 3/400 (95% Wilson 0.26–2.18%) and 2/400 (0.14–1.80%) on the same noise holdouts. Those counts are compatible with substantial uncertainty in each realized false-alarm rate. The paired comparisons below are conditional on the two frozen thresholds.
+
+| 18 dB channel, 160 fresh shared blocks per row | Original correct | Expanded correct | Expanded gains / losses on paired blocks | Wrong accepted, original / expanded |
+|---|---:|---:|---:|---:|
+| Single ray | 135 | 125 | 0 / 10 | 0 / 0 |
+| Second ray +2 bins | 15 | 40 | 25 / 0 | 0 / 0 |
+| Second ray −2 bins | 19 | 47 | 30 / 2 | 2 / 0 |
+| Second ray +1.5 bins | 20 | 19 | 4 / 5 | 1 / 0 |
+
+In the prespecified +2-bin case, correct admission rose from 9.4% (95% interval 5.8–14.9%) to 25.0% (18.9–32.2%). The exact two-sided test on the 25 discordant blocks gives *p* = 5.96 × 10⁻⁸. The extra aperture combines signal energy from both rays and excludes three of the noise bins in the five-bin average. Yet 120 of 160 blocks were still missed. Half a bin of mismatch removed the observed gain. The higher joint threshold also cost ten single-ray admissions. Keep the two-bin pair as a conditional diagnostic; a cross-channel gain for routine use remains unestablished. These probabilities depend on this score, energy, delay, off-grid timing, channel geometry and threshold calibration.
+
+## Coherent branch and protected per-tone fallback
+
+Freeze this comparison before sampling. Reuse the original six-hypothesis per-tone bank and its FFTs. Score all 1,024 words on all six coherent window lengths (2, 4, 8, 16, 32 and 64 tones), five specified integer time offsets (−64, −32, 0, 32, 64 samples), and three frequency offsets (−0.5, 0, +0.5 cycles per 10.24 s block). The two intermediate timing candidates use the central FFT windows and a per-position phase correction. They approximate boundary movement; the actual samples still cross tone boundaries. Each projected complex bin uses two four-bit component codes, followed by the scheduled phase correction, the hypothesized position-dependent timing correction and the hypothesized common frequency rotation at each tone midpoint. For each candidate sum complex values within each window and add window powers over the block. Score every message, standardizing against the other messages at that timing, frequency and rung before taking the maximum. This tests one finite grid.
+
+Use independent fresh seeds for 399 noise calibration blocks and 400 common held-out null blocks. The baseline uses order statistic 396. The joint detector assigns each branch 0.5% of aggregate false-admission probability with order statistic 398 for each complete branch maximum. Prefer an admitted per-tone word, otherwise take the coherent word if admitted. The thresholds are marginal predictive rank bounds over calibration and test under the same exchangeable null, with no independence assumption between the branches. On 120 fresh shared trials per stratum, compare single-path and equal-power +2-bin two-ray at 15 and 18 dB, and independent uniform phase reset each tone at 18 and 22 dB. All RF offsets are independently signed ±0.25 cycles/block, halfway between frequency hypotheses; true starts remain ±32 samples between FFT alignments. Report baseline, each allocated branch and the joint result including wrong payload, miss and noise false admissions. Preserve fixed draws even if unresolved. Verify a continuous joint stream with one interior outage and trailing physical quiet, and check that a lost observation breaks a run of scored quiet. Record work dimensions and measured wall time for the full bounded experiment including generation. No hardware capacity claim.
+
+The thresholds were 5.11875 for the 1%-budget per-tone baseline, 5.48257 for its reserved 0.5% branch, and 12.9713 for the 0.5% coherent branch. On the common 400 noise holdouts their false admissions were 8 (95% Wilson 1.02–3.90%), 2 (0.14–1.80%) and 1 (0.04–1.40%). The joint rule admitted 3 (0.26–2.18%). The baseline's realized 2.0% is a reminder that the rank bound averages over calibration. It does not certify a particular frozen threshold at 1%.
+
+| Channel and block energy, 120 trials per row | Correct, baseline | Correct, reserved per-tone | Correct, reserved coherent | Correct, joint | Missed, joint |
+|---|---:|---:|---:|---:|---:|
+| Single ray, 15 dB | 16 | 9 | 114 | 114 | 6 |
+| Single ray, 18 dB | 101 | 93 | 120 | 120 | 0 |
+| Two rays, 15 dB | 3 | 1 | 39 | 39 | 81 |
+| Two rays, 18 dB | 15 | 10 | 115 | 115 | 5 |
+| Independent phase each tone, 18 dB | 105 | 91 | 1 | 91 | 29 |
+| Independent phase each tone, 22 dB | 120 | 120 | 35 | 120 | 0 |
+
+There were zero wrong admissions in every signal row for all four rules. Misses for each individual branch are therefore 120 minus the number correct. For the joint 15 dB single ray, the 95% correct-admission interval is 89.52–97.69%. It is 24.78–41.31% on the two-ray case at the same energy and 90.62–98.21% at 18 dB. The direct ray retains a stable phase in both two-ray cases. At 18 dB with random phase resets, the per-tone fallback protected 91 correct admissions while the coherent branch alone afforded just one. The higher reserved per-tone threshold lost 14 admissions relative to giving per-tone the full false-admission budget. A search over additional waveform hypotheses can add sensitivity and still hurt the original route after calibration.
+
+The joint continuous stream gave 113, scored absence, 889, scored absence, scored absence, closing at ordinal 4. A separate negative control placed a missing buffer, zero-scale input, or wholly unusable interior IQ between two quiet observations. Each invalid slot broke the consecutive-quiet count, the receiver waited for two newly consecutive scored absences, and resumed data instead preserved the unresolved interior ordinals as erasures. Total **signal** extinction in valid received noise and unavailable receiver observations have different outcomes.
+
+Per 10.24 s block the branches share 192 first FFTs of 512 points. The coherent branch gathers 327,680 tone projections (five timing hypotheses × 64 tones × 1,024 words). Three frequency hypotheses and six window lengths yield 92,160 coherent word scores and 967,680 pairwise complex tree additions. The original energy branch keeps its 6,144 word scores. This implementation uses the same three RF hypotheses even on short rungs to permit a simple exact search over its declared scores. Applying each RF rotation at a tone midpoint models phase across tones, with small residual intra-tone mismatch on this narrow grid. A missing shifted window boundary, a wider frequency search, independent sample-rate error, or a true start beyond the five tested offsets can change the result.
+
+One local single-process run of the joint campaign took 16.2 seconds including signal generation, quantization, searches, decisions and stream checks (399 calibration + 400 held-out null + 720 present + 5 contiguous scored blocks). The original two diagnostic runs were executing concurrently, and this timing excludes initial schedule preparation. It describes experiment turnaround. All three commands reproduced their recorded results after integrating the branches.
+
+## One-cell versus two-cell HF tones
+
+Before sampling, fix a comparison at 10.24 s, 10 bits, 352 positions, 32 symbols and equal transmitted block energy. The one-cell format carries each symbol twice in 64 tones, the held format once in 32 tones of 320 ms. Keep the same matrices, masks and payload, drawing eight per-format permutations, interleavers and phases from reproducible schedule fixtures. Test a single frequency-flat, zero-mean complex Gaussian fading tap with a Gaussian Doppler spectrum approximated by 32 equal-power Doppler quantiles and independent Gaussian complex coefficients, constant over a trial. Compare slow 0.5 Hz and fast 20 Hz full two-standard-deviation widths. This single diffuse tap has neither a deterministic direct ray nor frequency diversity. The path varies continuously throughout each sampled block. Both formats see exactly the same gain and noise on the same sample indices, including in deep fades. Hold oscillator offset at zero, and use the existing ±32-sample half-grid timing error.
+
+Use native 512-point and 1,024-point FFTs for per-tone evidence. Each compares the single matched bin and the mean noise-normalized energy around the same ±12.5 Hz range (five or nine bins respectively). Sum 4-bit per-tone evidence for all messages; calibrate the maximum over the three coarse timing alignments and two widths separately per format. Additionally run the same coherent grid and six physical-time rungs from the previous section for both formats, retaining their separate 0.5% per-tone and 0.5% coherent budgets. In the held format this reuses the quantized one-cell projections for the coherent branch; the per-tone branch evaluates the full two-cell FFT. Keep 399 shared fresh calibration nulls, 400 shared held-out nulls and 120 matched cases for each of two channel widths at 18 and 22 dB. Report correct/wrong/missed outcomes, paired gains/losses and the primary slow 18 dB paired per-tone comparison. Stop after these fixed draws regardless of sign. No threshold tuning or optimal-duration extrapolation.
+
+The primary exact two-sided paired test gave *p* = 0.00333. At 0.5 Hz and 18 dB, the longer tone gained 24 correct per-tone admissions and lost 7 (81 to 98 correct out of 120). With the coherent branch added, 18 gained and 7 lost (90 to 101 correct). Thus in this slow diffuse fixture a receiver that tries coherent windows still benefited from holding the transmitted tone. On the fast path at 18 dB both designs missed almost every block. At 22 dB the four extra correct joint admissions for held tones there arose from 20 gains and 16 losses. This small difference supplies little basis for selecting a duration on that path.
+
+| 2σ spread, block energy | One cell per-tone C/W/M | Two cells per-tone C/W/M | One cell joint C/W/M | Two cells joint C/W/M | Held joint gains / losses |
+|---|---:|---:|---:|---:|---:|
+| 0.5 Hz, 18 dB | 81 / 1 / 38 | 98 / 0 / 22 | 90 / 2 / 28 | 101 / 0 / 19 | 18 / 7 |
+| 0.5 Hz, 22 dB | 120 / 0 / 0 | 120 / 0 / 0 | 120 / 0 / 0 | 120 / 0 / 0 | 0 / 0 |
+| 20 Hz, 18 dB | 0 / 2 / 118 | 3 / 4 / 113 | 0 / 4 / 116 | 3 / 2 / 115 | 3 / 0 |
+| 20 Hz, 22 dB | 82 / 2 / 36 | 89 / 0 / 31 | 81 / 1 / 38 | 85 / 0 / 35 | 20 / 16 |
+
+C/W/M counts correct admissions, wrong admissions and misses. Primary slow-path per-tone 95% Wilson intervals are 58.7–75.2% for one cell and 73.8–87.6% for two. The full per-tone and joint branches used distinct calibrations for each format. The per-tone-only, reserved per-tone and reserved coherent thresholds were 5.34598, 5.38788 and 12.6951 for one cell, and 5.43116, 5.62931 and 12.6664 for two. On the common 400 null holdouts, false admissions for the two durations were 4 and 8 with per-tone alone, and 7 and 4 with the joint detector. The tests compare equal nominal predictive budgets; fixed-threshold false rates still have sampling uncertainty. All 120 received gain histories are shared across levels and formats and each has at most 32 independent complex fading coefficients. That finite-rank approximation matters especially at 20 Hz. The wider apertures span the same bin-center interval but their rectangular spectral responses differ.
+
+ITU-R F.1487 Annex 3 specifies a 2σ spread, with 0.5 Hz and two independently fading paths separated by 1 ms for its moderate mid-latitude case. The single-tap fixture here isolates Doppler and omits that delay diversity. Twenty hertz probes fast fading and is within the comparative test grid of Annex 2. Additional delay spread, finer spectral models, a weaker power or a different detector can change the ranking. [ITU-R F.1487, Annexes 2–3](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I%21%21PDF-E.pdf)
+
+The joint receiver for both formats forms 192 FFTs of 512 samples, gathers 327,680 complex tone-cell values and scores all six coherent physical window lengths. The held format adds 96 FFTs of 1,024 samples for its full-resolution per-tone pass. Per-tone lookup/additions across the 6,144 candidate scores fall from 393,216 to 196,608. On one local instrumented rerun, 1,279 scorer calls per format took 10.44 s for one cell and 10.26 s for two. The whole comparison took 22.37 s. Per-format timings include sample coding, FFTs and both search branches on one CPU thread, with templates and schedule prepared. The timing difference is too small to establish an advantage. The three earlier probes retained their counts. [Comparison implementation](held_tones.hpp)

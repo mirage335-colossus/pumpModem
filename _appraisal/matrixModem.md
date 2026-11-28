@@ -2,6 +2,8 @@
 
 Matrix Modem is a new standalone modem, attempting to learn from the lessons of Fast Modem, Robust Modem (single carrier), and triple Robust Modem.
 
+**Research status.** This is the original design brief. Read the [FSK proposal](matrixModem-FSK.md) alongside the [receiver design review](../_ref/algorithms-matrixModem/fsk-reconciliation.md) for the measured limitations of four-bit processing, narrow-band fading, codeword recovery, false presence and complete receiver service.
+
 As a standalone modem, Matrix Modem should be clearly seprated in the code, and development of Matrix Modem should not change the code of othe other modems.
 
 - Fast Modem is excellent, achieving very near the Shannon limit of bitrate throughput under such extraordinarily challenging conditions as acoustic echo in a large room over physical speakers and microphone. However, Fast Modem does not seem likely to communicate at such low transmit power the carrier would be much less than the noise floor of the bandwidth which GPS DO cannot narrow - although impressive, Fast Modem was not designed as a weak-signal modem.
@@ -118,7 +120,7 @@ Both transmitter and receiver must be designed to maximize computational ceiling
 
 - Total bandwidth should be configurable. A 2.2kHz (450Hz-2650Hz) bandwidth may be preferable, but such a limit is not subject to the 26dB attenuation of the 2.8kHz limit, rather this configurable total bandwidth has more to do with avoiding failure due to typical SSB transceiver built-in frequency filters. 
 
-- Total bandwidth used should not exceed the FCC Part 97 limit of 2.8kHz and 26dB attenuation outside the 2.8kHz band relative to the mean power within it .
+- The project targets up to 2.8 kHz and requests 26 dB out-of-band attenuation relative to mean in-band power. Treat the 26 dB figure as an engineering target with a specified measurement bandwidth, transmit filter and averaging interval. US Part 97 sets a 2.8 kHz authorized bandwidth for specified emissions on applicable bands. Spectrum containment alone does not qualify the private-key, hopping or one-way profiles for amateur operation. [47 CFR §97.307](https://www.ecfr.gov/current/title-47/section-97.307) · [operating assumptions](../_ref/algorithms-matrixModem/fsk-reconciliation.md#operating-assumptions)
 
 
 

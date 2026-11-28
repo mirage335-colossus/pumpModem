@@ -1,0 +1,28 @@
+seed 1: distinct 10-bit messages
+   0 consecutive hops erased: 1024..1024
+  16 consecutive hops erased: 1024..1024
+  28 consecutive hops erased: 1024..1024
+  31 consecutive hops erased: 249..251
+  two tones from one / two symbols: 170 / 251
+  minimum differing hops / minimum containing span: 28 / 30
+seed 2: distinct 10-bit messages
+   0 consecutive hops erased: 1024..1024
+  16 consecutive hops erased: 1024..1024
+  28 consecutive hops erased: 1024..1024
+  31 consecutive hops erased: 253..254
+  two tones from one / two symbols: 107 / 226
+  minimum differing hops / minimum containing span: 27 / 30
+seed 3: distinct 10-bit messages
+   0 consecutive hops erased: 1024..1024
+  16 consecutive hops erased: 1024..1024
+  28 consecutive hops erased: 1024..1024
+  31 consecutive hops erased: 249..251
+  two tones from one / two symbols: 165 / 252
+  minimum differing hops / minimum containing span: 28 / 30
+seed 4: distinct 10-bit messages
+   0 consecutive hops erased: 1024..1024
+  16 consecutive hops erased: 1024..1024
+  28 consecutive hops erased: 1024..1024
+  31 consecutive hops erased: 251..253
+  two tones from one / two symbols: 168 / 256
+  minimum differing hops / minimum containing span: 28 / 30

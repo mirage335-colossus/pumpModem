@@ -19,6 +19,7 @@
 //
 // Build: nvcc -O3 -std=c++17 -arch=sm_120 search_gpu.cu -lcublas -lcufft -o search_gpu
 // Run:   ./search_gpu [tones] [frequency bins] [blocks of 4096 messages per batch]
+//        ./search_gpu smoke 512 174 1   (one batch, planted-signal checks, no timing sweep)
 //        ./search_gpu sustain gemm|gemm8|fft SECONDS [tones] [bins] [blocks]     (for telemetry)
 // With more frequency bins than the short rungs can take directly (more than three on windows of
 // eight tones) only the product over all rungs runs; that is the scaling check.
@@ -26,6 +27,8 @@
 #include <cuda_fp16.h>
 #include <cublas_v2.h>
 #include <cufft.h>
+
+#include "search_geometry.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -124,12 +127,12 @@ __global__ void short_k(const int8_t* zmap, const uint8_t* sym, const uint8_t* g
 }
 
 // cuFFT route: fill the transform input of rung r, drift d: x[(msg * W + w) * 2L + i]
-__global__ void fill_k(const float2* ub, const float2* chirp, int N, int L, int r, int d, long total, float2* x) {
+__global__ void fill_k(const float2* ub, const float2* chirp, int N, int L, long total, float2* x) {
     long e = blockIdx.x * (long)blockDim.x + threadIdx.x;
     if (e >= total) return;
     long msg = e / (2 * N); int pos = (int)(e % (2 * N)), w = pos / (2 * L), i = pos % (2 * L);
     float2 v = make_float2(0.f, 0.f);
-    if (i < L) { int t = w * L + i; v = ub[msg * N + t]; if (r == 0) { float2 c = chirp[d * N + t]; v = make_float2(v.x * c.x - v.y * c.y, v.x * c.y + v.y * c.x); } }
+    if (i < L) { int t = w * L + i; v = ub[msg * N + t]; if (chirp) { float2 c = chirp[i]; v = make_float2(v.x * c.x - v.y * c.y, v.x * c.y + v.y * c.x); } }
     x[e] = v;
 }
 // energies of rung r from the transforms; keeps the better of the stored and the new result
@@ -158,8 +161,11 @@ template <class F> static double timeit(F f, double min_s = 2.0) {
 int main(int argc, char** argv) {
     std::string mode = argc > 1 ? argv[1] : "all"; int a0 = 1; std::string sroute = "gemm"; double ssecs = 10;
     if (mode == "sustain") { sroute = argc > 2 ? argv[2] : "gemm"; ssecs = argc > 3 ? atof(argv[3]) : 10; a0 = 4; }
+    const bool smoke = mode == "smoke";
+    if (smoke) a0 = 2;
     const int N = argc > a0 ? atoi(argv[a0]) : 512, NB0 = argc > a0 + 1 ? atoi(argv[a0 + 1]) : 174, CB = argc > a0 + 2 ? atoi(argv[a0 + 2]) : 32;
     cudaDeviceProp pr; CK(cudaGetDeviceProperties(&pr, 0));
+    if (CB < 1 || CB > NH || NB0 < 1 || N < 64 || N > 65536) return 2;
     Geo g{}; g.N = N; g.R = 0; while ((2 << g.R) <= N) ++g.R; g.B = CB * NH;
     if ((1 << g.R) != N || g.R > MAXR || NB0 > 2 * N || N < 64) { fprintf(stderr, "tones must be a power of two from 64, bins at most 2N\n"); return 2; }
     const int R = g.R; const long B = g.B;
@@ -179,14 +185,14 @@ int main(int argc, char** argv) {
     for (int t = N - 1; t > 0; --t) std::swap(sym[t], sym[rng() % (uint64_t)(t + 1)]);
     const uint32_t planted = (uint32_t)(rng() & 0xFFFFFF);
     const int f0 = -NB0 / 2 + (int)(rng() % (uint64_t)NB0), d0 = 2;
-    const double gd[ND] = {-5.82, -1.94, 1.94, 5.82};
     std::vector<int8_t> zmap((size_t)N * NV * 2);
     for (int t = 0; t < N; ++t) {
         uint8_t map[NV]; for (int v = 0; v < NV; ++v) map[v] = (uint8_t)(v % POS);
         for (int v = NV - 1; v > 0; --v) std::swap(map[v], map[rng() % (uint64_t)(v + 1)]);
         double zr[POS], zi[POS];
         for (int p = 0; p < POS; ++p) { zr[p] = 2.2 * gauss(rng); zi[p] = 2.2 * gauss(rng); }
-        const double x = (double)t / N, ph = PI * f0 * x + PI * gd[d0] * x * x / 2;
+        const double x = search_geometry::midpoint(t, N);
+        const double ph = search_geometry::phase(x, search_geometry::frequency(f0 + NB0 / 2, NB0), search_geometry::drift(d0));
         const int pp = map[value(sym[t], planted)];
         zr[pp] += 2.5 * std::cos(ph); zi[pp] += 2.5 * std::sin(ph);
         for (int v = 0; v < NV; ++v) {
@@ -194,7 +200,7 @@ int main(int argc, char** argv) {
             zmap[((size_t)t * NV + v) * 2 + 1] = (int8_t)std::max(-7, std::min(7, (int)std::lrint(zi[map[v]])));
         }
     }
-    const int h0 = (int)(planted >> HB) / CB * CB;         // batch that holds the planted message
+    const int h0 = std::min((int)(planted >> HB) / CB * CB, NH - CB);         // batch that holds the planted message
     const int want0 = (d0 * g.nb[0]) + (f0 + g.nb[0] / 2);
 
     uint8_t *dghi, *dglo, *dsym; int8_t* dz; float* dbest; int* darg;
@@ -212,6 +218,13 @@ int main(int argc, char** argv) {
     };
     auto verdict = [&]() { uint32_t m = 0; int h = 0; found(0, m, h); return (m == planted && h == want0) ? "correct" : "WRONG"; };
 
+    // A smoke run executes one batch on each arithmetic route and checks the physical grid label.
+    auto required_match = [&](const char* route) {
+        const std::string result = verdict();
+        std::printf("%s planted message, frequency and drift: %s\n", route, result.c_str());
+        if (result != "correct") std::exit(1);
+    };
+
     // ---- matrix operand A for rungs [0, RG): rows (rung, drift, window, bin)
     auto build_rows = [&](int RG, std::vector<float>& af, int& rows) {
         g.rowoff[0] = 0; for (int r = 0; r < R; ++r) g.rowoff[r + 1] = g.rowoff[r] + g.nd[r] * (1 << r) * g.nb[r];
@@ -219,14 +232,14 @@ int main(int argc, char** argv) {
         for (int r = 0; r < RG; ++r) { const int W = 1 << r, L = g.L[r], nb = g.nb[r];
             for (int d = 0; d < g.nd[r]; ++d) for (int w = 0; w < W; ++w) for (int b = 0; b < nb; ++b) {
                 const size_t row = (size_t)g.rowoff[r] + ((size_t)d * W + w) * nb + b;
-                for (int i = 0; i < L; ++i) { const int n = w * L + i; const double x = (double)n / N;
-                    const double a = -PI * (b - nb / 2) * i / L - (r == 0 ? PI * gd[d] * x * x / 2 : 0.0), ar = std::cos(a), ai = std::sin(a);
+                for (int i = 0; i < L; ++i) { const int n = w * L + i; const double x = search_geometry::midpoint(i, L);
+                    const double a = -search_geometry::phase(x, search_geometry::frequency(b, nb), r == 0 ? search_geometry::drift(d) : 0), ar = std::cos(a), ai = std::sin(a);
                     af[(2 * row) * (size_t)(2 * N) + n] = (float)ar; af[(2 * row) * (size_t)(2 * N) + N + n] = (float)-ai;
                     af[(2 * row + 1) * (size_t)(2 * N) + n] = (float)ai; af[(2 * row + 1) * (size_t)(2 * N) + N + n] = (float)ar; } } }
     };
     cublasHandle_t blas; if (cublasCreate(&blas) != CUBLAS_STATUS_SUCCESS) { fprintf(stderr, "cublas create failed\n"); return 2; }
     std::vector<float2> rot((size_t)3 * 3 * 8, make_float2(0, 0));
-    for (int l = 0; l < 3; ++l) { const int r = RS + l, L = g.L[r], nb = g.nb[r]; for (int b = 0; b < nb && b < 3; ++b) for (int i = 0; i < L; ++i) { const double a = -PI * (b - nb / 2) * i / L; rot[(l * 3 + b) * 8 + i] = make_float2((float)std::cos(a), (float)std::sin(a)); } }
+    for (int l = 0; l < 3; ++l) { const int r = RS + l, L = g.L[r], nb = g.nb[r]; for (int b = 0; b < nb && b < 3; ++b) for (int i = 0; i < L; ++i) { const double a = -2 * PI * search_geometry::frequency(b, nb) * i / L; rot[(l * 3 + b) * 8 + i] = make_float2((float)std::cos(a), (float)std::sin(a)); } }
     const bool noshort = g.nb[RS] > 3;                     // then only the all-rungs product runs
     float2* drot; CK(cudaMalloc(&drot, sizeof(float2) * rot.size())); CK(cudaMemcpy(drot, rot.data(), sizeof(float2) * rot.size(), cudaMemcpyHostToDevice));
     auto run_short = [&]() { short_k<<<NBLK, 256>>>(dz, dsym, dghi, dglo, drot, RS, g, h0, dbest, darg); };
@@ -244,7 +257,7 @@ int main(int argc, char** argv) {
 
     // ---- matrix-product route
     for (int variant = 0; variant < 2; ++variant) {
-        const int RG = variant == 0 ? R : RS; if ((mode == "sustain" && (variant == 1 || sroute == "fft")) || (noshort && variant == 1)) continue;
+        const int RG = variant == 0 ? R : RS; if ((smoke && variant != 0) || (mode == "sustain" && (variant == 1 || sroute == "fft")) || (noshort && variant == 1)) continue;
         std::vector<float> af; int rows; build_rows(RG, af, rows);
         const size_t na = af.size(); float* daf; __half* dah; int8_t* da8;
         CK(cudaMalloc(&daf, sizeof(float) * na)); CK(cudaMemcpy(daf, af.data(), sizeof(float) * na, cudaMemcpyHostToDevice));
@@ -268,6 +281,21 @@ int main(int argc, char** argv) {
             double t0 = now(); long it = 0;
             while (now() - t0 < ssecs) { if (sroute == "gemm8") { gather8(); prod_8i(); epi_i(); } else { gather(); prod_hh(); epi_h(); } CK(cudaDeviceSynchronize()); ++it; }
             printf("sustain %s: %ld batches of %ld messages in %.1f s\n", sroute.c_str(), it, B, now() - t0); return 0;
+        }
+        if (smoke) {
+            gather();
+            if (prod_hh() != CUBLAS_STATUS_SUCCESS) return 2;
+            epi_h();
+            required_match("FP16 output");
+            if (prod_hf() != CUBLAS_STATUS_SUCCESS) return 2;
+            epi_f();
+            required_match("FP32 output");
+            gather8();
+            if (prod_8i() != CUBLAS_STATUS_SUCCESS) return 2;
+            epi_i();
+            required_match("INT32 output");
+            cudaFree(dah); cudaFree(da8); cudaFree(duh); cudaFree(du8); cudaFree(dch); cudaFree(dcf);
+            continue;
         }
         printf("\nmatrix product on Tensor Cores, rungs 0 to %d in the product (%d complex rows, %.3g flop per batch)%s\n", RG - 1, rows, flop, RG < R ? ", short rungs by the direct kernel" : "");
         const double tg = timeit(gather), ts = RG < R ? timeit(run_short) : 0.0;
@@ -296,8 +324,16 @@ int main(int argc, char** argv) {
 
     // ---- cuFFT route
     if (!noshort) {
-        std::vector<float2> chirp((size_t)ND * N);
-        for (int d = 0; d < ND; ++d) for (int t = 0; t < N; ++t) { const double x = (double)t / N, a = -PI * gd[d] * x * x / 2; chirp[(size_t)d * N + t] = make_float2((float)std::cos(a), (float)std::sin(a)); }
+        std::vector<float2> chirp;
+        std::vector<size_t> offset(RS);
+        for (int r = 0; r < RS; ++r) {
+            offset[r] = chirp.size();
+            for (int d = 0; d < g.nd[r]; ++d) for (int i = 0; i < g.L[r]; ++i) {
+                const double x = search_geometry::midpoint(i, g.L[r]);
+                const double a = -search_geometry::phase(x, search_geometry::fft_shift(g.nb[r]), r == 0 ? search_geometry::drift(d) : 0);
+                chirp.push_back(make_float2(std::cos(a), std::sin(a)));
+            }
+        }
         float2 *dchirp, *dub, *dx;
         CK(cudaMalloc(&dchirp, sizeof(float2) * chirp.size())); CK(cudaMemcpy(dchirp, chirp.data(), sizeof(float2) * chirp.size(), cudaMemcpyHostToDevice));
         CK(cudaMalloc(&dub, sizeof(float2) * (size_t)B * N)); CK(cudaMalloc(&dx, sizeof(float2) * (size_t)B * 2 * N));
@@ -305,7 +341,10 @@ int main(int argc, char** argv) {
         for (int r = 0; r < RS; ++r) { int n = 2 * g.L[r]; if (cufftPlanMany(&plan[r], 1, &n, nullptr, 1, n, nullptr, 1, n, CUFFT_C2C, (int)(B << r)) != CUFFT_SUCCESS) { fprintf(stderr, "cufft plan failed for size %d\n", n); return 2; } }
         const long total = B * 2L * N; const unsigned fb = (unsigned)((total + 255) / 256);
         auto gatherc = [&]() { gather_c<<<NBLK, 256>>>(dz, dsym, dghi, dglo, N, h0, dub); };
-        auto fill = [&](int r, int d) { fill_k<<<fb, 256>>>(dub, dchirp, N, g.L[r], r, d, total, dx); };
+        auto fill = [&](int r, int d) {
+            auto* phasors = r == 0 || search_geometry::fft_shift(g.nb[r]) != 0 ? dchirp + offset[r] + d * g.L[r] : nullptr;
+            fill_k<<<fb, 256>>>(dub, phasors, N, g.L[r], total, dx);
+        };
         auto fft = [&](int r) { if (cufftExecC2C(plan[r], (cufftComplex*)dx, (cufftComplex*)dx, CUFFT_FORWARD) != CUFFT_SUCCESS) { fprintf(stderr, "cufft exec failed\n"); exit(2); } };
         auto epi = [&](int r, int d) { epi_c<<<NBLK, 256>>>(dx, N, g.L[r], r, g.nb[r], d, dbest, darg); };
         auto whole = [&]() { gatherc(); for (int r = 0; r < RS; ++r) for (int d = 0; d < g.nd[r]; ++d) { fill(r, d); fft(r); epi(r, d); } run_short(); };
@@ -313,7 +352,9 @@ int main(int argc, char** argv) {
             double t0 = now(); long it = 0; while (now() - t0 < ssecs) { whole(); CK(cudaDeviceSynchronize()); ++it; }
             printf("sustain fft: %ld batches of %ld messages in %.1f s\n", it, B, now() - t0); return 0;
         }
-        whole(); CK(cudaDeviceSynchronize()); const char* v = verdict();
+        whole(); CK(cudaDeviceSynchronize());
+        if (smoke) { required_match("cuFFT"); return 0; }
+        const char* v = verdict();
         printf("\ncuFFT, rungs 0 to %d by transforms of %d to %d points, short rungs by the direct kernel; planted: %s\n", RS - 1, 2 * N, 2 * g.L[RS - 1], v);
         const double tg = timeit(gatherc), ts = timeit(run_short);
         gatherc(); CK(cudaDeviceSynchronize());

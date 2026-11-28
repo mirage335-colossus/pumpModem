@@ -1,35 +1,36 @@
 # Matrix Modem FSK: specification draft
 
-Draft of 26 November 2026, last reconciled 27 November (fourth pass), with the sub-9 kHz
-configuration adopted, the hypothesis search restructured and the computational rules of
-section 13.1 added and completed on 28 November, for review. It extends the
-[Matrix Modem brief](matrixModem.md) with a concrete keyed MFSK waveform, optionally frequency
-hopped, and the receiver behaviour it requires. No implementation exists. Every number is a
-calculation, a model simulation or a stage measurement on one GPU type and three CPUs. The supporting research is
-indexed in
-[`_ref/algorithms-matrixModem/Fable-5.2/`](../_ref/algorithms-matrixModem/Fable-5.2/README.md).
-[Section 14](#14-decisions) lists what is settled and what still needs a decision, and
-[section 15](#15-known-weaknesses) lists the known weaknesses.
+This experimental specification extends the [original brief](matrixModem.md). The initial
+draft and its retained calculations date from 26–28 November 2026 (UTC).
+The [receiver design review](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
+records corrections to the waveform, search geometry, code, presence statistic and overload policy.
+There are working experimental receiver stages and a bounded sample-to-message experiment.
+Complete-format sensitivity, capacity on target hardware and field use remain unqualified.
+The [earlier research index](../_ref/algorithms-matrixModem/Fable-5.2/README.md)
+preserves the original measurements and their provenance. Sections 14 and 15 distinguish design
+choices from evidence about their performance.
 
 ## 1. Scope and fixed decisions
 
 - One-way, one tone at a time at full peak power, fixed configuration per purpose, no feedback,
   no length fields.
-- Target: 2–100 mW through more than 150 dB of path loss, C/N₀ from about +10 down to −20 dB-Hz,
-  short messages that may take hours, days or weeks. On phase-stable paths without FHSS the range
-  extends to about −37 dB-Hz, where coherent links below 9 kHz already work.
-- **Constant envelope always; no amplitude shifts.** Power, not bandwidth, limits every link in
-  this range, and a peak-limited transmitter that varies its amplitude lowers its average power
-  ([4.2](#42-tone-length)).
-- **Messages shorter than 10 bits are not supported.** A message of about 10 bits is expected to
-  take less than twice as long to send reliably as a single bit at similar confidence. Under this
-  specification's sizing it takes 1.1 to 1.3 times as long
-  ([section 10](#10-sizing-and-expected-duration)).
+- The HF design target uses 2–100 mW and high path loss. Received C/N₀ also depends on
+  antenna gains and noise density. The +10 to −20 dB-Hz study points, and the −37 dB-Hz
+  coherent sub-9 kHz comparison, are research inputs. The proposed format has no field
+  sensitivity measurement at these limits.
+- **Constant amplitude on the active flat interval.** The proposed transmitter uses its available
+  peak power throughout that interval. Hopping has ramps and quiet guards. Bandwidth, oscillator
+  error, antenna response and channel nulls can independently limit reception. Use conducted,
+  radiated or received power consistently in each link budget.
+- **The configured payload sizes start at 10 bits.** Section 10's presence-limited model gives
+  1.10–1.30 times the one-bit duration. A payload-error-only comparison gives up to 2.48 times
+  at the listed operating points. These are different error criteria.
 - **The transmitter assumes a diffuse path; the receiver also tries a specular one.** The
-  transmitter sends FSK suited to the expected Doppler spread of its configured path class, by
-  default one tone per 160 ms cell on 6.25 Hz spacing, and never relies on coherence between
-  tones. The receiver must always attempt to add tones coherently as well, in case the path is
-  specular, and keep the better result.
+  transmitter sends FSK suited to the expected Doppler spread of its configured path class, using one tone per 160 ms cell on 6.25 Hz spacing as the reference configuration.
+  Select a held-tone profile before transmission when one-cell tones miss the deadline on the
+  configured weak, slowly fading path. Explicit coherent profiles below 9 kHz assume the stated
+  minimum coherence window. The receiver must always attempt to add tones coherently as well, in case the path is
+  specular. Combine the branches with a threshold calibrated for the joint decision (section 8).
 - **The transmit format stays on the lattice; sensitivity is the receiver's work.** A path that
   allows more than per-tone detection is exploited by further receiver attempts on the same
   transmitted signal, not by another waveform.
@@ -39,33 +40,27 @@ indexed in
   coherent windows carry the sensitivity
   ([12.2](#122-phase-stable-paths-below-9-khz)).
 - **Below 9 kHz not hitting the computational ceiling has priority, and concealment is kept only
-  where it costs no computation.** The band is widely regarded as useless and is shared with
-  every electronic device, so an emission there is unlikely to draw complaint. The keyed phase
-  per tone stays because it is free. Nothing that adds search work for concealment is offered
-  there: no phase steps inside a tone, no more than one phase per cell, no hopping. This case
-  is also one of the two extremes the receiver's computation is specified for. At HF the first
-  transform is the bulk of the work; below 9 kHz the hypothesis search is. The same measured
-  scheduling has to finish the whole job soonest in both
-  ([13.1](#131-rules-that-bind-every-implementation), rule 1; [section 8](#8-receiver-requirements),
-  item 7).
-- **Every tone carries a keyed phase.** At least one keyed phase change per tone is mandatory in
-  every configuration, so that no observer on a steadier path than the intended receiver's can
-  add the signal coherently without the key ([4.4](#44-phase-key)).
+  where it costs no computation.** Existing site noise and emissions measurements do not establish interference at another
+  receiving site. The research profile assumes a separately authorized experiment. The per-tone
+  phase operation has a small cost for an aligned receiver. The profile uses at most one
+  phase assignment per tone and disables hopping. Test scheduling on both HF and sub-9 kHz
+  profiles with the complete search and workspace admitted.
+- **Every tone has a scheduled phase.** Successive draws can be equal. The common-phase
+  calculation assumes a private schedule, while the published zero-key profile is reproducible
+  by any receiver ([4.4](#44-phase-key)).
 - **FHSS is optional, and its ramps are tolerated.** With FHSS nothing is assumed to carry over
-  between hops: the shift oscillator changes phase at random on most radios and may come back
-  slightly off frequency. Without FHSS (no shift oscillator, as below 9 kHz) tones run back to
+  between hops: the research model allows an unknown phase and frequency error on each retune.
+  Characterize the radio before assuming either independence or continuity. Without FHSS (no shift oscillator, as below 9 kHz) tones run back to
   back with a phase the keyed receiver knows. Alphabet, code, keys and decoder are the same in
   both cases.
 - **Helper Carrier is a separate, diagnostic system.** It stands in for more stable oscillator
   hardware. Its two-pilot frequency, phase and timing estimates are used, if at all, as standalone
   search narrowing with a benefit similar to a GPSDO. There is no joint detection between Helper
   tones and modem signals. No setting of this specification depends on it.
-- **Computation is specified, not left to the implementation.** Three rules bind the receiver
-  and the simulator ([13.1](#131-rules-that-bind-every-implementation)): every route is timed
-  on the machine it runs on (CPU FFT against GPU FFT against a Tensor Core matrix-product DFT,
-  and the like) and work is rebalanced so that the whole job finishes soonest; no work is done
-  twice, in particular no outer loop repeats an inner one's work; and simulation speed is a
-  requirement, on a 256-CPU machine and on a 32-CPU machine with an RTX PRO 6000.
+- **Measure the complete receiver.** Compare qualified CPU and GPU routes on the available
+  machine, reuse shared work within the workspace limit, and measure simulation throughput
+  on the stated CPU and GPU reference classes. A candidate route needs to finish the full
+  public search, including quiet periods. [Scheduling rules](#131-rules-that-bind-every-implementation)
 - A general solution without drastic failure is preferred over one that is slightly better in the
   cases it handles. A theoretical weakness is listed, not dismissed.
 
@@ -94,18 +89,18 @@ indexed in
 | --- | --- | --- |
 | Complex baseband sample rate | 3,200 Hz (48 kHz audio ÷ 15) | 3,200 Hz, or 400 Hz after a further decimation by 8 |
 | Cell | 512 samples = 160 ms | 4,096 samples at 3,200 Hz = 1.28 s |
-| Tone bandwidth and position spacing | 6.25 Hz (one bin of one cell: the FT8 cell) | 0.78125 Hz |
+| Reciprocal cell duration and position spacing | 6.25 Hz (one bin of one cell: the FT8 cell) | 0.78125 Hz |
 | Total FSK bandwidth | Configurable, a whole number of positions. Default 2.2 kHz (450–2,650 Hz audio) = 352 positions; up to 2.8 kHz = 448; down to 12.5 Hz = 2 positions | 12.5 Hz = 16 positions, for example from 8,259.375 Hz |
-| Tone rate | 6.25 tones per second by default (one cell per tone) | 0.098 tones per second (8 cells = 10.24 s per tone) |
+| Tone rate | 6.25 tones per second in the one-cell HF reference | 0.098 tones per second (8 cells = 10.24 s per tone) |
 
-- Every tone length is a whole number of cells, and so is the flat part of every hop; a hop is
-  a whole number of cells too, except the 0.4 s hop of 2.5 cells ([4.3](#43-hop)). Every tone
-  is on a position. A
-  tone is unshaped and completes whole cycles in every cell. Its phase changes only by the keyed
-  quarter turns of the phase key ([4.4](#44-phase-key)); below 9 kHz each change is spread over
-  an 80 ms ramp.
-- These rules give exact orthogonality over a cell, one transform plan, and bin statistics that a
-  simulator may draw without forming samples.
+- A tone occupies an integer number of flat cells. The frequencies differ by integer multiples
+  of the reciprocal cell duration. The common carrier phase still evolves at the chosen band
+  origin. A flat aligned observation of a single undistorted tone has zero projection onto
+  distinct lattice positions. An identical known unit-modulus phase modulation on all candidate
+  references also preserves their inner products. A rectangular tone has sidelobes outside the
+  nominal position band. Filters, masks, delayed transitions and displaced receiver windows
+  change the projected means or noise covariance. Model them explicitly when drawing joint bin
+  statistics. [Finite-window checks](../_ref/algorithms-matrixModem/fsk-lattice-validity.md)
 - **Lattice scale.** The cell is 160 ms × 2^j with positions 6.25 Hz / 2^j apart. `j` = 0 is the
   default and serves every path through a voice-bandwidth radio. A larger `j` puts more
   positions into a band that the transmit antenna or the receiver's interference keeps narrow.
@@ -116,16 +111,15 @@ indexed in
     antenna of 20 Hz or less.
   - A scaled cell is 512 samples at 3,200 Hz / 2^j or 512 × 2^j samples at 3,200 Hz; the bins
     are the same. Conditioning runs before any further decimation.
-  - Shorter cells are not offered: a 40 ms cell is never better than 160 ms for weak signals on
-    a continuous path, at any spread up to 100 Hz ([4.2](#42-tone-length) gives the cost of
-    faster tone rates). Meteor burst, which this draft does not support, is the one path that
-    would want a shorter cell ([12.3](#123-meteor-burst-and-troposcatter-at-50-mhz)).
+  - The draft offers 160 ms as its shortest cell. Earlier weak-signal comparisons hold only for
+    the specified diffuse-channel, bandwidth and receiver model. Transient openings, a rapidly
+    varying channel or other deadlines can favor another aperture or within-cell processing.
 
 ## 4. Tone, hop and phase key
 
 ### 4.1 Settings
 
-| Setting | Default | Other values | Chosen from |
+| Setting | HF reference | Other values | Chosen from |
 | --- | --- | --- | --- |
 | Lattice scale | `j` = 0: 160 ms cell, 6.25 Hz spacing | `j` = 3 below 9 kHz (1.28 s, 0.78125 Hz); `j` = 2 or 4 there for other antennas | Transmit antenna bandwidth and the receiver's interference ([section 3](#3-lattice), [12.2](#122-phase-stable-paths-below-9-khz)) |
 | Tone length | 1 cell (160 ms) | Any whole number of cells up to the hop. Below 9 kHz 8 cells (10.24 s), with 1 cell (1.28 s) and 32 cells (41 s) as the alternatives | Expected Doppler spread and level ([4.2](#42-tone-length)) |
@@ -136,11 +130,13 @@ indexed in
 
 ### 4.2 Tone length
 
-The transmitter chooses the tone length for a diffuse path of the expected spread. With per-tone
-reception a tone is worth holding for about 4 divided by the Doppler spread and no longer.
+The transmitter chooses the tone length for a diffuse path of the expected spread. The retained Gaussian diffuse-channel calculations give diminishing returns around four
+divided by their stated Doppler spread. The spectrum shape, tone energy, clock and receiver
+metric determine the appropriate aperture.
 
-**Stated preference.** A tone rate as fast as the spread and the total bandwidth allow, up to
-one tone per cell, with one keyed phase per tone. Two cases depart from it:
+**Profile selection.** Use one tone per cell as the comparison point. Choose a faster rate for a
+short strong-signal deadline only if the credible weak-path airtime and receiver work also fit.
+Compare held tones at the configured signal level and spread. Two particular cases are:
 
 - **Paths where specular reception can be expected.** The receiver's wide-band coherent attempt
   then carries the load, with its 57 µs timing and a delay-rate search
@@ -156,11 +152,20 @@ one tone per cell, with one keyed phase per tone. Two cases depart from it:
   - One cell (1.28 s) is the fastest tone offered there, for a link that turns out strong; 32
     cells (41 s) suit blocks longer than about three hours.
   - The search in millihertz bins through oscillator, clock and path drift is a transform
-    across tone sums. For a ±1 ppm reference it is within reach of a laptop CPU for 24 bits;
-    for a free-running crystal it still exceeds the ceiling for 24 bits and not for 16
+    across tone sums. Historical kernel projections favour the narrow bank and already
+    exceed real time on some broad 24-bit searches. Complete CPU service for these
+    oscillator envelopes remains unmeasured
     ([12.2](#122-phase-stable-paths-below-9-khz)).
 
-The preference costs sensitivity on slow paths, which is open decision 1 of
+At fixed 10.24 s airtime, 10 payload bits and 18 dB block energy, a paired native HF test
+compared 64 one-cell tones with 32 two-cell tones. In the 0.5 Hz diffuse fixture, holding
+tones raised correct per-tone admissions from 81 to 98 out of 120 and joint admissions from
+90 to 101. The formats used their respective repeat counts and separately calibrated
+thresholds. At 20 Hz spread, joint reception recovered 0 and 3 of 120 at that energy.
+At 22 dB it recovered 81 and 85. This supports testing a held-tone profile on a slow path.
+Neither profile covered the fast path at the lower energy. [Matched experiment](algorithms-matrixModem/block-reception/README.md#one-cell-versus-two-cell-hf-tones)
+
+The reference rate costs sensitivity on slow weak paths. Profile selection is open decision 1 of
 [section 14](#14-decisions).
 
 Extra transmit time against the theoretical bound at −10 dB-Hz, per-tone reception, for a
@@ -186,11 +191,10 @@ steady path and for spreads of 0.1 / 1 / 3 / 10 / 30 Hz:
   diffuse path the delay spread holds the rate to roughly 50 to 200 Hz on HF. A faster rate
   would improve concealment only for strong signals ([section 14](#14-decisions), open).
 - **Where phase or amplitude would carry information instead.** Near the full bandwidth the
-  signal is phase keying, and amplitude levels pay only when bandwidth limits the link: above
-  roughly 2 bit/s/Hz, at a symbol energy of 12 to 15 dB over the noise density. In 2.2 kHz that
-  is a C/N₀ of about 46 to 48 dB-Hz, against +10 to −20 dB-Hz here; the default lattice carries
-  0.023 bit/s/Hz before coding. Both also need a coherent path. That regime belongs to a fast
-  modem and is outside this specification. Textbook reasoning, not computed.
+  signal approaches a single phase-keyed carrier when the occupied band allows only one position. This draft uses tones at full active amplitude.
+  Noncoherent reception can distinguish changes in amplitude from energy. Different peak,
+  average-power and deadline constraints can change the ordering of waveforms.
+  [Power constraints and tone-length comparison](../_ref/algorithms-matrixModem/fsk-reconciliation.md#choosing-tone-length-and-power-constraints)
 - Named held-tone lengths, and where each reaches diminishing returns with per-tone reception:
 
   | Held tone | Diminishing returns for |
@@ -215,19 +219,23 @@ steady path and for spreads of 0.1 / 1 / 3 / 10 / 30 Hz:
 - **Structure.** A hop holds a whole number of tones between its edges. The 0.4 s hop has 2
   cells flat and, at each edge, a 20 ms raised-cosine ramp and 20 ms of quiet. Longer hops have
   the same ramp and 60 ms of quiet, so a hop of `N` cells in all has `N` − 1 cells flat. The
-  position changes at hop edges only while the envelope is zero.
-- **Edge cost.** 0.97 dB of time at 0.4 s, 0.18 dB at 4 s, 0.02 dB at 40 s, 0.002 dB at 400 s.
+  radio changes its hop frequency during a quiet edge. Tone positions can change between cells within the hop.
+- **Flat-window exposure.** A receiver using only the flat cells captures 80% of the
+  full-power 0.4 s reference energy (0.97 dB loss). Including transmitted raised-cosine
+  amplitude ramps gives 83.75% (0.77 dB). The flat-window losses at 4, 40 and 400 s are
+  0.18, 0.02 and 0.002 dB. Extra time to reach an error target depends on the decoder and channel.
 - **A new phase in every hop is assumed and costs nothing more.** Per-tone reception does not
   use the phase.
 - **A new frequency in every hop acts like added Doppler spread** on a held tone, unless the
   tone is strong enough to locate itself. Block time against a known centre: within ±0.1 Hz,
   nothing at 1 Hz of spread or more and 1.3 to 1.7 times on a 0.1 Hz path; within ±1 Hz, 1.6
-  times at 1 Hz of spread and 6 to 11 times on a 0.1 Hz path. A one-cell tone is unaffected:
-  an error of about ±1 Hz stays inside its 6.25 Hz bin.
-- **0.4 s is the longest hop unlicensed hopping allows.** US rule 47 CFR 15.247 limits the
-  average occupancy of a hop frequency to 0.4 s at 902–928 MHz, 2.4 GHz and 5.8 GHz, with at
-  least 50, 15 and 75 hop channels (read in the 2023 annual edition, not the current eCFR).
-- **40 s is the recommended alternate for one-cell tones.** It loses 0.02 dB to its edges, keeps
+  times at 1 Hz of spread and 6 to 11 times on a 0.1 Hz path. A one-cell tone offset by 1 Hz retains approximately
+  91.86% of its nominal-bin energy, a 0.37 dB loss before combining.
+- **The 0.4 s hop is an engineering example.** US Part 15.247(a)(1) limits occupancy per
+  frequency over specified observation periods in the 902–928, 2400–2483.5 and 5725–5850 MHz
+  bands. Channel count and bandwidth conditions differ by band. This rule does not govern HF
+  amateur operation. [47 CFR 15.247](https://www.ecfr.gov/current/title-47/section-15.247)
+- **40 s is the recommended alternate for one-cell tones.** It loses 0.02 dB of flat-window exposure to its edges, keeps
   the concealment of hopping for 50 channels ([section 11](#11-concealment)), gives coherent
   attempts a 40 s window, and asks the oscillators for 25 mHz. With one-cell tones a longer hop
   adds no sensitivity by itself; hops longer than about 40 s are worth having only with held
@@ -236,8 +244,7 @@ steady path and for spreads of 0.1 / 1 / 3 / 10 / 30 Hz:
 
 ### 4.4 Phase key
 
-**Mandatory in all cases: every tone is sent with a keyed phase of 0°, 90°, 180° or 270°, so the
-phase changes at least once per tone.** Tone, envelope and lattice are unchanged. The phase
+**Mandatory in all cases: every tone is sent with a keyed phase of 0°, 90°, 180° or 270°, with a fresh scheduled value per tone. Consecutive values can coincide.** Tone, envelope and lattice are unchanged. The phase
 carries no information and depends only on the key and the time, not on the position.
 
 **Options.** The phase may change more often than once per tone: every 8, 4, 2 or 1 cells inside
@@ -256,7 +263,9 @@ it.
   the source: for 2.6 ms and 11 J on an 86 Hz antenna at 10 kW, 9.2 ms and 41 J on a 24 Hz one.
   VLF practice forbids such steps because they trip or damage transmitters
   ([12.2](#122-phase-stable-paths-below-9-khz)).
-- **With the ramp no power is returned.** The ramp is a frequency excursion of 3.125 Hz (quarter
+- **The 80 ms ramp avoided reversal of net real power in the modeled cases.** A reflected
+  traveling wave can still be present. A standing-wave ratio of 2.84 gives approximately
+  23% reflected-to-forward power on the assumed reference impedance. The ramp is a frequency excursion of 3.125 Hz (quarter
   turn) or 6.25 Hz (half turn) for 80 ms, the kind of phase-continuous shift that FSK at VLF
   uses. Largest angle between drive and antenna current, with the standing-wave ratio against
   the antenna's resonant resistance:
@@ -270,7 +279,7 @@ it.
   A 20 ms ramp still returns power on a 24 Hz antenna. Sending a half turn towards the centre of
   the positions instead of in a keyed direction does as much as doubling the ramp; it is not
   adopted because the ramp would then depend on the position.
-- **Cost to the receiver.** None when its reference follows the ramp. A receiver that assumes a
+- **Cost to the receiver.** A matched reference removes phase-template mismatch for the modeled waveform. Antenna attenuation and channel distortion still apply. A receiver that assumes a
   plain step loses 0.03 dB with 10.24 s tones and 0.24 dB with 1.28 s tones at 80 ms, and twice
   that at 160 ms. The timing spacing is unchanged.
 - **Basis.** Calculated for a single-tuned antenna driven at constant amplitude
@@ -285,7 +294,7 @@ it.
   a cell, so every tone would start its cell at the same phase. The average of all possible
   tones is then a short pulse at the start of each cell, which an observer can add over its
   whole observation without knowing any position.
-- **The gain is large and unbounded.** On a phase-stable path, against an observer measuring
+- **The model advantage grows over the stated observation interval.** On a phase-stable path, against an observer measuring
   energy, it is 5 dB in an hour, 11.5 dB in 18 hours and 16 dB in a week (1.5, 7.7 and 12.5 dB
   if the observer must also search 10,000 frequency bins), growing 5 dB per tenfold of time.
   Over one block at −10 dB-Hz the observer's margin falls from 8.1 dB to −3.4 dB, and at
@@ -296,35 +305,35 @@ it.
 - **The observer's path need not be the link's.** On HF an observer may be near enough for
   ground wave or line of sight, on a side or back lobe of the transmitting antenna, while the
   intended receiver further away sees a diffuse path and cannot add coherently at all.
-- **It keeps coherent reception to the keyed receiver.** Where the path is steady, as below
-  9 kHz, only a receiver with the key can add tones with their phases.
+- **Scope of the coherent comparison.** The cited calculation studies a particular
+  statistic with an unknown schedule. The zero-key receiver and its schedule are public.
 - **It limits perceived interference.** A nearby simple coherent receiver would lock onto the
-  steady cell-rate component of an unkeyed signal. The keyed phase leaves none.
+  steady cell-rate component of an unkeyed signal. The cited calculation suppresses that particular mean component.
 - **With few positions without FHSS** an unkeyed tone would also leave a steady line at every
   position, 6, 12 and 24 dB below the signal for 2, 4 and 16 positions. The keyed phase removes
   it.
 - **Four phases, not two.** Squaring the signal removes a two-phase key and restores the pulse
   or line. In the simulation this needed tones about 10 dB stronger than the plain pulse, and
-  detected nothing against four phases. A fourth-power attack remains in principle and was not
-  computed.
+  detected nothing against four phases. Other statistics remain untested.
 
 **What it costs the receiver**
 
-- **One phase per one-cell tone costs nothing.** Per-tone reception takes each cell's energy,
+- **One constant phase per aligned one-cell tone preserves its bin energy.** Per-tone reception takes each cell's energy,
   which a quarter turn of the whole cell does not change; it need not undo the key. The timing
   spacing is 20 ms with or without it. Coherent attempts undo it with a quarter turn of each
   cell's transform output (a swap and a sign change, exact on 4-bit values).
-- **One phase per held tone costs nothing either.** The timing spacing is an eighth of the tone,
+- **A constant phase over an aligned held tone likewise preserves bin energy.** The timing spacing is an eighth of the tone,
   as it would be without the key.
-- **The timing rule.** A timing error `τ` keeps (1 − `τ`/`T`)² of the power, where `T` is the
-  phase interval. Hypotheses `T`/8 apart lose 0.27 dB on average and 0.56 dB at worst. The count
-  per dimension is the timing uncertainty divided by that spacing; timing known to a few
-  milliseconds needs one hypothesis.
+- **The timing rule.** For an isolated rectangular tone, the overlap contribution at offset
+  `τ` has normalized power `(1−|τ|/T)²`. At half of a `T/8` grid step it loses 0.56 dB.
+  A neighboring tone contributes its own samples. At the same position with opposite phase
+  this gives `(1−2|τ|/T)²`, or 1.16 dB loss at that offset. The overlap-only figure cannot
+  bound a sequence or the picked search maximum. [Sample calculation](../_ref/algorithms-matrixModem/fsk-lattice-validity.md)
 - **Phase steps inside a held tone cost timing hypotheses.** A step every cell needs 20 ms
   spacing where held tones of 4, 40 and 400 s with one phase need 0.5 s, 5 s and 50 s: 24, 249
   and 2,499 times the hypotheses per dimension, where timing is uncertain.
-- **More than one phase per cell costs transforms, not arithmetic.** The receiver undoes the key
-  on the samples before the transform, at no cost. The coarse timing spacing shrinks with the
+- **More than one phase per cell costs transforms, not arithmetic.** The receiver removes the scheduled phase
+  on the samples before the transform. A fused sign change or swap still needs the correct alignment. The coarse timing spacing shrinks with the
   phase interval, so 2 or 4 phases per cell need 2 or 4 times the transforms per second of
   timing uncertainty (10 and 5 ms spacing), for per-tone reception and coherent attempts alike.
   The 350 fine timing steps of the wide-band coherent attempt are unchanged. Each tone then
@@ -359,17 +368,16 @@ it.
 
 ### 4.5 Without FHSS
 
-- There is no ramp and no quiet interval; the envelope is constant through the block, and the
-  edge cost is recovered.
-- Every tone starts at its keyed phase. Because a tone completes whole cycles in every cell, the
-  receiver knows the phase of every tone from the key, apart from one carrier phase and the
-  frequency offset. The transmitter needs nothing extra for this.
+- With FHSS disabled, tones have no hop-amplitude ramp or quiet guard. The configured sub-9 kHz
+  phase ramp still applies. Predict phase in a specified baseband/carrier convention, including
+  the common phase accumulated at the chosen band origin. Relative lattice spacings make whole
+  cycles per cell. The path can still impose a different complex gain on each position.
 - The receiver's coherent attempts may then span the whole block
   ([section 8](#8-receiver-requirements), item 8).
 
 ## 5. Alphabet and keyed placement
 
-- **256 symbol values per tone** (8 coded bits).
+- **256 internal symbol values** (an 8-bit label). The emitted tone can distinguish at most `min(P,256)` positions.
 - For every tone a keyed permutation of all positions maps the 256 values to positions. The
   remaining positions (96 of 352 by default) are not used for that tone.
 - **Fewer than 256 positions.** The largest power of two `P` that fits is used, and the keyed map
@@ -378,13 +386,15 @@ it.
   0.8, 0.2 and 0.0 dB for 2, 4, 8 and 16 positions (simulated; a second, smaller simulation
   agrees within its scatter of ±0.2 dB). Per-tone reception prefers more positions as well, by
   1.5 dB between two and sixteen (simulated for the sub-9 kHz formats on a steady path).
-  **Below 9 kHz sixteen positions are used**, which avoids the loss
-  ([12.2](#122-phase-stable-paths-below-9-khz)). A keyed map that also gives each value one of
-  four quarter turns would remove the coherent loss for any number of positions; it is open
+  **Below 9 kHz sixteen positions are used**, for which this fixture resolved no additional loss
+  ([12.2](#122-phase-stable-paths-below-9-khz)). A value-dependent phase is a candidate to test under its phase-coherence assumptions; it is open
   decision 18 of [section 14](#14-decisions).
 - Adjacent positions are allowed. With a fresh placement for every tone and the spread-weighted
   evidence of section 8, simulation shows no loss against wider spacing at spreads up to 30 Hz
-  for tones of 2 and 24 cells. One-cell tones were not run in that simulation.
+  for tones of 2 and 24 cells. A separate one-cell calculation at 30 Hz spread finds similar
+  average discrimination for two wide placement pools, while two nearby positions alone lose
+  substantial pairwise discrimination. A frozen two-ray channel can put the entire narrow
+  alphabet in a notch. [One-cell and two-ray controls](../_ref/algorithms-matrixModem/fsk-lattice-validity.md)
 - No placement may have structure at fixed position spacings (2, 4, 8, 16) or fixed periods.
 
 ## 6. Message format and error correction
@@ -396,9 +406,11 @@ each sent on `L` tones: 32·`L` tones per block.
   8 × `k` binary matrix and `m_j` a keyed 8-bit mask. This is a keyed random code, not a
   convolutional code.
 - **Repeats.** `L` carries the adaptation to weak signals; the code does not change. `L` comes
-  from the configured transmit power, path loss, noise density, margin and Doppler class. With
-  `P` positions fewer than 256, `L` is at least 8/log₂`P`, so that a block still carries 256
-  coded bits. With the sixteen positions used below 9 kHz `L` is at least 2: the shortest block
+  from the configured transmit power, path loss, noise density, margin and Doppler class. With fewer than 256 positions the draft sets `L ≥ ceil(8/log₂ P)` so a symbol has
+  space for at least 256 position tuples. Independently drawn balanced maps can collide.
+  At 16 positions and two repeats only 167.77 tuples are occupied on average per byte.
+  The full 32-symbol code can nevertheless identify the payload. Assess that code after the
+  actual erasure mask. [Identifiability calculation](../_ref/algorithms-matrixModem/fsk-code-identifiability.md) With the sixteen positions used below 9 kHz `L` is at least 2: the shortest block
   is 64 tones, 10.9 minutes with 10.24 s tones (82 s with 1.28 s tones, 44 minutes with 41 s
   tones).
 - **Interleaving.** Each tone of the block is assigned to a symbol by a keyed pseudo-random
@@ -406,21 +418,28 @@ each sent on `L` tones: 32·`L` tones per block.
 - **Hop spanning.** With FHSS a block spans at least 32 hops, and each symbol's tones are spread
   over the hops as evenly as the permutation allows. Where the level would allow a shorter
   block, `L` is raised until the block fills 32 hops; the extra energy is margin.
-- **Decoding** is an exhaustive maximum-likelihood search of all `2^k` messages for every
-  hypothesis of the receiver. There are no sync symbols: the block is its own sync pattern.
+- **Decoding** scores all `2^k` messages at every configured hypothesis. This finds the
+  maximum of the chosen metric. It implements maximum likelihood only when that metric
+  represents the observation law, including quantization, channel uncertainty and erasures. There are no sync symbols: the block is its own sync pattern.
 - **What adapts and what does not.** Tone length and level are met by `L`; total bandwidth by the
   keyed map of section 5; block length by the interleaver; lost hops by hop spanning and margin.
   Fixed regardless: 32 symbols per block, the three block sizes, and the code.
-- **Why this code.** For 10 to 24 bits nothing better is known to this draft. It is within 0.2 dB
-  of ideal orthogonal signalling at 10 bits and 0.3 to 0.7 dB at 20 bits. It has no sync, CRC or
-  termination overhead. Repeating symbols loses nothing, because two messages already differ in
-  nearly every symbol. The presence test, not the code, sets the block length.
+- **Evidence for the code.** The short affine code supports exhaustive comparisons at the
+  proposed block sizes. Earlier random-code/energy-bank comparisons gave gaps of about
+  0.2 dB at 10 bits and 0.3–0.7 dB at 20 bits under their own models. These values do not
+  specify the sensitivity of this placement and detector. Repeats supply energy and sometimes
+  diversity. Replacing independent parity with repetition can cost information and correlated
+  loss can erase multiple copies together. Compare on equal elapsed time, transmitted energy,
+  false admission and payload error. [Earlier coding study](../_ref/algorithms-matrixModem/Fable-5.2/coding-and-message-structure.md)
 
 **Message.** A message is a run of blocks on a public calendar derived from the system clock.
 
 - It ends when two consecutive block periods are scored absent. A received length never selects
   geometry or completion. If the schedule resumes, the message reopens and the gap is erased
-  blocks.
+  blocks. An unobserved, wholly erased or unscored slot provides no evidence of quiet.
+  An *observed* slot in which propagation completely suppresses the signal can score as
+  quiet even while the transmitter continues sending. Count a premature closure even if
+  later reception reopens. Keep the public ordinal through closure.
 - Longer messages are runs of 24-bit blocks for now. That costs about 2–3 dB at 100 bits and
   3–5 dB at 300 bits against one long code, and is where another code would do better. The first
   candidate is a CRC-aided tail-biting convolutional code over the tone alphabet with list
@@ -437,8 +456,13 @@ each sent on `L` tones: 32·`L` tones per block.
 - Payload bits are encrypted before coding by the AES-256 + Serpent cascade keystream. Encryption
   adds no bits.
 - Encryption is always on, with the published zero key or a loaded keyfile, as in the brief.
-- A signal under another key or shift occupies other positions and is noise to this receiver.
-  Wrong-key admission is decided by the presence test of section 8.
+- A signal under a different schedule can contribute structured energy. Include wrong-schedule
+  traffic as its own false-admission case alongside quiet noise and occupied interference.
+  A public schedule and a threshold supply no sender authentication.
+- The zero-key configuration is public and reproducible. US amateur rules restrict
+  obscuring a message, one-way transmissions, authorized emission types and identification.
+  A publicly decodable configuration still needs a specific band and operating basis. The
+  private-key research profile is distinct. [Prior Matrix operating review](../_ref/algorithms-matrixModem/Opus-5.5/09-keys-schedules-spectrum-and-stream-contract.md)
 
 ## 8. Receiver requirements
 
@@ -487,17 +511,16 @@ each sent on `L` tones: 32·`L` tones per block.
    - *The transform across tone sums is a routed stage* like the first transform: a CPU FFT,
      a GPU FFT or one matrix product on Tensor Cores (messages × tones times tones ×
      hypotheses), chosen by the scheduling rule of [section 13](#13-computation-and-simulation).
-     Measured for a 24-bit block of 512 tones with 13,920 hypotheses on the whole block: 1,643 s
-     by CPU FFT on a 12-thread laptop and 11 s by the matrix product on an RTX PRO 6000
-     Blackwell, against 35,300 s and 980 s with a decode per hypothesis
-     ([12.2](#122-phase-stable-paths-below-9-khz)).
-   - The positions a message selects are looked up once, whatever the number of timing
-     offsets; each offset turns the gathered values by the phase slope of their positions.
-   - Tones shorter than the frequency search needs are first summed into sub-blocks, so that
-     the transform does not grow with the tone rate. Measured on the laptop for the same
-     search: 2,148 s with 2.56 s tones and 4,667 s with 0.64 s tones, each summed into 512
-     sub-blocks (7,956 s for 2.56 s tones without summing); 24,200 s with 0.16 s tones, where
-     the gather and the turn per timing offset dominate.
+     Stage timing projected over the historical 24-bit, 512-tone search shape gives 1,643 s
+     with laptop FFTW and 11.4 s with Blackwell FP16 GEMM. See section 12.2 for the sampled
+     messages, physical drift correction and omitted work.
+   - Reuse the position indices across timing offsets. Within a shared aperture, a phase slope
+     models a delay of each stationary tone. For moved boundaries, form shifted bin values,
+     add the entering/leaving samples, or establish the loss of reusing the old aperture.
+   - Sum short tones into sub-blocks when the residual frequency and curvature over the
+     sub-block preserve the required sensitivity. Historical laptop kernel estimates for 512
+     sub-blocks were 2,148 s with 2.56 s tones and 4,667 s with 0.64 s tones. The estimate
+     without summation at 2.56 s was 7,956 s. All exclude physical window formation.
    - *Where the line lies.* A decode per hypothesis is the right form for one or a few
      hypotheses and the wrong one for many. With the kernels measured the transform takes over
      at about 30 hypotheses on the laptop and 10 on the GPU; the scheduler decides from its
@@ -511,8 +534,8 @@ each sent on `L` tones: 32·`L` tones per block.
    drift-rate hypotheses ([12.2](#122-phase-stable-paths-below-9-khz)).
 8. **Coherent attempts across tones (required).** The receiver makes these for every block,
    whatever the transmitter's settings and over the whole configured band. They are part of its
-   fixed work and are not reduced under overload. Items 5 to 7 always run as well, and the
-   better statistic per block decides.
+   fixed work. Items 5 to 7 run as well. Compare branch-specific null tail scores before
+   applying the common block decision of item 9.
    - **Span.** The phase key is undone first. Without FHSS the attempts may span the whole
      block. With FHSS they are confined to one hop: tones inside a hop have phases known from
      the key, each hop arrives with a new unknown one, and hops are added as energies.
@@ -540,7 +563,8 @@ each sent on `L` tones: 32·`L` tones per block.
    - **Specular path.** A specular path has one delay, which appears as a phase slope across the
      band. Scoring with one phase for all positions is then valid over any band, with timing
      hypotheses about 1/(8 × band span) apart: 57 µs for 2.2 kHz, 1.25 ms for 100 Hz. The slope
-     is applied to the stored bin values, so no fine step repeats the transform. The fine
+     can be applied to stored bin values for a common aperture. Boundary samples require
+     explicit correction or a tested approximation. The fine
      steps are further hypotheses of the one pass over the messages, with their table entries
      stored together; they multiply the additions, not the enumeration. Over 2.2 kHz that is
      about 350 fine steps for each 20 ms step: as kernels, 9.7 s per coarse step for 24 bits
@@ -552,29 +576,52 @@ each sent on `L` tones: 32·`L` tones per block.
      path's coherence bandwidth, which on HF is tens to a few hundred hertz. Scoring with one
      phase per position is available by configuration for an antenna or path whose phase differs
      across the band.
-   - **Diffuse path.** The attempts gain only inside the coherence time and the coherence
-     bandwidth together: at most what a held tone of about 4 divided by the spread would gain,
-     and nothing at spreads of 10 Hz or more. The per-tone result then stands.
-9. **Presence.** The block is present if its best score exceeds a threshold taken from the same
-   statistic on decoy keys, for a false-presence rate of 10⁻⁶ per block across all hypotheses and
-   attempts. Ten times as many hypotheses cost about 0.3 dB of block time.
+   - **Diffuse path.** The coherent gain depends on the joint time and frequency correlation.
+     The earlier diffuse examples gave little gain at 10 Hz and above. Specular components
+     or a multimodal Doppler spectrum at the same quoted width can give a different result.
+     Reserve a stated false-admission budget for the per-tone branch and test its sensitivity
+     after combining decisions.
+9. **Presence.** Convert branch scores to comparable evidence under each branch's null law,
+   then calibrate the maximum over all messages, offsets, spreads and coherence windows on joined
+   observations. The trial goal is 10⁻⁶ false admissions per public block. Set thresholds
+   on a training set and evaluate independent held-out blocks and outage sequences. Decoy
+   keys on one capture share noise, and their ranks alone do not establish an operational
+   tail rate. Separately report false admission in quiet and wrong-schedule traffic, missed
+   active blocks, admitted wrong payloads and false or delayed ends.
+   [Calibration and counterexamples](../_ref/algorithms-matrixModem/fsk-presence-calibration.md)
 10. **Precision.** After conditioning, operands are at most four bits (sample code, evidence, bin
     values, 0/1 code tables) with exact wide accumulation. Where a device has no native 4-bit path
     the values are carried in wider containers; the arithmetic is unchanged. The coefficients
-    of a transform are not among these operands; their precision is open decision 23.
+    of a transform have separate precision requirements (open decision 23). Size the storage,
+    intermediates and squared magnitudes from the configured maximum length and scales.
+    At 420,000 equally allocated tones an additive symbol entry can reach 196,875, and one
+    coherent energy can need 44 unsigned bits even with four-bit input components.
+    [Accumulator bounds](../_ref/algorithms-matrixModem/fsk-reconciliation.md#what-reducing-the-work-can-buy)
 
-Properties that tests must show:
+**Sample-level result.** With 10 bits, 64 one-cell tones, hopping disabled, and an 18 dB
+block, the new bounded search admitted the correct payload on 115/120 two-ray blocks when
+it combined the coherent and per-tone branches. A per-tone-only baseline admitted 15/120
+on the same draws. On a path resetting phase every tone, the corresponding counts were
+91/120 and 105/120. Reserving a branch budget preserved the fallback but cost some of its
+sensitivity. The joint rule admitted 3/400 quiet blocks. These thresholds target a nominal
+1% family false-admission rate. [Full fixture, grids, calibration and uncertainty](algorithms-matrixModem/block-reception/README.md#coherent-branch-and-protected-per-tone-fallback)
 
-- One tone cannot move a block's score by more than the clip, whatever its level.
-- Adding tones never raises the error probability, with or without interference.
-- Reception at a spread of 30 Hz reaches 99% at a finite signal level (no cliff).
-- With nothing but noise, conditioning and the 4-bit sample code together cost under 0.3 dB.
-- The block result is never worse than per-tone reception alone by more than the threshold
-  change for the added attempts.
-- Work counts: for a block, the counted first transforms, gathers, turns, transforms across tone
-  sums and passes over the messages equal the counts of
-  [13.1](#131-rules-that-bind-every-implementation), and no count grows with a loop that does
-  not change that stage's inputs.
+Properties to test:
+
+- Verify the one-tone influence bound for a fixed additive clipped evidence table. A coherent
+  squared sum has cross terms with earlier tones, and estimating a noise scale can couple
+  several observations.
+- Compare additional tones and receiver branches at fixed energy or fixed per-tone power as
+  appropriate, and at the same family false-admission rate. A mismatched extra observation can
+  increase error. Report when the per-tone branch loses acceptance after joint calibration.
+- Test the proposed 99% target at 30 Hz under a specified channel law, bandwidth, signal level
+  and outage allowance. A coherent notch or two consecutive extinguished blocks can defeat a
+  universal guarantee.
+- Measure the 0.3 dB conditioning/quantization loss target on matched Gaussian fixtures and
+  test separate colored, interfered and erased cases.
+- Work counts: for a block, report counted first transforms, gathers, turns, transforms across tone
+  sums and passes over the messages against the reference counts of
+  [13.1](#131-rules-that-bind-every-implementation), and explain extra work used to respect workspace or improve complete service.
 - Scheduling: from a cold start, on each target machine and for both extreme configurations
   (default HF and sub-9 kHz), the whole job finishes within a stated factor of the best fixed
   assignment as 13.1 defines it (placeholder 1.2; the prototype reached 0.94 to 1.12).
@@ -588,8 +635,9 @@ Properties that tests must show:
   shared by path-loss error, fading and noise deciles, receiver losses and interference.
 - **Erasures.** With tones near or below 0 dB at the design point, a margin of 3, 6, 10, 13, 16 or
   20 dB tolerates the random loss of about 57, 77, 87, 90, 91 or 92% of the tones.
-- **Lost hops act as a worse noise floor.** The per-hop weighting of section 8 makes a bad hop
-  count as noise, and the 32-hop minimum lets the loss average out.
+- **Lost hops reduce observed energy and can remove diversity.** The table below counts
+  the surviving exposure for equal-power known erasures. It assumes that usable symbol
+  evidence is spread across the surviving hops.
 
   | Hops lost out of 32 | Cost in transmit time | Margin that covers it |
   | --- | ---: | --- |
@@ -597,10 +645,15 @@ Properties that tests must show:
   | A quarter | 1.2 dB | 3 dB |
   | Half | 3.0 dB | 6 dB |
 
-  Half lost is an extreme case. A persistent radar is met mainly by enough transmit time to
-  overcome the raised noise floor. For a failure probability of 10⁻³ with half the hops lost, a
-  block needs 33 hops at 6 dB of margin, 18 at 10 dB and 14 at 13 dB or more. A 3 dB margin would
-  need about 500 hops for that case, which is accepted as not covered.
+  Four deterministic 10-bit schedules on 16 positions retained distinct codewords after any
+  26 out of 32 two-tone hops were erased, assuming perfect surviving labels. That result
+  concerns four specific codebooks and is separate from their decoding error in noise.
+  For independent per-hop loss with probability 1/2 and an assumed 77% erasure budget,
+  32 hops exceed that budget with probability 0.0010512, and 33 hops with probability
+  0.0006594. Those are budget exceedances. With mean bad runs of ten hops at the same
+  stationary lost fraction, all 32 hops are lost with probability 0.01908. That event alone
+  precludes 10⁻³ reliable delivery. Channel memory and symbol coverage matter even when a
+  long-run lost fraction is known. [Burst-loss calculation](../_ref/algorithms-matrixModem/fsk-code-identifiability.md)
 - **OTHR.** Margin alone does not cover a radar: an unhandled 10 kHz sweep 25 dB above the passband
   noise uses up 20 dB. With the conditioning of section 8, simulated loss was at most 1.8 dB for
   coherent radars from 0 to 60 dB above the noise at duties of 7–70%. Budget 1–2 dB of the margin
@@ -621,7 +674,7 @@ Properties that tests must show:
 
 ## 10. Sizing and expected duration
 
-A block is sized by its presence test: a false-presence rate of 10⁻⁶ over all hypotheses and
+These preliminary duration estimates use an approximate presence-test model with a false-presence rate of 10⁻⁶ over all hypotheses and
 messages, and a miss rate of 10⁻³. For weak tones that is a total deflection of about 100 for
 10 bits and 127 for 24 bits with 400 hypotheses, and the number of tones is that deflection
 divided by the deflection per tone. A block has at least 32 tones, and with FHSS at least 32
@@ -634,8 +687,9 @@ hops.
 | This sizing, 1 to 4,000 hypotheses, block of 1 to 1,024 tones | 1.10–1.30× | 1.25–1.73× |
 | Message error rate alone, 10⁻² / 10⁻³ / 10⁻⁴, ideal orthogonal signalling | 2.48 / 2.01 / 1.77× | – |
 
-The keyed code adds about 0.2 dB at 10 bits. A 24-bit block takes about 27% longer than a 10-bit
-block.
+The separate codebook comparison in section 6 gives a scale for the coding cost. The
+400-hypothesis Gaussian-deflection example gives about 27% longer for 24 bits, before template
+mismatch, block rounding and minimum hop counts.
 
 **Per-tone reception, one 10-bit block** (Doppler centre known, no interference, no margin).
 The one-cell columns were calculated before the 32-hop rule, which sets a floor of 13 s with
@@ -652,7 +706,7 @@ The one-cell columns were calculated before the 32-hop rule, which sets a floor 
 | −20 dB-Hz | 0.1 Hz | 91 d | 75 d | 45 d | 4.0 d |
 | −20 dB-Hz | 1 Hz | 94 d | 79 d | 53 d | 24 d |
 
-Halving the power quadruples these times below about 0 dB-Hz.
+In the low-SNR independent-energy portion of this model, halving power approximately quadruples airtime until other constraints govern.
 
 **Held tones on a steady path with FHSS** (a new phase every hop, centres known, 4,000
 hypotheses, exact chi-square tails). `*` marks a block held at 32 tones:
@@ -693,7 +747,9 @@ worst sub-9 kHz spread bound, at 1% wrong decodes and without the presence test.
 
 ## 11. Concealment
 
-All figures are the extra C/N₀ an observer without the key needs over the keyed receiver to
+These model results assume the observer lacks the key. The public zero-key profile gives an observer access to the same receiver. No field detectability or interference-perception threshold has been established.
+
+The figures are the extra C/N₀ an observer without the key needs over the keyed receiver to
 notice one 10-bit block, with detection probability 0.9 at a false-alarm rate of 10⁻². The
 observer is idealised: it knows the lattice, band, tone and hop timing, covers every hop channel
 at the tone's resolution and knows its noise level. Steady path; block sized for its level.
@@ -812,7 +868,7 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   | Shortest block | 64 tones = 10.9 minutes | 82 s with one-cell tones; 44 minutes with 41 s tones |
   | Phase key | One per tone, reached by an 80 ms ramp ([4.4](#44-phase-key)) | 160 ms ramp for an antenna narrower than about 40 Hz |
   | Receiver | Cells inside a tone, per-tone reception, and coherent windows from two tones to the block, with a reference that follows the ramp | – |
-  | References | GPS-locked at both ends, corrections logged or the audio re-timed from the PPS | A lesser reference is searched, within the ceiling below |
+  | References | GPS-locked at both ends, corrections logged or the audio re-timed from the PPS | Search the configured relative error budget and qualify complete service |
 
   - **What it gives up.** A strong link is not served faster than the shortest block. A 10 s
     tone is conspicuous to an observer with a filter bank ([section 11](#11-concealment)). It
@@ -852,8 +908,7 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   18.5 J. After a half turn the antenna current opposes the drive, and nearly the whole 10 kW
   flows back into the source for 2.6 ms (11 J; 9.2 ms and 41 J at 24 Hz). With the 80 ms ramp
   of [4.4](#44-phase-key) nothing flows back and the drive and the current stay within 16° of
-  each other at 86 Hz and 49° at 24 Hz. A receiver whose reference follows the ramp loses
-  nothing. Calculated for a single-tuned antenna; no transmitter was examined.
+  each other at 86 Hz and 49° at 24 Hz. A matched reference accounts for the scheduled phase. The antenna transfer function still affects the received energy. Calculated for a single-tuned antenna; no transmitter was examined.
 - **Mains harmonics leave about 13 Hz.** Near 8.27 kHz the 50 Hz harmonics (8,250 and 8,300 Hz)
   and the 60 Hz harmonics (8,220, 8,280, 8,340 Hz) wander by about 3 Hz rms on the steadier
   grids. Three standard deviations from both leaves 8,259 to 8,272.5 Hz. From grid-frequency
@@ -865,7 +920,7 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   from the nominal line; the earlier research records only that carriers are placed off the
   railway harmonics, and no line amplitude was found. A line on one of sixteen positions is
   left to excision and margin ([section 9](#9-margin-interference-and-lost-hops)).
-- **The tone length does not change the sensitivity; it sets the floor and the work.** Block
+- **Tone-length comparison at matched total energy and known timing/frequency.** Block
   `E/N₀` at 1% wrong decodes for the 10-bit block over 87 minutes, the same within the
   simulation's scatter in every format with eight or more positions and tones from 0.16 s to
   41 s (simulated, known timing and frequency):
@@ -883,22 +938,27 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   case needs no coherence between tones. The 1.28 s tone offered as the fastest has a floor of
   26.0 dB, 4.2 dB worse. A receiver that has to pick its window per block needs up to 0.8 dB
   more than the best window.
-- **Two further reasons for the span and the spacing.** Night echoes of 0.2 to 1.9 ms on short
-  and medium paths stay one path across 12.5 Hz. Spacing should be at least eight times the
+- **Two further reasons for the span and the spacing.** Differential delays of 0.2 to 1.9 ms give a small
+  relative phase change across 12.5 Hz. Comparable rays can still cancel across the entire
+  narrow band. Their powers alone cannot establish available signal energy. Spacing should be at least eight times the
   spread, which puts the 0.39 Hz of `j` = 4 at its edge under the 50 mHz bound.
 - **Spacing equal to the reciprocal of a long tone is not offered.** Positions 0.098 Hz apart
   for 10.24 s tones decode as well up to the worst spread bound but have no shorter window: at
-  0.5 Hz of spread they did not decode at any energy, where 0.78125 Hz spacing decoded at
-  27.4 dB. They also tolerate only ±6 ppm of frequency error.
-- **Below 9 kHz the search volume, not the sample rate, is the computational load.** Each
-  frequency bin, drift-rate bin and timing offset is a hypothesis to be scored against every
-  message; the bullets below say how that is done without repeating the decode. Bins are half
-  of 1 ÷ window
-  apart (0.9 dB worst loss) and drift-rate hypotheses 3.9 bins of drift apart. Frequency ×
-  drift-rate bins per coherent window, at 9 kHz, for assumed reference classes
-  ([calculation 18](algorithms-matrixModem/fsk-lattice/results/lattice_receiver_section18.md)):
+  0.5 Hz diffuse spread, none of the tested energies from 6 to 44 dB met an observed 1%
+  error target in the H trial. At 44 dB, correcting numerical aliasing at the grid edges
+  reduced the error count from 10 to 5 in the same 200 trials. Performance above that energy
+  remains open. The wider-spaced format previously reported 27.4 dB under its simulated
+  conditions. About 6 ppm at 8.27 kHz is half a 0.098 Hz position, an offset a receiver must
+  compensate or include in its search. [Projection and decoder checks](algorithms-matrixModem/sub9-fsk-rate/quadrature-check.md)
+- **Coherent search volume below 9 kHz.** The following counts assume a relative oscillator
+  error budget between the emitted and sampled signals. At window duration `T` the frequency
+  centres are half a Fourier bin apart and candidate drift rates differ by `3.88/T²` Hz/s.
+  With rectangular integration the isolated worst half-cell losses are each about 0.91 dB.
+  The joint corner gives 1.75 dB. The table uses 9 kHz.
+  [Physical-grid calculation](../_ref/algorithms-matrixModem/fsk-search-validity.md) ·
+  [Original counts](algorithms-matrixModem/fsk-lattice/results/lattice_receiver_section18.md)
 
-  | Reference at each end | 22 min | 1 h | 5.8 h |
+  | Assumed relative reference error | 22 min | 1 h | 5.8 h |
   | --- | ---: | ---: | ---: |
   | GPS-disciplined, corrections logged | 1 × 1 | 1 × 1 | 1 × 1 |
   | GPS-disciplined, corrections slewed unseen at up to 1 ppm | 48 × 3 | 130 × 17 | 752 × 562 |
@@ -925,53 +985,52 @@ The case worked there is a 61 m transmit antenna fed with 10 kW near 8.27 kHz.
   | RTX PRO 6000 Blackwell | 1,198 | 4,741 | 18,378 | 74,483 | 288,546 |
 
   On the laptop a 16-bit block fits 8,180 to 2.1 million and a 10-bit block 459,000 to
-  130 million (measured; the GPU was timed for 24 bits only). With logged GPS references one
-  decode per block is all the search there is, and every device keeps up at every tone length.
-- **With a lesser reference the search is a transform across tone sums, not a decode per
-  hypothesis** ([section 8](#8-receiver-requirements), item 7). An 87-minute whole-block window
-  at 8.27 kHz in a 12.5 Hz span needs 5,742 hypotheses with unseen slewing, 13,920 for a TCXO
-  with ±0.1 s of timing, 23 million for a crystal and 570 million for a sound-card clock with
-  ±1 s. Measured for the TCXO case and a 24-bit block of 512 tones, with every rung of the
-  ladder searched on the bins its length resolves:
+  130 million. The GPU timing covers 24 bits only. These stage ratios assume a single
+  supplied hypothesis. Even disciplined endpoints can leave residual path delay, clock
+  corrections or frequency uncertainty.
+- **Search over a less stable reference.** For an 87.38-minute block at 8.27 kHz the
+  example relative bounds of ±1 ppm, ±0.1 ppm/h and ±0.1 s need 174 frequency × 4 drift
+  × 20 fine timing cells. If *each* independently referenced endpoint contributes those
+  frequency and drift limits, the worst relative range requires 347 × 7 before timing
+  and propagation uncertainty. A drift `g` in end-to-end Fourier bins contributes phase
+  `πg((t−T/2)/T)²`. The historical CPU/GPU benchmarks and simulator generated and searched
+  half this curvature. Their four synthetic rows covered centres from −2.91 to +2.91 bins.
+  The corrected centres reach ±5.82. [Geometry and tests](../_ref/algorithms-matrixModem/fsk-search-validity.md)
 
-  | Route | Search time | Block duration ÷ search time |
+  | Historical 24-bit search route | Projected time | Block duration ÷ projected stage time |
   | --- | ---: | ---: |
-  | Laptop, a decode per hypothesis | 35,300 s | 0.15 |
-  | Laptop, FFT across tone sums (FFTW, 12 threads), its 20 timing offsets executed | 1,643 s | 3.2 |
-  | GPU, a decode per hypothesis | 980 s | 5.4 |
+  | Laptop, repeated decode | 35,300 s | 0.15 |
+  | Laptop, FFTW across tone sums | 1,643 s | 3.2 |
+  | GPU, repeated decode | 980 s | 5.4 |
   | GPU, cuFFT across tone sums | 83 s | 63 |
-  | GPU, FP16 matrix product across tone sums on Tensor Cores | 11.4 s | 461 |
+  | GPU, FP16 matrix product across tone sums | 11.4 s | 461 |
 
-  - The matrix product ran at 404 nominal TFLOP/s; over the whole pipeline the GPU showed 99%
-    activity and 60% Tensor Core activity. With 8-bit integer operands the same library gave
-    223 and 35%, and 18.9 s.
-  - Block duration ÷ search time for the other assumed classes, scaled from that measurement
-    (at or above 1 the device keeps up):
+  The laptop actually evaluated 393,216 candidate messages with 20 synthetic timing
+  rotations. The GPU projection scales one 131,072-message batch at one offset by 128 × 20.
+  Its matrix product ran at 404 nominal TFLOP/s, with 60% Tensor Core activity over the
+  profiled pipeline. The [historical clock-class extrapolations](algorithms-matrixModem/sub9-fsk-rate/results/search_margins.md)
+  put the 24-bit crystal case below real time even for these stages. Other clock classes,
+  smaller message sizes and complete receiver service require their own evidence.
 
-    | Reference at each end | Laptop, 24 bits | GPU, 24 bits | Laptop, 16 bits | GPU, 16 bits | Laptop, 10 bits |
-    | --- | ---: | ---: | ---: | ---: | ---: |
-    | Slewed unseen at 1 ppm | 16 | 1,900 | 4,190 | 488,000 | 268,000 |
-    | TCXO, ±1 ppm, ±0.1 s (24 bits measured) | 3.2 | 461 | 836 | 118,000 | 53,500 |
-    | Crystal, ±20 ppm, ±1 s | 0.012 | 0.47 | 3.1 | 119 | 196 |
-    | Sound-card clock, ±100 ppm, ±1 s | 0.0006 | 0.02 | 0.15 | 5.9 | 9.3 |
+  A length-`U` rectangular pre-sum leaves power `sinc²(δf U)` at residual `δf`.
+  With 512 tones, the edges of centred spans of 512, 696 and 1,024 half-bin cells cost
+  0.91, 1.72 and 3.92 dB before the final frequency-grid mismatch. At one reciprocal of
+  the tone length the first projection has a null. Form additional pre-mixed bands or
+  preserve shorter observations when the configured trajectories exceed the allowed loss.
+  Drift can also change frequency *within* a shorter ladder window. At two windows per
+  block this spans 1.58 ordinary local bins for the relative TCXO limit, 15.79 for the
+  crystal and 78.93 for the sound-card limit. Summing powers on a tilted bin path only
+  corrects the motion *between* windows.
 
-  - A 24-bit block with a free-running crystal is about twice too slow on one GPU and 80 times
-    on the laptop; with 16 bits both keep up. A sound-card clock is in reach for 10 bits on the
-    laptop and 16 bits on the GPU. A 5.8 h window needs 53 to 64 times more hypotheses.
-  - A single hypothesis is still cheapest as one plain decode; the transform pays from some
-    tens of hypotheses on the laptop and about ten on the GPU. The scheduler chooses.
-  - With the 10.24 s tone the tone sums are the transform's input as they stand. Shorter tones
-    are summed into 512 sub-blocks first, and the gather and the turn per timing offset then
-    grow with the tone rate. Measured on the laptop for the same search, block duration ÷
-    search time: 8.9 with 41 s tones, 3.2 with 10.24 s, 2.4 with 2.56 s, 1.1 with 0.64 s and
-    0.22 with 0.16 s. The naive loop had the laptop 430 times too slow at 0.16 s; it is 4.6.
-  - More than 1,024 frequency bins exceed what tone sums carry. The range is then cut into
-    bands of 512 bins, each with its own bin values, at 0.9 dB at a band edge; the crystal and
-    sound-card rows are scaled that way.
-  - **Searching also costs sensitivity.** For a 10-bit block the search over the 696 frequency
-    and drift hypotheses of the ±1 ppm class moved the 1% point from 13.0 dB to about 14.6 dB,
-    1.6 dB (simulated on the GPU, 204,800 trials per level, offsets on the grid, steady path,
-    whole-block window). Locked references save that as well as the work.
+  In a new physical-grid check the full 188-SM RTX PRO 6000 Blackwell returned the
+  planted message, frequency and drift for four arithmetic routes in one 4,096-message
+  batch. For the 10-bit AWGN code fixture, with one timing and on-grid frequency/drift,
+  the known/searched whole-block decisions gave 91/1,257 wrong among 8,192 at 13 dB
+  and 0/49 among 8,192 at 15 dB. The simulation includes rectangular tone projection
+  and leakage. It conditions on a present block and one fixed code. The older 1.6 dB
+  inferred search penalty belongs to the original, narrower bank. The new two points
+  do not determine a 1% crossing. [Device, uncertainty and reproduction](algorithms-matrixModem/search-validity/device-validation.md)
+
   - The antenna's group delay (3.7 ms at 86 Hz, 13 ms at 24 Hz) and the path delay (3.3 ms per
     1,000 km) are as large as one 10 ms timing step. With locked references they have to be
     known, or a few timing offsets searched.
@@ -1082,36 +1141,38 @@ counts only if it was obtained under them.
      and machine. The matrix product beat cuFFT by 7 in the sub-9 kHz search and lost to it by
      2.1 on small batches of the first transform ([13.2](#132-measured)).
    - Every run records the times it measured and the assignment it chose.
-   - **Both extremes are served by the same scheduler:** a default HF configuration, where the
-     first transform is the bulk of the work, and the sub-9 kHz configuration, where the search
-     is. Neither gets a fixed assignment of its own.
+   - **Use the same scheduling policy on both reference profiles.** Record the limiting stage
+     on each device with the entire configured work running. The HF workload can shift between
+     transforms, evidence formation and message search.
    - **Reference for the test of section 8.** The best fixed assignment is found by trying
      every route listed in 13.4 for every stage, at portion sizes in powers of two, on a
      recorded workload of at least one block of each configuration under test.
    - **Workers.** Software workers number twice the logical CPUs, as elsewhere in this project,
      so that preparing the next portions overlaps the running ones.
-2. **Do no work twice.** Work is done at the outermost loop level at which its inputs change,
-   and its result is reused inside. No loop repeats work that its loop variable does not change.
+2. **Reuse common work within the admitted workspace.** Compute shared inputs once when storage,
+   traffic and synchronization permit. Bounded tiling or measured recomputation can raise
+   complete service when materializing all intermediates would exhaust memory. When possible,
+   compute at the outermost loop level at which the input changes and reuse the result inside.
    - **Loop order of the search.** The search is over messages × hypotheses. Work that the
      hypotheses share is done once, and the hypotheses become an inner dimension of it. For
      frequency and drift the shared work is the gather and the ladder, and the inner dimension
      is a transform. Where every hypothesis has its own evidence (timing and spread in per-tone
      reception, fine timing steps) only the enumeration of the messages is shared, and that is
      cheap; the loop order is then a route like any other.
-   - **Precedence.** Rule 2 forbids repeating shared work. Where nothing substantial is shared,
+   - **Precedence.** Prefer reuse where it fits and improves whole-receiver service. Where nothing substantial is shared,
      and for a handful of hypotheses, rule 1 decides between the forms by measured cost. The
      measurements below show why: the form that won on two CPUs lost on the GPU.
    - **Why it is a rule and not a detail.** A hypothesis loop around the decode repeats the
-     gather and the whole ladder for every hypothesis. Measured for 13,920 hypotheses: 35,300 s
-     against 1,643 s on the laptop and 980 s against 11.4 s on the GPU. The outer loop made the
-     ceiling 21 and 86 times worse than it is.
+     gather and ladder work. At the historical 13,920-hypothesis shape, the measured
+     component costs projected a 21-fold saving on the laptop and 86-fold on the GPU.
+     Section 12.2 gives the evidence and its bounds.
    - **What is done once per what:**
 
      | Work | Done once per | Reused by |
      | --- | --- | --- |
      | Keys, schedules, symbol values of every message, hypothesis matrices, transform plans | Configuration or block | Everything below |
      | Conditioning and first transform | Cell, for each cell alignment (alignments an eighth of the tone apart) | Every timing offset inside the alignment, spread hypothesis and message |
-     | Bin values | Alignment and frequency band (a band is up to 512 bins of the whole block; one band unless the range exceeds 1,024 bins) | Every message, timing offset, frequency bin and drift of the band |
+     | Bin values | Alignment and first-stage band admitted by the residual frequency, drift and aperture-loss budget | Every message, timing offset, frequency bin and drift of the band |
      | Evidence table entries of per-tone reception | Spread and timing hypothesis | Every message |
      | Gather of a message's tone values and positions | Message, alignment and band | Every timing offset, frequency bin, drift and rung |
      | Turn by a timing offset's phase slope; sum of short tones into sub-blocks | Message and timing offset | Every frequency bin, drift and rung |
@@ -1119,25 +1180,28 @@ counts only if it was obtained under them.
      | Transform of a rung's windows | Message and timing offset | That rung's bins, and only those its window length resolves |
      | Scores under the decoy keys | Block, in the same pass as the real key | The presence test |
 
-   - **Counts for one block,** against which the test of section 8 counts. With `M` messages,
+   - **Illustrative counts for the aligned, drift-free lower-rung route.** With `M` messages,
      `A` alignments, `F` bands, `T` timing offsets per alignment, `D` drift hypotheses and `W`
      windows in all rungs below the whole block: first transforms = cells × `A`; gathers =
      `M`·`A`·`F`; turns = `M`·`A`·`F`·`T`; transforms across tone sums = `M`·`A`·`F`·`T`·(`D` +
      `W`); passes over the messages in per-tone reception = 1 with vector entries, or one per
-     hypothesis, whichever route is chosen.
-   - **When a timing offset is a phase slope.** Inside an eighth of the tone from a computed
-     alignment an offset is a phase slope across positions on that alignment's bin values;
-     beyond it new bin values are formed.
+     hypothesis, whichever route is chosen. Add band-specific window formation, boundary
+     corrections, dechirps within affected windows and searches across their tilted paths
+     where needed. Count executed operations and memory for the actual route.
+   - **Timing offsets within an alignment.** A phase slope rotates stationary bin values.
+     A translated aperture exchanges samples at the boundaries. A one-sixteenth-tone
+     offset on a legal unshaped same-position phase reversal loses 1.16 dB after the slope
+     is removed. Include the required boundary work or measure the approximation.
    - **How each hypothesis dimension is carried.**
 
      | Dimension | Form | Basis |
      | --- | --- | --- |
-     | Frequency and drift in coherent attempts | A transform across the message's tone sums, by FFT or as one matrix product; each rung only on the bins its window length resolves | Measured: 21 times faster on the laptop and 86 times on the GPU than a decode per hypothesis ([12.2](#122-phase-stable-paths-below-9-khz)) |
-     | Timing offsets in coherent attempts | One operand per offset: the positions a message selects are looked up once, and each offset turns the gathered values by the phase slope of their positions before the transform | Measured on the laptop with the 20 offsets executed: 1,643 s for the 24-bit search, the one gather being under 1% of it. On the GPU the operand is formed per offset, 7% of the time |
+     | Frequency and drift in coherent attempts | A transform across the message's tone sums, by FFT or as one matrix product; each rung only on the bins its window length resolves | Historical projected kernel ratios of 21 on the laptop and 86 on the GPU versus repeated decode ([12.2](#122-phase-stable-paths-below-9-khz)) |
+     | Timing offsets in coherent attempts | One operand per offset: the positions a message selects are looked up once, and each offset turns the gathered values by the phase slope of their positions before the transform | Historical laptop projection from 20 synthetic rotations per sampled message, 1,643 s. Boundary sample corrections excluded. One GPU offset was timed |
      | Short tones | Summed into sub-blocks after the turn, so that the transform keeps its size | Measured on the laptop: 2,148 s against 7,956 s for 2.56 s tones |
      | Spread hypotheses and timing offsets of per-tone reception; fine timing steps of the wide-band coherent attempt | Two routes: one pass over the messages with the entries of all hypotheses stored together, or a pass per hypothesis with its table in fast memory | Measured for 7, 56 and 350 hypotheses, one pass against a pass per hypothesis: laptop 1.6, 6.0 and 6.7 times faster; 27 threads of an EPYC 9554 0.7, 4.2 and 11.8; RTX PRO 6000 slower, by 1.7, 8 and 10 |
-     | A frequency range beyond 1,024 bins | Bands of 512 bins, each with its own bin values and gather; 0.9 dB at a band edge | Scaled in 12.2; not built |
-     | Drift on the two rungs below the whole block | Energies summed along tilted bin paths in the epilogue | Not built |
+     | A frequency range exceeding the allowed pre-sum loss | Use additional pre-mixed bands or shorter retained sums | 0.91 dB at the edge of a 512-half-bin band with 512 tones and constant offset. Budget drift and final-grid loss separately |
+     | Drift on shorter rungs | Correct local curvature before summing and match window-centre frequencies across the block | Tilt and intra-window correction depend on relative oscillator limits. Wider classes remain unmeasured |
      | Clock rate, where the sample clock is not tied to the carrier reference | One operand per hypothesis, as for timing offsets | Not sized beyond the factor of up to 200 of 12.2 |
      | Frequency error of each hop with FHSS | The same transform across the tones of one hop | Not measured |
      | Centre of a held tone with FHSS | Inside the evidence, before the search over messages (section 8, item 5) | Not a search dimension |
@@ -1199,20 +1263,13 @@ counts only if it was obtained under them.
   - **The frequency and drift search as one matrix product is where Tensor Cores carry the
     coherent attempts.** Messages × tones times tones × hypotheses is a dense product; the
     search over messages as a matrix product is one-hot and wastes 255 of 256 products, which is
-    why the 64-window figure above is slow. For a 24-bit block of 512 tones with 13,920
-    hypotheses on the whole block the search took 11.4 s as an FP16 product (404 nominal
-    TFLOP/s; 60% Tensor Core activity and 99% GPU activity over gather, product and epilogue),
-    18.9 s with 8-bit integer operands, 83 s by cuFFT and 980 s as a decode per hypothesis. The
-    product was 69% of the pipeline's time, the epilogue 24% and the gather 7%. FFTW on the
-    12-thread laptop CPU took 1,643 s with the 20 timing offsets executed, against 35,300 s as
-    a decode per hypothesis; a plain radix-2 transform took 6,917 s there and 880 s on 27
-    threads of an EPYC 9554.
-  - **A Monte Carlo of the 10-bit block ran at 34,900 trials a second**, generation, gather,
-    product over every rung and epilogue included (1.8 × 10⁸ times real time for an 87-minute
-    block; 98% GPU activity and 72% Tensor Core activity sustained), and at 81,000 with the
-    whole-block window only. With frequency and drift known, 1.0% of 204,800 blocks were wrong
-    at 13 dB, where exactly orthogonal messages need 12.87 dB; searched over the 696
-    hypotheses, 1% is reached at about 14.6 dB.
+    why the 64-window figure above is slow. The historical GPU batch measured 404 nominal
+    TFLOP/s on the FP16 product, which represented 69% of the measured stage sum. The
+    extrapolated times, drift-coordinate correction and current GPU checks are in section 12.2.
+  - **The historical 10-bit Monte Carlo** ran at 34,900 trials/s when the matrix included
+    all ladder rungs and 81,000 trials/s for the whole block only. Both decided on the
+    whole-block output and used the earlier half-range drift bank. The physical-grid
+    two-point experiment in section 12.2 uses the corrected rectangular projection.
   - A pass per hypothesis over all 2²⁴ messages with its table in shared memory took 0.19 ms.
     One pass with the entries of all hypotheses stored together was slower there: 1.7, 8 and
     10 times for 7, 56 and 350 hypotheses.
@@ -1228,9 +1285,11 @@ counts only if it was obtained under them.
 
 - **What the settings do to the work** (reasoned from the receiver's structure and the
   measurements above; not measured for these configurations):
-  - The search over messages is the same in every case, and is where the ceiling sits. The
-    hypotheses over frequency and drift ride on it as a transform and must not repeat it.
-  - Hop length does not enter the work with one-cell tones.
+  - Cost depends on the number of candidate messages, hypotheses, tones and retained
+    intermediates. The search over candidates can dominate. Share computations across
+    frequency and drift where their inputs are common.
+  - At fixed total active tones the raw flat-cell transform count is independent of hop
+    length. Per-hop phase, frequency handling, guards and minimum block span can change.
   - Tone length does. One-cell tones make a block of about 420,000 tones at −10 dB-Hz where held
     tones make 32 to a few hundred, so there is far more transform and accumulation work, in the
     stage with the most headroom. They need 20 ms timing spacing where a held tone needs an
@@ -1241,8 +1300,7 @@ counts only if it was obtained under them.
   - Below 9 kHz the work is the frequency, drift-rate and timing search of
     [12.2](#122-phase-stable-paths-below-9-khz), not the first transform. That search is itself
     a transform across tone sums, so the same routes serve both stages and the balance between
-    them shifts with the configuration: at HF the first transform is the bulk and the search is
-    small, below 9 kHz the first transform is negligible and the search is everything.
+    them depends on the particular workload, device and admitted buffer sizes.
   - Coherent attempts add two table columns per window: 128 times the decode work for a ladder
     down to 1/64 of the block (36.9 full 24-bit decodes a second measured for the
     specification's block shape). A ladder from two tones up follows the tone count instead.
@@ -1280,18 +1338,25 @@ counts only if it was obtained under them.
      end-to-end comparison of the two best assignments. The measure of success is the backlog the
      complete receiver clears, or the trials a simulation finishes, never one stage's rate or
      one unit's utilization.
-  7. When no full-fidelity assignment keeps up, the receiver may give up at most 2 dB of
-     sensitivity, charged to the margin and reported: first by computing only the position bins
-     (0 dB up to 1 Hz of spread, 0.3 dB at 3 Hz, 1.5 dB from 10 Hz), then by shedding tones evenly
-     by key (1.0 dB for 1.6 times the throughput, 1.5 dB for 2 times, 2.0 dB for 2.5 times). It
-     never drops hypotheses or coherent attempts. Beyond the limit it reports overload.
+  7. When complete full-fidelity work cannot keep up, report overload. Use a reduced route only
+     within a measured channel and timing envelope, with a recalibrated decision and adequate
+     remaining deadline and sensitivity margin. Keeping half the tones costs about 1.51 dB in the
+     weak independent-energy model and 3.01 dB with coherent combining at constant tone power.
+     If the retained tones fall in a fade the loss can be total. Unchanged per-message work
+     limits the speedup. The draft's 2 dB allowance is a design proposal. Missing input or
+     unscored blocks cannot advance the two-quiet completion counter.
+     [Sensitivity and service bounds](../_ref/algorithms-matrixModem/fsk-reconciliation.md#what-reducing-the-work-can-buy)
+
 ### 13.5 Simulation
 
 Experiments have to be quick, so simulation speed is a design objective of the same rank as the
 receiver's ceiling. Transmitter format and receiver structure are chosen with it in view.
 
 - **One compiled implementation with two input modes.** The cell mode draws bin statistics
-  directly and is exact for a linear front end under the rules of section 3. The sample mode
+  directly using the signal means and joint noise law of the sample projections. Independent
+  Gaussian bins are exact for orthogonal projections of white Gaussian noise. Fractional bins,
+  window overlap, colored noise and shared hypotheses can produce correlated bins even in a
+  linear front end. The sample mode
   forms samples and is required for anything that involves conditioning, the 4-bit sample code
   or timing error. The cell mode is used wherever it is valid.
 - **Experiment machines.** Two kinds are the reference for simulation speed: 256-CPU computers,
@@ -1322,8 +1387,9 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 - **Budget.** Sample budget, uncertainty target and stopping rule are declared before the run.
 - **Measured on the 32-CPU RTX PRO 6000 class** (a pod with one RTX PRO 6000 Blackwell and a
   CPU share of 27 threads of an EPYC 9554), a cell-mode Monte Carlo of the keyed 10-bit block
-  of the sub-9 kHz configuration, with trials batched 128 at a time as rows of the matrix
-  operand:
+  of one sub-9 kHz fixture (512 tones, 87.38 minutes per trial, 128 trials per batch). The
+  rows used the historical half-range drift bank and the earlier bin generator. Times below
+  describe that fixture. The 64-tone minimum was not timed.
 
   | Simulation | Trials a second | Times real time |
   | --- | ---: | ---: |
@@ -1334,68 +1400,67 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 
   - The GPU run kept 98% GPU activity and 72% Tensor Core activity; the product is 82% of a
     batch, the gather 9%, the epilogue and read-back 8% and the generation 1%.
-  - It reproduces theory: 1.0% wrong blocks at 13 dB with frequency and drift known, against
-    12.87 dB for exactly orthogonal messages.
+  - At 13 dB with the exact frequency/drift row supplied, 1.0% were wrong in the
+    historical simulation. The corrected two-point study and its assumptions are in section 12.2.
   - Six signal levels of 204,800 trials each took 35 s. That is a quick experiment.
   - Limits: 10 bits; offsets on the grid; a steady path; a decision on the whole block; no
     presence test; one timing offset; the two programs do not simulate the same thing, so
     their rates are not a comparison of CPU against GPU.
-- **What a trial costs with the kernels measured so far**, for one 87-minute block of 512 tones:
+- **Historical kernel-based trial projections**, for one 87-minute block of 512 tones:
 
   | Trial | Laptop, 12 threads | Pod CPU share | RTX PRO 6000 Blackwell |
   | --- | ---: | ---: | ---: |
   | 24 bits, one hypothesis | 2.5 s | 0.48 s (13 threads of an EPYC 9355) | 0.07 s |
-  | 24 bits, ±1 ppm search, FFTW | 1,643 s | not installed there | – |
-  | 24 bits, ±1 ppm search, plain transform or matrix product | 6,917 s | 880 s (27 threads of an EPYC 9554) | 11.4 s |
+  | 24 bits, historical 174 × 4 bank, FFTW | 1,643 s | not installed there | – |
+  | 24 bits, historical 174 × 4 bank, plain transform or matrix product | 6,917 s | 880 s (27 threads of an EPYC 9554) | 11.4 s |
   | 10 bits, one hypothesis | 0.17 ms | not timed | not timed |
-  | 10 bits, ±1 ppm search of one timing offset, generation included | not built | not built | 0.029 ms |
+  | 10 bits, historical 174 × 4 bank at one timing offset, generation included | not built | not built | 0.029 ms |
 
-  A sweep of 2,000 trials of 24-bit blocks with the ±1 ppm search is 6.3 hours on one GPU and
-  is not a quick experiment; experiments on sensitivity should use 10-bit blocks, or 24-bit
+  At the historical stage projection, 2,000 24-bit trials would take 6.3 GPU-hours.
+  Initial sensitivity studies can use 10-bit blocks, or 24-bit
   blocks on the known hypothesis. Sample-level generation ran at 7 to 12 million times real
   time on the GPU.
 - **Not measured.** No simulator of the complete format exists; the GPU Monte Carlo above is a
   part of one. Nothing was run on a 256-CPU machine: the widest CPU run had 27 threads, and
-  whether trials scale to 256 workers is untested. A 256-CPU run needs the hourly-billed
-  Linode route with its own approval step and was not started.
+  scaling to the 256-CPU configuration is untested. RunPod is preferred for short
+  experiments when it offers the needed allocation.
 
 ## 14. Decisions
 
-**Settled**
+**Design choices for the experimental profiles**
 
 | Decision | Where |
 | --- | --- |
-| One cell per tone is the default tone length; tone length and hop length are separate settings | 4.1, 4.2 |
+| The HF reference uses one cell per tone. Tone length and hop length are configured separately | 4.1, 4.2 |
 | FHSS is optional; nothing carries over between hops; no setting depends on Helper | 1, 4.3 |
 | The transmitter is formatted for a diffuse path; the receiver always makes coherent attempts, over the whole band | 1, 8 |
-| A block spans at least 32 hops; half the hops lost is covered from 6 dB of margin, and not at 3 dB | 6, 9 |
+| A block spans at least 32 hops. Erasure budgets require the assumed hop correlation and symbol coverage | 6, 9 |
 | 40 s is the recommended alternate hop length for one-cell tones | 4.3 |
-| About 10 bits take less than twice as long as one bit at similar confidence | 1, 10 |
+| The duration comparison with one bit depends on the chosen false-admission and payload-error criteria | 1, 10 |
 | 256 values with a keyed placement over all positions, where earlier notes suggested 64 with wide spacing | 5 |
-| Conditioning ahead of the 4-bit sample code uses full precision; everything after it is 4-bit | 8 |
+| Low-precision operands are the design target after conditioning. Size accumulators for each admitted block | 8 |
 | The spread bank reaches 500 Hz; EME needs a predicted-Doppler input | 8, 12.1 |
 | "Dwell" is replaced by tone, hop and held tone | 2 |
-| At least one keyed phase change per tone is mandatory in all cases, with four phases | 1, 4.4 |
-| Preferred tone rate: as fast as the spread and total bandwidth allow, up to one tone per cell; below 9 kHz the tone is held for 10.24 s instead | 4.2 |
+| Each tone gets a scheduled quarter-turn phase, which can equal the preceding phase | 1, 4.4 |
+| One-cell HF reference, with held tones evaluated for slow weak-path deadlines and a 10.24 s research profile below 9 kHz | 4.2 |
 | Tones shorter than one cell and three phases per cell are not offered | 4.2, 4.4 |
-| No amplitude shifts and no information in phase; those belong to a fast modem on a strong, coherent link | 1, 4.2 |
+| The format uses constant amplitude on flat cells and tone labels carry the payload | 1, 4.2 |
 | Meteor burst is outside this draft; if pursued it is an FSK path class on overdense trails, not a PSK mode | 12.3 |
 | Below 9 kHz: FHSS off, lattice scale `j` = 3 (1.28 s cell, 0.78125 Hz), sixteen positions in 12.5 Hz, tones of 8 cells (10.24 s), with `j` = 2 and 4 and tones of 1 and 32 cells as alternatives | 3, 4.1, 4.2, 12.2 |
 | Below 9 kHz the keyed phase is reached by an 80 ms ramp, not a step; the receiver's reference follows it | 4.4, 12.2 |
 | Below 9 kHz the window ladder runs from two tones to the block, with the tone and the cells inside it below; references are taken as GPS-locked at both ends | 8, 12.2 |
 | Below 9 kHz not hitting the computational ceiling has priority; concealment is kept only where it costs no computation (the keyed phase per tone), and phase steps inside a tone are not offered there | 1, 4.4, 11 |
 | Frequency and drift hypotheses are a transform across a message's tone sums, routed between CPU FFT, GPU FFT and a Tensor Core matrix product; a decode per hypothesis is kept for a few hypotheses only | 8, 12.2, 13 |
-| Three computational rules bind receiver and simulator: time every route and rebalance for the whole job; do no work twice, with hypotheses that share work made an inner dimension of it; simulation speed is a requirement on 256-CPU computers and on 32-CPU computers with an RTX PRO 6000 | 1, 8, 13.1, 13.5 |
-| One measured scheduling serves both extremes: default HF, where the first transform is the bulk of the work, and sub-9 kHz, where the hypothesis search is | 1, 8, 13.1 |
+| Compare qualified routes on whole-job time, reuse shared work within memory limits, and measure simulation speed on both reference machine classes | 1, 8, 13.1, 13.5 |
+| Apply one scheduling policy to HF and sub-9 kHz and measure the bottleneck separately on each device | 1, 8, 13.1 |
 
 **Open**
 
-1. **Tone length for weak signals.** The stated preference is the fastest rate the path allows.
-   Still to decide: whether the tone stays at one cell for the weak-signal use on slow paths or
-   is set from the design C/N₀ and path class, as the hop length is. One cell costs 5 to 13 dB of
-   time on paths of 1 Hz or less against a matched held tone. Coherent attempts do not recover
-   this when the expected spread appears: they are limited to about the coherence time, like a
-   held tone. A narrower band only helps paths with very little spread.
+1. **Choosing between the HF profiles.** Size the one-cell and held-tone candidates against
+   the credible diffuse path, signal level, uncertainty and deadline. Section 4.2 predicts
+   about sixteen times the airtime with one-cell tones at −10 dB-Hz and 0.1 Hz spread on the
+   4 s hop. Verify the crossover with calibrated payload and presence decisions before making
+   either profile the general default.
 2. **Phase steps beyond the mandatory one per tone** (settled below 9 kHz: none). Whether held
    tones of 4 s and more step every cell by default, and whether 2 or 4 phases per cell are offered for one-cell tones
    (1.4 to 2.8 dB against a filter-bank observer for 2 to 4 times the transforms). The mandatory
@@ -1403,7 +1468,7 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
    on how the emission is classified (spread spectrum) is unexamined.
 3. **Which observer the LPI goal means.** The brief intends the long tone for maximum LPI. That
    holds against energy detection, and against a matched filter bank only with phase steps
-   inside the tone. The coherent observer is covered by the mandatory keyed phase.
+   inside the tone. The stored study evaluates specified observers. Its outcomes do not establish a best-observer guarantee.
 4. **Hop edges.** This draft uses 20 ms of ramp and 20 ms of quiet per edge at 0.4 s. The
    existing triad envelope (55 ms quiet, 20 ms ramp) would cost a further 1.0–1.5 dB of power
    there. Confirm what the radios need.
@@ -1422,17 +1487,15 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 10. **Long messages.** Which long-block code, and whether to extend the exhaustive search past
     24 bits at double the decode work per added bit.
 11. **The brief's "40x alternative"** is read here as the 40 s hop.
-12. **Measuring the always-on coherent attempts** against the computational ceiling. Done for a
-    narrow band without FHSS, with the frequency and drift search as a transform across tone
-    sums on CPU and on Tensor Cores (sections 12.2 and 13). The wide-band specular search is
-    still unmeasured as a whole. Its 350 fine timing steps cannot be had from a transform
-    across positions at a saving; they are vector entries of the one pass over the messages
-    (13.1), measured on a CPU as a kernel: 9.7 s per coarse timing step for 24 bits.
-13. **Search volume below 9 kHz.** The configuration assumes GPS-locked references at both
-    ends, and a lesser reference is searched by the transform of section 8. Still to decide:
-    which reference classes a configuration may declare (a ±1 ppm reference is within reach of
-    the laptop CPU for 24 bits, a free-running crystal only for 16). Beyond its ceiling the
-    receiver reports overload and drops no hypothesis (13.4, step 7); that part is settled.
+12. **Measure the complete coherent attempts.** The narrow-band CPU and GPU kernel shapes
+    have timing evidence, and the corrected physical-grid GPU search has a bounded
+    correctness check. The wide-band path has only synthetic stage measurements. Include
+    window formation, drift inside each affected window, boundary handling and quiet-slot
+    decisions in a real-time acceptance check.
+13. **Search volume below 9 kHz.** State combined relative bounds for frequency, drift, clock
+    and delay, including which errors share a reference and any measured path contribution.
+    A hardware budget is qualified only by complete service over those bounds. An overloaded
+    configuration reports its backlog and retains all required hypotheses.
 14. **Clock-correction rule.** Adopt the rule of section 12.2 and set the slew bound.
 15. **Tone rates above 6.25 Hz.** Not offered in this draft. Whether a faster rate is wanted for
     strong signals on paths that allow it, given the finer timing and larger drift search.
@@ -1473,35 +1536,33 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
 
 ## 15. Known weaknesses
 
-- **No end-to-end simulation exists** of the code, placement, evidence, presence test and search
-  together. Durations in section 10 are estimates.
+- **Complete-format performance is open.** A native 10-bit experiment now connects samples,
+  the modeled schedule, exhaustive codeword search, calibrated admission and two-quiet closure.
+  Its configured calendar, finite search, channel laws and 1% diagnostic threshold bound the
+  evidence. Durations in section 10 remain model estimates.
+  [Experiment design and holdouts](algorithms-matrixModem/block-reception/README.md)
 - **One cell per tone is the slower choice for weak signals with per-tone reception.** Against
   the bound it stands at 14.2, 5.7 and 1.2 dB at 0.1, 1 and 10 Hz of spread (−10 dB-Hz, 4 s
   hop), where a 4 s held tone stands at 2.2, 0.6 and 0.2 dB. This is the largest single
   sensitivity cost in this specification.
-- **One-cell tones were not run in the alphabet simulation.** The adjacent-position result and
-  the two-cell durations do not automatically carry over.
+- **One-cell alphabet evidence is conditional.** The wide-pool average in the one-cell
+  pairwise calculation hides a severe narrow-band failure. A complete-codeword spacing
+  comparison across diffuse and notched paths remains open. [One-cell controls](../_ref/algorithms-matrixModem/fsk-lattice-validity.md)
 - **Required coherent attempts over a wide band are costly and unmeasured as a whole.** A
   specular path over 2.2 kHz needs timing to 57 µs: about 350 fine steps for each coarse one,
   measured only as kernels (9.7 s per coarse step for 24 bits on the laptop, 66 ms on the GPU
   with real entries), and a presence threshold raised by about 0.7 dB of block time.
-- **The search below 9 kHz still exceeds the computational ceiling for 24-bit blocks with
-  free-running crystals and sound-card clocks**, by about two on one GPU and 80 on the laptop
-  for a crystal (section 12.2); 16-bit blocks are within reach. Only the ±1 ppm case is
-  measured; the other classes are scaled, the reference classes are assumptions, and the
-  counting grid is rectangular.
-- **The transform search is a benchmark, not a receiver.** It has synthetic bin values, one
-  planted signal and stock kernels. Forming the bin values for every timing offset, the
-  presence test, tilted bin paths for a drifting reference on the two rungs below the whole
-  block, and the summing of short tones into sub-blocks are not in it.
-  A specular HF path adds a delay-rate dimension to the 57 µs timing of the wide-band coherent
-  attempt as the ionosphere's height changes; that is not sized.
-- **Coherent attempts are calculated, not built.** Their gains rest on large-alphabet
-  calculations for two-cell tones, a 10-bit Monte Carlo with ideal frequency and timing, and a
-  threshold estimate. Attempts inside a hop with FHSS are derived, not computed. No receiver,
-  drift-rate search or sub-9 kHz noise was run. A block Monte Carlo with phase and frequency
-  wander now covers the sub-9 kHz formats (section 12.2), with known timing and frequency,
-  Gaussian noise and constructed wander: no phase spectrum of a carrier below 9 kHz was found.
+- **Broad oscillator uncertainty can exceed the computational ceiling.** The earlier
+  24-bit crystal estimate failed even for projected stages. Neither the successful
+  narrow-bank device check nor the small-message projections establish complete service
+  for these clock classes. See section 12.2 for combined reference bounds, tested rows,
+  omitted intra-window curvature, boundary processing and the cost of multiple bands.
+- **Coherent search has component evidence.** Corrected physical-grid CPU and GPU
+  kernels recovered a planted signal. A 10-bit GPU experiment measured wrong messages
+  on a steady, known-timing path. The CPU benchmark includes short-tone sub-block sums.
+  The field oscillator trajectories, sub-9 kHz noise, real timing search, complete
+  ladder acquisition and full receiver service remain unqualified. A specular HF path
+  also adds a delay-rate dimension across a wide band.
 - **A block sized for a coherence window depends on that coherence.** If the path or either
   reference is less steady than the window, the block fails; per-tone reception would have
   needed 6 to thousands of times as long. Night-time wander and the sunrise and sunset steps
@@ -1533,7 +1594,8 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
   attack on an unkeyed signal is computed and simulated (11.5 dB in 18 hours); the fourth-power
   attack on the four-phase key is not.
 - **Phase steps inside a held tone make timing a hard requirement.** Half a phase interval of
-  timing error costs 6 dB and a whole one everything. The timing search has to cover the clock
+  timing error can severely reduce the score. On a single abrupt phase reversal a
+  half-interval displacement cancels the sum, while equal phases retain full power. The timing search covers the clock
   uncertainty in offset and in rate: 26 rate hypotheses for a 3.6 h block on a ±20 ppm clock,
   256 for a 36 h block. A clock whose rate changes during the block adds a dimension that is not
   sized. Phase steps through a narrow antenna are now calculated for the receiver's side and for
@@ -1562,20 +1624,23 @@ receiver's ceiling. Transmitter format and receiver structure are chosen with it
     established, and fading inside an echo is not modelled.
   - The troposcatter figures come from methods not validated at 50 MHz, which differ by 10 to
     13 dB among themselves; no measurement was found.
-- **Outage looks like quiet.** A fadeout longer than two block periods ends the message unless the
-  schedule resumes.
+- **Outage can look like quiet.** Two consecutive transmitted periods extinguished at the receiver
+  caused premature closure in the native test. One extinguished interior period followed by
+  successful reception remained an erasure. A resumed schedule can reopen an already closed
+  message. [Continuous-IQ checks](algorithms-matrixModem/block-reception/README.md)
 - **Long messages** pay the block penalty until a long-block code is qualified.
 - **No HF precedent below about +3 dB-Hz** at milliwatt power; the lower part of the target range
   rests on theory.
 - **The search forms of 13.1 are measured as kernels with synthetic values.** The transform
-  across tone sums ran on CPU and GPU for one reference class; the other classes are scaled.
+  across tone sums ran on CPU and GPU for a fixed bank, including a corrected on-grid check.
+  Historical projections for broader classes lack full receiver costs.
   Six of the dimensions listed in 13.1 have no measured form. For hypotheses with their own
   evidence the 32 additions per message and hypothesis remain, and the faster loop order
   differs between CPU and GPU, so it has to be measured on every machine.
 - **Simulation speed is measured for part of a simulator on one of its two machines.** The
   GPU Monte Carlo of the 10-bit block runs 34,900 trials a second on the 32-CPU RTX PRO 6000
   class, but it has no presence test, no timing search and no channel model. Nothing was run
-  on a 256-CPU machine. A 24-bit trial with the ±1 ppm search takes 11 s on the GPU, which
+  on a 256-CPU machine. The historical 24-bit GPU stage projection was 11.4 s, which
   makes sweeps of thousands of such trials slow.
 - **The measured transforms are not 4-bit.** The matrix product ran with FP16 coefficients and
   sums, and with 8-bit integers; the brief asks for 4-bit arithmetic throughout (open

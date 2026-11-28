@@ -1,5 +1,7 @@
 # Computation and simulation speed of the FSK lattice receiver
 
+**Later correction.** For the corrected physical search and the distinction between measured batches and projected full-block costs, see the [search audit](../fsk-search-validity.md). The [receiver review](../fsk-reconciliation.md#what-reducing-the-work-can-buy) gives separate losses for coherent and noncoherent tone shedding and accounts for fixed work. The measurements below retain their original fixture and model.
+
 26 November 2026 · Fable-5.2 pass · GPU measurement on a full RTX PRO 6000 Blackwell, with reconciliation
 
 This note answers three questions for the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md).

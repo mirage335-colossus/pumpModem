@@ -1,5 +1,7 @@
 # Matrix Modem research
 
+The [FSK receiver reconciliation](../fsk-reconciliation.md) connects the current proposal to checked finite-window, code, search and admission results and a native sample-to-message experiment.
+
 25 November 2026 · Research and experimental design
 
 **26 November 2026.** The [Fable-5.2 pass](../Fable-5.2/README.md) adds the FSK lattice design behind the

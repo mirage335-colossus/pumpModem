@@ -33,6 +33,8 @@
 // Run:   /tmp/search_bench [threads] [tones] [frequency bins] [sampled blocks of 4096 messages]
 //                          [timing offsets, default 1] [sub-blocks, default = tones]
 
+#include "search_geometry.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -51,6 +53,8 @@ typedef struct fftwf_plan_s* fftwf_plan;
 fftwf_plan fftwf_plan_dft_1d(int n, fftwf_complex* in, fftwf_complex* out, int sign, unsigned flags);
 void fftwf_execute_dft(const fftwf_plan p, fftwf_complex* in, fftwf_complex* out);
 void* fftwf_malloc(size_t n);
+void fftwf_free(void* p);
+void fftwf_destroy_plan(fftwf_plan p);
 }
 #endif
 
@@ -89,13 +93,20 @@ int main(int argc, char** argv) {
   const int S = argc > 4 ? atoi(argv[4]) : 96;
   const int T = argc > 5 ? atoi(argv[5]) : 1;
   const int K = argc > 6 ? atoi(argv[6]) : N;
+  // With two symmetric midpoints x*x is constant. Magnitude scoring then
+  // cannot distinguish any two drift rows, even on a noiseless signal.
+  if (K == 2) { std::fprintf(stderr, "two retained values cannot identify drift\n"); return 2; }
+  if (N < 2 || N > 65536 || K < 2 || K > N || NB0 < 1 || S < 1 || S > NH || threads < 1) {
+    std::fprintf(stderr, "invalid search shape or worker count\n");
+    return 2;
+  }
   omp_set_num_threads(threads);
   int R = 0; while ((2 << R) <= K) ++R;                 // rungs 0..R-1, windows of K .. 2 sub-blocks
   const int G = N / K;                                  // tones per sub-block
   int RS = 0; while ((2 << RS) <= G) ++RS;              // short rungs: windows of G, G/2, .. 2 tones
   if ((1 << R) != K || K * G != N || (G & (G - 1)) || NB0 > 2 * K || NB0 > K * (G > 1 ? 1 : 2) || T < 1 || T > 256) { fprintf(stderr, "tones and sub-blocks must be powers of two, bins at most 2K (K when tones are summed), 1 to 256 timing offsets\n"); return 2; }
   std::vector<int> nb(R), L(R); std::vector<bool> direct(R);
-  for (int r = 0; r < R; ++r) { L[r] = K >> r; nb[r] = std::max(1, (NB0 + (1 << r) - 1) >> r); direct[r] = L[r] <= 8; }
+  for (int r = 0; r < R; ++r) { L[r] = K >> r; nb[r] = std::max(1, (NB0 + (1 << r) - 1) >> r); direct[r] = r > 0 && L[r] <= 8; }
 
   std::mt19937_64 rng(2026);
   std::normal_distribution<double> gauss(0, 1);
@@ -113,9 +124,8 @@ int main(int argc, char** argv) {
   const uint32_t planted = (uint32_t)(rng() & 0xFFFFFF);
   const int f0 = -NB0 / 2 + (int)(rng() % (uint64_t)NB0), d0 = 2;
   const int q0 = T > 1 ? (int)(rng() % (uint64_t)T) : 0;
-  const double gd[ND] = {-5.82, -1.94, 1.94, 5.82};      // frequency change over the block, in bins
-  // a timing offset of q steps turns position p by -2 pi p (q - T/2) / 128: steps of 1/(8 x span)
-  auto tphase = [&](int q, int p) { return T > 1 ? -2 * PI * p * (q - T / 2) / 128.0 : 0.0; };
+  // a timing offset of q steps turns position p by -2 pi p (q - (T-1)/2) / 128: steps of 1/(8 x span)
+  auto tphase = [&](int q, int p) { return T > 1 ? -2 * PI * p * (q - (T - 1) / 2.0) / 128.0 : 0.0; };
   std::vector<int8_t> zmap((size_t)N * NV * 2); std::vector<uint8_t> pmap((size_t)N * NV);
   for (int t = 0; t < N; ++t) {
     uint8_t map[NV]; for (int v = 0; v < NV; ++v) map[v] = (uint8_t)(v % POS);
@@ -123,7 +133,8 @@ int main(int argc, char** argv) {
     double zr[POS], zi[POS];
     for (int p = 0; p < POS; ++p) { zr[p] = 2.2 * gauss(rng); zi[p] = 2.2 * gauss(rng); }
     const int pp = map[value(sym[t], planted)];
-    const double x = (double)t / N, ph = PI * f0 * x + PI * gd[d0] * x * x / 2 - tphase(q0, pp);
+    const double x = search_geometry::midpoint(t, N);
+    const double ph = search_geometry::phase(x, search_geometry::frequency(f0 + NB0 / 2, NB0), search_geometry::drift(d0)) - tphase(q0, pp);
     zr[pp] += 2.5 * std::cos(ph); zi[pp] += 2.5 * std::sin(ph);
     for (int v = 0; v < NV; ++v) {
       zmap[((size_t)t * NV + v) * 2] = (int8_t)std::max(-7, std::min(7, (int)std::lrint(zr[map[v]])));
@@ -134,14 +145,31 @@ int main(int argc, char** argv) {
   std::vector<float> trot((size_t)T * POS * 2);
   for (int q = 0; q < T; ++q) for (int p = 0; p < POS; ++p) { trot[((size_t)q * POS + p) * 2] = (float)std::cos(tphase(q, p)); trot[((size_t)q * POS + p) * 2 + 1] = (float)std::sin(tphase(q, p)); }
   std::vector<float> chirp((size_t)ND * K * 2);         // at the centre of each sub-block
-  for (int d = 0; d < ND; ++d) for (int k = 0; k < K; ++k) { const double x = (k * G + (G - 1) / 2.0) / N, a = -PI * gd[d] * x * x / 2; chirp[((size_t)d * K + k) * 2] = (float)std::cos(a); chirp[((size_t)d * K + k) * 2 + 1] = (float)std::sin(a); }
+  for (int d = 0; d < ND; ++d) for (int k = 0; k < K; ++k) { const double x = search_geometry::midpoint(k, K);
+    const double a = -search_geometry::phase(x, search_geometry::fft_shift(NB0), search_geometry::drift(d)); chirp[((size_t)d * K + k) * 2] = (float)std::cos(a); chirp[((size_t)d * K + k) * 2 + 1] = (float)std::sin(a); }
   std::vector<std::vector<float>> rot(R);                // direct rungs: e^{-j pi b i / L}
-  for (int r = 0; r < R; ++r) if (direct[r]) { rot[r].resize((size_t)nb[r] * L[r] * 2); for (int bi = 0; bi < nb[r]; ++bi) for (int i = 0; i < L[r]; ++i) { const double a = -PI * (bi - nb[r] / 2) * i / L[r]; rot[r][((size_t)bi * L[r] + i) * 2] = (float)std::cos(a); rot[r][((size_t)bi * L[r] + i) * 2 + 1] = (float)std::sin(a); } }
+  for (int r = 0; r < R; ++r) if (direct[r]) { rot[r].resize((size_t)nb[r] * L[r] * 2); for (int bi = 0; bi < nb[r]; ++bi) for (int i = 0; i < L[r]; ++i) { const double a = -2 * PI * search_geometry::frequency(bi, nb[r]) * i / L[r]; rot[r][((size_t)bi * L[r] + i) * 2] = (float)std::cos(a); rot[r][((size_t)bi * L[r] + i) * 2 + 1] = (float)std::sin(a); } }
+
+  // The larger, even-sized lower-rung banks need a quarter-bin shift before the FFT.
+  std::vector<std::vector<std::complex<float>>> fft_shift(R);
+  for (int r = 1; r < R; ++r) {
+    if (direct[r] || search_geometry::fft_shift(nb[r]) == 0) continue;
+    for (int i = 0; i < L[r]; ++i) {
+      const double a = -2 * PI * search_geometry::fft_shift(nb[r]) * i / L[r];
+      fft_shift[r].emplace_back(std::cos(a), std::sin(a));
+    }
+  }
 
 #ifdef USE_FFTW
   std::vector<fftwf_plan> plan(R, nullptr);
   { fftwf_complex* tmp = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * 2 * K);
-    for (int r = 0; r < R; ++r) if (!direct[r]) plan[r] = fftwf_plan_dft_1d(2 * L[r], tmp, tmp, -1, 0U); }
+    if (!tmp) return 2;
+    for (int r = 0; r < R; ++r) if (!direct[r]) {
+      plan[r] = fftwf_plan_dft_1d(2 * L[r], tmp, tmp, -1, 0U);
+      if (!plan[r]) { std::fprintf(stderr, "FFTW plan creation failed\n"); return 2; }
+    }
+    fftwf_free(tmp);
+  }
   const char* fftname = "FFTW 3 single precision, measured plans";
 #else
   std::vector<Radix2> plan(R); for (int r = 0; r < R; ++r) if (!direct[r]) plan[r].init(2 * L[r]);
@@ -160,6 +188,7 @@ int main(int argc, char** argv) {
     {
 #ifdef USE_FFTW
       float* buf = (float*)fftwf_malloc(sizeof(float) * 4 * K);
+      if (!buf) { std::fprintf(stderr, "FFTW workspace allocation failed\n"); std::exit(2); }
 #else
       std::vector<float> bufv(4 * K); float* buf = bufv.data();
 #endif
@@ -205,7 +234,17 @@ int main(int argc, char** argv) {
                 }
               } else {
                 for (int w = 0; w < W; ++w) {
-                  std::copy(&uu[(size_t)w * Lr * 2], &uu[(size_t)(w + 1) * Lr * 2], buf); std::fill(buf + 2 * Lr, buf + 4 * Lr, 0.f);
+                  const float* window = uu + (size_t)w * Lr * 2;
+                  if (fft_shift[r].empty()) {
+                    std::copy(window, window + 2 * Lr, buf);
+                  } else {
+                    for (int i = 0; i < Lr; ++i) {
+                      auto y = std::complex<float>(window[2 * i], window[2 * i + 1]) * fft_shift[r][i];
+                      buf[2 * i] = y.real();
+                      buf[2 * i + 1] = y.imag();
+                    }
+                  }
+                  std::fill(buf + 2 * Lr, buf + 4 * Lr, 0.f);
 #ifdef USE_FFTW
                   fftwf_execute_dft(plan[r], (fftwf_complex*)buf, (fftwf_complex*)buf);
 #else
@@ -225,6 +264,9 @@ int main(int argc, char** argv) {
           }
         }
       }
+#ifdef USE_FFTW
+      fftwf_free(buf);
+#endif
 #pragma omp critical
       { for (int r = 0; r < MAXR; ++r) if (tb[r] > o.best[r]) { o.best[r] = tb[r]; if (r == 0) { o.msg = tm; o.bin = tbin; o.drift = tdr; o.off = tq; } } }
     }
@@ -233,6 +275,9 @@ int main(int argc, char** argv) {
 
   pass(0);                                               // warm up threads and caches
   const Out a = pass(0), b = pass(1), c = pass(2);
+#ifdef USE_FFTW
+  for (auto p : plan) if (p) fftwf_destroy_plan(p);
+#endif
   const double msgs = (double)S * NH, M24 = 16777216.0;
   const double tg = a.secs / msgs, t0 = (b.secs - a.secs) / msgs / ND / T, tr = (c.secs - b.secs) / msgs / T, tall = c.secs / msgs;
   printf("# Hypothesis search by a transform across tone sums, CPU\n\n");
@@ -259,5 +304,5 @@ int main(int argc, char** argv) {
   }
   printf("\nThe 16-bit and 10-bit rows are the 24-bit time divided by 2^8 and 2^14, not separate timings.\n");
   printf("\nbest energy per rung:"); for (int r = 0; r < R + RS; ++r) printf(" %.4g", c.best[r]); printf("\n");
-  return 0;
+  return c.msg == planted && c.bin == f0 && c.drift == d0 && c.off == q0 && b.msg == planted ? 0 : 1;
 }
