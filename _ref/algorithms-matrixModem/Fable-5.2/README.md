@@ -1,6 +1,6 @@
 # Matrix Modem FSK research pass (Fable-5.2)
 
-26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews
+26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews · last change: the hypothesis search as a transform across tone sums
 
 This pass supports the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md). It
 builds on the [Sol-6.2](../Sol-6.2/README.md) and [Opus-5.5](../Opus-5.5/README.md) passes and
@@ -281,15 +281,15 @@ A cross-check of the repository's own earlier research, not a literature review:
     1/64 of an 87-minute block and per-tone reception only, tones of 0.16 to 1.28 s lost 3.6 to
     4.0 dB under the worst spread bound. A ladder from two tones up closes it at one lookup per
     message and tone.
-35. **The computational ceiling follows the tone rate.**
+35. **One decode follows the tone rate; the search must not be a decode per hypothesis.**
     Measured: a 24-bit decode on the full ladder takes 166 s with 32,768 tones and 2.5 s with
     512 on the 12-thread laptop CPU, 4.4 s and 0.07 s on an RTX PRO 6000 Blackwell. The 64-window
     ladder runs 36.9 times a second on that GPU as a direct kernel (65 was the estimate) and 5.9
-    as an FP16 matrix product. With logged GPS references every device keeps up at any rate; for
-    a ±1 ppm reference with ±0.1 s of timing and 24 bits the laptop is 430 times too slow at
-    0.16 s tones and seven times too slow at 10.24 s, and the GPU keeps up from 2.56 s tones.
+    as an FP16 matrix product. With logged GPS references every device keeps up at any rate.
     Coherent sums across positions need the timing to 1/(8 × span), 10 ms at 12.5 Hz, which the
-    earlier search count had left out.
+    earlier search count had left out. The margins first reported for a ±1 ppm reference (laptop
+    430 and seven times too slow) assumed a full decode per hypothesis and are superseded by
+    finding 40.
 36. **A keyed phase jump into a high-Q antenna is the transient VLF practice forbids, and an
     80 ms ramp removes it.** MIL-STD-188-140A excludes PSK at VLF for it. At 10 kW and 86 Hz a
     half turn sends nearly the whole 10 kW back into the source for 2.6 ms (11 J of the 18.5 J
@@ -314,6 +314,24 @@ A cross-check of the repository's own earlier research, not a literature review:
     12.5 Hz span is clear of them if they wander as the mains harmonics do. The earlier antenna
     note already had the frequencies; the first version of the sub-9 kHz note missed them, and a
     re-reading of the earlier notes found it. No line amplitude near 8 kHz is in any source.
+40. **The frequency and drift search is a transform across a message's tone sums, and as a
+    matrix product it is the Tensor Core workload of the coherent attempts.** Gather the tone
+    values once per message and timing offset; every frequency bin is then a transform output
+    and every drift a de-chirp, and each rung of the ladder is searched only on the bins its
+    length resolves. Measured for 24 bits, 512 tones and 13,920 hypotheses on the whole block
+    (±1 ppm, ±0.1 s), against a block of 5,243 s: 35,300 s as a decode per hypothesis and
+    1,624 s by FFTW on the 12-thread laptop CPU; 980 s per hypothesis, 83 s by cuFFT and 11.4 s
+    as one FP16 matrix product on the GPU (404 nominal TFLOP/s, 60% Tensor Core activity over
+    the whole pipeline; 8-bit integer operands 18.9 s). The laptop keeps up by 3.2 and the GPU
+    by 461. Scaled, not measured: a free-running crystal with 24 bits is about twice too slow on
+    one GPU and 80 times on the laptop, and within reach of both with 16 bits. A matrix product
+    for the search over messages is one-hot and stays slow; the earlier statement that Tensor
+    Cores do not help the coherent attempts tested only that.
+41. **Below 9 kHz concealment is relaxed by the user's direction of 28 November.** The band is
+    regarded as uncontended, so concealment is kept only where it costs no computation (the
+    keyed phase per tone), and not hitting the computational ceiling has priority. The
+    sub-9 kHz case is meant as the extreme one that makes the specification call for the right
+    balance between CPU FFT, Tensor Core DFT and the hypothesis search that follows.
 
 ## State of the specification
 
@@ -397,6 +415,15 @@ request, where it had been a recommendation with open decisions.
   where the first version of the note had a hand estimate.
 - Finding 39 and the present form of finding 36 date from this step.
 
+After that the user asked whether the timing search had failed to use Tensor Cores and whether
+anything received in real time, and set the sub-9 kHz priorities of finding 41. The search was
+rebuilt as a transform across tone sums and measured on the laptop and on a third pod (finding
+40). In the specification: section 1 (ceiling before concealment below 9 kHz), 4.1, 4.2 and 4.4
+(no phase steps inside tones there), 8 item 7 (hypotheses are not an outer loop; the transform
+across tone sums as a routed stage), 11, 12.2 (measured search table and scaled classes), 13
+(the product as the Tensor Core workload; routes the scheduler has to hold), 14 (two settled
+rows; open decisions 2, 12 and 13 narrowed) and 15.
+
 ## Corrections to earlier Matrix Modem documents
 
 Found by the reviews of this pass. The first four are annotated where they occur.
@@ -412,6 +439,7 @@ Found by the reviews of this pass. The first four are annotated where they occur
 | Sol-6.2 practice review, STANAG 4415 | −7 dB, 40 Hz, approaching 12 ms | The documented test points are 10 ms and 0.5–50 Hz at −1 to 0 dB; no source contains 16 ms |
 | Earlier guidance on impulsive noise | "Clip or blank before the transform" | Insufficient for OTHR: 7–35% duty with long filter tails; a 3σ clipper loses 8 dB at 28% duty ([OTHR review](reviews/review-othr-interference.md)) |
 | [Lattice design note](fsk-lattice-design.md), "Without FHSS" | "The lattice scale is worth at most 1.6 dB, and only for an antenna narrower than about 50 Hz" | Holds for antenna loss alone at 4 to 16 positions. The scale is also what lets sixteen positions fit the mains slot and a 10 s tone keep a wide spacing ([sub-9 kHz note](sub9khz-fsk-rate-and-spacing.md)) |
+| [Sub-9 kHz note](sub9khz-fsk-rate-and-spacing.md), first version, and specification 12.2 of 28 November | With a ±1 ppm reference the laptop is seven times too slow for 24 bits at 10.24 s tones; a 24-bit block with a free-running crystal is out of reach at any rate; Tensor Cores do not help the ladder | Those figures loop a full decode over every hypothesis. As a transform across tone sums the laptop keeps up by 3.2 and the GPU by 461 (measured); a crystal with 24 bits is about twice too slow on one GPU (scaled). The matrix product that was slow was the search over messages; the search over frequency and drift runs at 404 nominal TFLOP/s |
 | Specification section 13 and finding 10 above | "About 65" coherent-ladder decodes a second, by extrapolation from 8,400 | Measured 36.9 for 64 windows and the specification's block shape; the per-tone decode measures 5,900, the 8,400 was for 24 symbols of 64 tones |
 ## Open questions carried forward
 
@@ -441,9 +469,11 @@ Found by the reviews of this pass. The first four are annotated where they occur
 10. Below 9 kHz: the top-voltage limit of a real 61 m installation; a real transmitter's
     tolerance of the 80 ms phase ramp; mains and railway harmonic amplitudes near 8 kHz at a
     receiving site, and the carrier to use where no slot is clear; the night mode cut-offs near
-    5.17 and 8.27 kHz; a measured phase spectrum of a sub-9 kHz carrier; the transform across
-    tone sums and tiered screening as ways to cut the frequency search; a tuned GPU kernel for
-    the full ladder; concealment of 10 s tones on sixteen positions.
+    5.17 and 8.27 kHz; a measured phase spectrum of a sub-9 kHz carrier; the transform search
+    inside a receiver (bin values per timing offset, tilted bin paths, short tones summed into
+    sub-blocks, a fused epilogue, batched small transforms on the CPU, the 4-bit and FP8/FP4
+    Tensor paths); the same product for the fine timing steps of the wide-band specular search;
+    tiered screening.
 
 ## Cost and provenance of the GPU run
 
@@ -453,7 +483,8 @@ remote compute. The sub-9 kHz decode timings of 28 November (UTC) used two more 
 type for 0.076 h and 0.095 h, about 0.46 USD together, both verified removed. The second reran
 the timings after an independent check found that the first CPU benchmark had left threads idle.
 The adoption work of 28 November (phase-ramp calculation, DOI checks, storing the reviews) used
-no remote compute. The text of 47 CFR 15.247 was read once through a delegated web fetch (Cornell LII
+no remote compute. The search benchmark that followed used a third pod of the same type for
+0.116 h, about 0.31 USD, verified removed. The text of 47 CFR 15.247 was read once through a delegated web fetch (Cornell LII
 and the GovInfo 2023 annual edition). Device, software, hashes and method are in the
 [computation note](computation-and-simulation-speed.md#the-run). All other calculations ran on the
 local 12-thread Ryzen 5 PRO 5650U.

@@ -1,0 +1,12 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+tones 512, frequency bins on the whole block 696, drift hypotheses 4, rungs 9, batch 32768 messages
+planted message 7f3a79, frequency bin -108, drift hypothesis 2
+
+matrix product on Tensor Cores, rungs 0 to 8 in the product (8520 complex rows, 1.14e+12 flop per batch)
+  gather to FP16 planes: 0.133 ms per batch (1.26e+11 tone lookups/s)
+  FP16 x FP16 -> FP16: product 2.865 ms (399.2 nominal TFLOP/s), epilogue 3.376 ms (331 GB/s read); planted: correct
+  gather + product + epilogue         194.509 ns per message and timing; one timing hypothesis over 2^24 messages 3.263 s; 20 timing offsets 65.27 s; block/search 80
+  FP16 x FP16 -> FP32: product 3.012 ms (379.6 nominal TFLOP/s), epilogue 3.414 ms (654 GB/s read); planted: correct
+  gather + product + epilogue         200.176 ns per message and timing; one timing hypothesis over 2^24 messages 3.358 s; 20 timing offsets 67.17 s; block/search 78
+  INT8 x INT8 -> INT32: gather 0.122 ms, product 5.123 ms (223.2 nominal Top/s), epilogue 3.438 ms; planted: correct
+  gather + product + epilogue         264.971 ns per message and timing; one timing hypothesis over 2^24 messages 4.445 s; 20 timing offsets 88.91 s; block/search 59

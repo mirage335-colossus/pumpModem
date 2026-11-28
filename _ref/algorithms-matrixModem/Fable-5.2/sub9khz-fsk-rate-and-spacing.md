@@ -52,18 +52,25 @@ measured. Nothing here is a qualified receiver.
 4. **The computational ceiling moves with the tone rate.** A decode on the full window ladder
    costs one lookup per message and tone. On the 12-thread laptop CPU a 24-bit decode of an
    87-minute block takes 166 s with 0.16 s tones and 2.5 s with 10.24 s tones: 32 against 2,067
-   decodes in the block's own duration. With GPS-locked references one decode is enough. With a
-   ±1 ppm reference and ±0.1 s of timing a 24-bit block needs 13,920; the laptop is then 430
-   times too slow at 0.16 s tones and seven times too slow at 10.24 s, and the GPU keeps up from
-   2.56 s tones. A 10-bit block with that reference keeps up on the laptop at every tone length.
+   decodes in the block's own duration. With GPS-locked references one decode is enough.
+   **With a lesser reference the search must not repeat the decode for every hypothesis.** A
+   ±1 ppm reference with ±0.1 s of timing needs 13,920 hypotheses on the whole block. Done as
+   13,920 decodes, a 24-bit block takes 35,300 s on the laptop and 980 s on the GPU, against a
+   block of 5,243 s. Done as a transform across each message's tone sums it takes 1,624 s on
+   the laptop (an FFT) and 11 s on the GPU (one FP16 matrix product on Tensor Cores at 404
+   nominal TFLOP/s), both measured (section 6.4). The first version of this note reported only
+   the first way and concluded that the laptop was seven times too slow and that Tensor Cores
+   did not help; both conclusions were wrong.
 5. **Spacing equal to the reciprocal of a long tone is the wrong economy here.** A 0.098 Hz
    spacing for 10.24 s tones fits 16 positions in 1.6 Hz and decodes as well as the others up to
    the worst spread bound. It has no shorter window to fall back on: at ten times that bound it
    did not decode at any energy, where the 0.78 Hz spacing still decoded 5 dB down. It also
    tolerates only ±6 ppm of frequency error.
 6. **Disadvantages of the recommendation.** The shortest block is 11 minutes; a strong link is
-   not served faster. A 10 s tone is a narrow line to an observer with a filter bank. It is a
-   second cell length beside the default 160 ms. The transmitter has to ramp the keyed phase,
+   not served faster. A 10 s tone is a narrow line to an observer with a filter bank, which is
+   accepted: below 9 kHz concealment is kept only where it costs no computation (the keyed phase
+   per tone), and not hitting the computational ceiling has priority (the user's direction of
+   28 November). It is a second cell length beside the default 160 ms. The transmitter has to ramp the keyed phase,
    which is calculated and not tested on a transmitter. Where a 16.7 Hz railway supply is in
    range, one of its harmonics lies inside the 12.5 Hz slot (section 3).
 
@@ -497,7 +504,9 @@ how much was timed.]
 - **The matrix product on Tensor Cores is six times slower than the direct kernel** for the
   64-window ladder (product 90 ms at 390 nominal TFLOP/s, 45% Tensor Core activity; forming the
   rung energies and maxima from 8.6 GB of scores another 75 ms). The one-hot operand wastes 255
-  of 256 products, as in the earlier per-tone measurement.
+  of 256 products, as in the earlier per-tone measurement. This product is the search over
+  messages, which is the wrong job for Tensor Cores. The search over frequency and drift is a
+  dense product and runs at 404 nominal TFLOP/s (section 6.4).
 - On the laptop the plain lookups beat the fast transform by two for the 24-bit per-tone decode.
   For 16 bits the transform is four times the faster (13,500 against 3,200 a second).
 - The GPU's full-ladder kernel does a tenth of its table kernel's lookups per second; it is
@@ -510,6 +519,11 @@ how much was timed.]
 
 [Calculated from those times and the counting rules of the specification's calculation 18;
 `search_ceiling`. The reference classes are assumptions.]
+
+**Every margin in this subsection assumes one full decode per hypothesis.** That is the right
+count for a single hypothesis and the wrong way to search many. Section 6.4 measures the search
+done properly and replaces these margins for the adopted configuration; they are kept because
+they show what the naive loop costs and how it depends on the tone length.
 
 A block of duration `D` holds `D/T` tones, so the number of full-ladder decodes that fit into the
 block's own duration is `rate / (2^k × tone rate)`, whatever `D`. For a 24-bit block:
@@ -548,12 +562,12 @@ Margin, fitted divided by needed, for tones of 0.16 / 2.56 / 10.24 / 41 s:
 
 - **With locked references the ceiling is far away at any tone rate**, even for 24 bits on the
   laptop. The tone rate decides how far: 32 decodes per block at 0.16 s tones, 2,067 at 10.24 s.
-- **Without them the margin follows the tone length.** For a TCXO with ±0.1 s of timing and 24
+- **Without them, and with a decode per hypothesis, the margin follows the tone length.** For a TCXO with ±0.1 s of timing and 24
   bits the laptop is 430 times too slow at 0.16 s tones, seven times too slow at 10.24 s and 1.7
   times too slow at 41 s; the GPU keeps up from 2.56 s tones. For 10 bits the laptop keeps up
   with a TCXO at every tone length and with a crystal from 10.24 s.
-- **A 24-bit block with a free-running crystal or sound card stays out of reach on any device
-  and at any rate**, as the specification says. So does a 10-bit block on a sound-card clock on
+- **With a decode per hypothesis a 24-bit block with a free-running crystal or sound card stays
+  out of reach on any device and at any rate**, as the specification said then. So does a 10-bit block on a sound-card clock on
   the laptop (0.22 at best). The GPU's 10-bit figures are scaled from 24 bits, not measured;
   scaled, it would keep up with a crystal from 0.64 s tones and with a sound-card clock from
   10.24 s. The needed count grows with the cube of the window: a 5.8-hour block needs 53 to 64
@@ -575,10 +589,9 @@ Margin, fitted divided by needed, for tones of 0.16 / 2.56 / 10.24 / 41 s:
 - **A sample clock tied to the carrier is not a separate dimension.** GNSS receivers slave the
   code rate to the carrier offset; the specification's calculation 18 already assumes this.
 - **A transform across a message's tone sums** gives all frequency bins inside ±1/(4`T`) of the
-  tone length at once (Psiaki's two-level acquisition; at most 0.9 dB at the edge). The frequency
-  dimension then costs a few tens of plain decodes instead of thousands. With an assumed cost of
-  20 decodes the laptop's 24-bit margin for the unseen-slewing reference at 10.24 s tones rises
-  from 0.36 to about 3 [derived].
+  tone length at once (Psiaki's two-level acquisition; at most 0.9 dB at the edge). This is now
+  built and measured (section 6.4): the laptop's 24-bit margin for the unseen-slewing reference
+  at 10.24 s tones rises from 0.36 to about 18, where an assumed cost had given about 3.
 - **Hierarchical screening** with a stated false-dismissal budget gave 19 to 26 times in a 2026
   gravitational-wave search and more elsewhere. Here the cheap statistic would be the per-tone
   decode, and it only works where that statistic keeps enough signal, which is what a long tone
@@ -593,6 +606,91 @@ Margin, fitted divided by needed, for tones of 0.16 / 2.56 / 10.24 / 41 s:
   worst corner of the rectangular grid is about 0.4 by the metric, more than either alone. Past
   about 30 minutes a drifting sound card needs a third dimension (the rate of the drift), and
   the count then grows with the sixth power of the window.
+
+### 6.4 The search as a transform across tone sums
+
+[Measured; `search_bench` on the laptop and on a pod's EPYC 9554 with 27 threads, `search_gpu`
+on a full RTX PRO 6000 Blackwell; `search_margins` for the arithmetic. The adopted configuration:
+512 tones of 10.24 s, a block of 5,243 s, 24 bits. Synthetic 4-bit bin values with one planted
+message, frequency bin and drift, which every route returned. Reference classes other than the
+measured one are scaled and marked so.]
+
+For one timing offset a message fixes which position's bin value each tone contributes. Those
+512 complex values are the message's tone sums. A frequency offset and a drift only turn them:
+
+- **Gather once.** One lookup per message and tone gives the tone sums.
+- **Transform.** Every frequency bin of the whole block is one output of a transform across the
+  tone sums, and every drift hypothesis is a de-chirp before it. A shorter window is a transform
+  across its own tones, and needs only the bins its length resolves: 174, 87, 44, … on the
+  whole block, its halves, its quarters and so on for a ±1 ppm reference. One gather thus
+  serves 696 frequency and drift hypotheses on the whole block and 176 more on the shorter
+  windows, where the per-hypothesis loop repeats the gather and the whole ladder 696 times.
+- **Epilogue.** Energies, sums over a rung's windows, best bin per rung, best message.
+
+The transform is the step where a CPU FFT, cuFFT and a Tensor Core matrix product compete, as
+they do for the receiver's first transform. As a matrix product it is dense: messages × tones
+times tones × hypotheses, with no one-hot operand.
+
+Whole search for a 24-bit block with a ±1 ppm reference and ±0.1 s of timing (174 frequency
+bins, 4 drift hypotheses and 20 timing offsets on the whole block, every rung of the ladder):
+
+| Route | Search time | Block duration ÷ search time |
+| --- | ---: | ---: |
+| Laptop, one full decode per hypothesis (13,920 decodes; section 6.2) | 35,300 s | 0.15 |
+| Laptop, FFT across tone sums, FFTW, 12 threads | 1,624 s | 3.2 |
+| Laptop, the same with a plain radix-2 transform | 7,046 s | 0.74 |
+| EPYC 9554, 27 threads, plain radix-2 transform | 868 s | 6.0 |
+| GPU, one full decode per hypothesis | 980 s | 5.4 |
+| GPU, cuFFT across tone sums | 83 s | 63 |
+| GPU, FP16 matrix product across tone sums, Tensor Cores | 11.4 s | 461 |
+| GPU, the same with 8-bit integer operands | 18.9 s | 277 |
+
+- **The laptop keeps up with a ±1 ppm reference for 24 bits**, by 3.2, where the per-hypothesis
+  loop was seven times too slow. Six threads gave the same time as twelve.
+- **The Tensor Core product is 7 times faster than cuFFT and 86 times faster than the
+  per-hypothesis kernel on the same GPU**, and 143 times faster than the laptop. The product
+  itself ran at 404 nominal TFLOP/s. Over the whole pipeline (gather, product, epilogue) the GPU
+  showed 99% activity and 60% Tensor Core activity at 540 W; the product is 69% of the time,
+  the epilogue 24% (1.1 TB/s read) and the gather 7% (2.0 × 10¹¹ lookups a second).
+- **FP16 beat the 8-bit integer product**, 404 against 223 nominal units and 60% against 35%
+  Tensor Core activity, with this library's general matrix product. The integer result is
+  exact; the planted signal came out of all three.
+- **The library transform matters on the CPU**: FFTW was 4.3 times faster than the plain
+  radix-2 loop, and more than half of the laptop's time went into the many small transforms of
+  the shorter rungs, which are called one at a time here.
+- With 41 s tones (128 per block) the laptop needs 570 s; with 2.56 s tones (2,048) and no
+  summing into sub-blocks 7,412 s. Shorter tones should be summed into about 512 sub-blocks
+  before the transform, which leaves the gather as the part that grows with the tone rate; that
+  was not built.
+- **One hypothesis is still one plain decode.** With logged GPS references the full-ladder
+  kernel (2.5 s on the laptop, 0.07 s on the GPU) is the cheaper route; the transform pays from
+  some tens of hypotheses on the laptop and from about ten on the GPU. Choosing between them is
+  the scheduler's work.
+
+Block duration divided by search time for the assumed reference classes (at or above 1 the
+device keeps up; only the ±1 ppm row at 24 bits is measured, the rest is scaled by rows and
+passes as `search_margins` states):
+
+| Reference at each end | Laptop, 24 bits | GPU, 24 bits | Laptop, 16 bits | GPU, 16 bits | Laptop, 10 bits |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GPS-locked, corrections logged | 2,067 | 74,483 | 529,000 | 19 million | 34 million |
+| Slewed unseen at 1 ppm | 18 | 1,900 | 4,550 | 488,000 | 291,000 |
+| TCXO, ±1 ppm, ±0.1 s | 3.2 | 461 | 827 | 118,000 | 52,900 |
+| Crystal, ±20 ppm, ±1 s | 0.013 | 0.47 | 3.3 | 119 | 208 |
+| Sound-card clock, ±100 ppm, ±1 s | 0.0006 | 0.02 | 0.16 | 5.9 | 10 |
+
+- **What stays out of reach is narrower than first reported.** A 24-bit block with a
+  free-running crystal is about twice too slow on one GPU and 80 times on the laptop, where the
+  per-hypothesis count had it 300 and 11,000 times too slow. A 16-bit block with a crystal keeps
+  up on both. A sound-card clock is in reach for 10 bits on the laptop and 16 bits on the GPU.
+- More than 1,024 frequency bins exceed what tone sums can carry (half the tone's reciprocal);
+  the scaled rows cut the range into bands of 512 bins with bin values taken at each band's
+  centre, at 0.9 dB at a band edge.
+
+Not in these figures: forming the bin values for each timing offset; the presence test; and, at
+the two rungs below the whole block, a drifting reference moving the signal by up to 1.5 bins
+between windows, which the epilogue covers by summing along tilted bin paths and which was not
+timed. The kernels are stock: the library's general matrix product and a plain epilogue.
 
 ## 7. Positions and a value-dependent phase
 
@@ -690,11 +788,12 @@ receiver's work.
   no memory traffic from real tables. The large CPU cases are scaled from a timed sample of the
   message space. The GPU ladder kernel is untuned, and the GPU was timed for 24 bits only.
 - **The search counts are for assumed reference classes** and a rectangular grid. The transform
-  across tone sums and the screening are from the literature and were not built.
+  across tone sums is built as a benchmark with synthetic bin values and measured for one class;
+  the other classes are scaled, and tiered screening was not built.
 - **A 10 s tone is conspicuous** to an observer with a filter bank (the specification's section
-  11: 2 to 6 dB of margin with 32 tones per block). Phase steps inside the tone restore
-  concealment at the price of timing hypotheses and antenna transients. Not evaluated for this
-  case.
+  11: 2 to 6 dB of margin with 32 tones per block). Accepted by the user's direction of
+  28 November: below 9 kHz the band is regarded as uncontended, concealment is kept only where
+  it costs no computation, and phase steps inside the tone are not offered there.
 - **Per-tone reception with few positions** is now simulated for 2, 4, 8 and 16 positions, on
   the steady path and two wander channels only.
 - **The carrier should stay clear of the night mode cut-offs.** They sit at multiples of about
@@ -913,8 +1012,11 @@ report is not kept; what it found and what was done:
 ## Provenance and cost
 
 - Local calculations and the CPU timings: 12-thread Ryzen 5 PRO 5650U.
-- The phase-ramp calculation and the reruns of the searches' scratch calculations: the same
-  laptop, 28 November.
+- The phase-ramp calculation, the reruns of the searches' scratch calculations and the CPU
+  search benchmark: the same laptop, 28 November.
+- The search benchmark on the GPU: a third on-demand pod of the same type on 28 November, 0.116 h,
+  about 0.31 USD, verified removed, no persistent volume; identity and hashes in
+  [`results/gpu/identity_search.out`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/results/gpu/identity_search.out).
 - GPU and second CPU timings: two on-demand RTX PRO 6000 Blackwell Server Edition pods, 0.076 h
   and 0.095 h, about 0.46 USD together, both verified removed, no persistent volume. The second
   reran both programs after the CPU benchmark was corrected; its outputs are the stored ones.

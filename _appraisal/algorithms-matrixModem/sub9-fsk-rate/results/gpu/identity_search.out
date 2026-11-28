@@ -1,0 +1,16 @@
+date_utc: 2026-11-28T04:15:03Z
+NVIDIA RTX PRO 6000 Blackwell Server Edition, 97887 MiB, 595.112.07
+Cuda compilation tools, release 12.8, V12.8.93
+Build cuda_12.8.r12.8/compiler.35583870_0
+g++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0
+CPU(s):                                  256
+Model name:                              AMD EPYC 9554 64-Core Processor
+Thread(s) per core:                      2
+Socket(s):                               2
+CPU(s) scaling MHz:                      66%
+cpu.max: 2720000 100000
+threads used by search_bench: 27
+3b1232b5a4b77bb39da1f9e64137e24740fe5b4007d4381d008b463d2c93192c  search_gpu.cu
+730107bae78685c7e89f538487899120fdb061bfc44320a3380e331d1a9eb3db  search_gpu
+e30544458d0760bb7cc00fa84bd27a9e2ea0bc44305c6e007e09e32e8f4f68fc  search_bench.cpp
+17b446920d60a7ae8bb02ab1684c98a1a9ff044796f635abc137776a4b5b70fe  search_bench

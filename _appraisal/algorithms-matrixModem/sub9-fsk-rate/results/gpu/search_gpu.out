@@ -1,0 +1,28 @@
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition, 188 SMs, 95.0 GiB
+tones 512, frequency bins on the whole block 174, drift hypotheses 4, rungs 9, batch 131072 messages
+planted message 7f3a79, frequency bin -21, drift hypothesis 2
+
+matrix product on Tensor Cores, rungs 0 to 8 in the product (2294 complex rows, 1.23e+12 flop per batch)
+  gather to FP16 planes: 0.331 ms per batch (2.03e+11 tone lookups/s)
+  FP16 x FP16 -> FP16: product 3.049 ms (403.9 nominal TFLOP/s), epilogue 1.066 ms (1128 GB/s read); planted: correct
+  gather + product + epilogue          33.917 ns per message and timing; one timing hypothesis over 2^24 messages 0.569 s; 20 timing offsets 11.38 s; block/search 461
+  FP16 x FP16 -> FP32: product 3.216 ms (382.9 nominal TFLOP/s), epilogue 1.605 ms (1498 GB/s read); planted: correct
+  gather + product + epilogue          39.308 ns per message and timing; one timing hypothesis over 2^24 messages 0.659 s; 20 timing offsets 13.19 s; block/search 397
+  INT8 x INT8 -> INT32: gather 0.268 ms, product 5.511 ms (223.5 nominal Top/s), epilogue 1.604 ms; planted: correct
+  gather + product + epilogue          56.329 ns per message and timing; one timing hypothesis over 2^24 messages 0.945 s; 20 timing offsets 18.90 s; block/search 277
+
+matrix product on Tensor Cores, rungs 0 to 5 in the product (1590 complex rows, 8.54e+11 flop per batch), short rungs by the direct kernel
+  gather to FP16 planes: 0.322 ms per batch (2.08e+11 tone lookups/s)
+  short rungs direct: 1.367 ms per batch
+  FP16 x FP16 -> FP16: product 2.158 ms (395.5 nominal TFLOP/s), epilogue 0.738 ms (1129 GB/s read); planted: correct
+  gather + product + epilogue          34.986 ns per message and timing; one timing hypothesis over 2^24 messages 0.587 s; 20 timing offsets 11.74 s; block/search 447
+  FP16 x FP16 -> FP32: product 2.337 ms (365.3 nominal TFLOP/s), epilogue 1.117 ms (1493 GB/s read); planted: correct
+  gather + product + epilogue          39.237 ns per message and timing; one timing hypothesis over 2^24 messages 0.658 s; 20 timing offsets 13.17 s; block/search 398
+  INT8 x INT8 -> INT32: gather 0.181 ms, product 3.838 ms (222.4 nominal Top/s), epilogue 1.116 ms; planted: correct
+  gather + product + epilogue          49.610 ns per message and timing; one timing hypothesis over 2^24 messages 0.832 s; 20 timing offsets 16.65 s; block/search 315
+
+cuFFT, rungs 0 to 5 by transforms of 1024 to 32 points, short rungs by the direct kernel; planted: correct
+  gather to complex floats: 1.778 ms per batch; short rungs direct: 1.367 ms
+  rung 0, per drift hypothesis: fill 1.123 ms, transform 1.475 ms (8.88e+07 transforms of 1024 points per second), energies 0.375 ms
+  rungs 1 to 5 together: fill 5.602 ms, transforms 7.403 ms, energies 4.399 ms
+  whole route, timed as one           247.182 ns per message and timing; one timing hypothesis over 2^24 messages 4.147 s; 20 timing offsets 82.94 s; block/search 63

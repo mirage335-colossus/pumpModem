@@ -9,8 +9,8 @@ sources.
 **Purpose and retention.** `antenna_keying.cpp`, `phase_slew.cpp`, `coherent_block_mc.cpp` and
 `search_ceiling.py` are theoretical calculations (the third with a Monte Carlo part); their
 outputs are the reference for the specification's sub-9 kHz spacing, tone length, phase ramp and
-search figures. `decode_bench.cpp`, `decode_gpu.cu` and `results/gpu/` are measurements with
-provenance. [`literature-calcs/`](literature-calcs/README.md) holds the scratch calculations of
+search figures. `decode_bench.cpp`, `decode_gpu.cu`, `search_bench.cpp`, `search_gpu.cu` and
+`results/gpu/` are measurements with provenance; `search_margins.py` is arithmetic on them. [`literature-calcs/`](literature-calcs/README.md) holds the scratch calculations of
 the delegated literature searches. Keep them as research material under the
 [research-material rule](../../../docs/development.md#research-material).
 
@@ -148,6 +148,70 @@ lookups per second and can probably be improved; the GPU was timed for 24 bits o
 CPU cases are scaled from a timed sample; no transform stage, no accumulation stage and no real
 tables.
 
+## `search_bench.cpp` and `search_gpu.cu`
+
+The whole hypothesis search of one block of the adopted configuration (512 tones, 24 bits),
+organised so that the frequency and drift hypotheses are not an outer loop of decodes. Added on
+28 November after the user asked why the search had not been put on Tensor Cores: the first
+benchmarks had run a full decode per hypothesis and had tried Tensor Cores only on the search
+over messages.
+
+Per message and timing offset: gather the bin value of the position the message puts each tone
+on (one lookup per tone); for the whole block de-chirp for each drift hypothesis and transform
+across the tones (2 × 512 points, 174 bins kept); for each shorter rung transform every window on
+its own tones and keep the bins that rung needs; an epilogue forms energies, adds a rung's
+windows and keeps the best. Windows of eight tones and fewer are evaluated directly.
+
+| Route | Where | The transform step |
+| --- | --- | --- |
+| CPU | `search_bench.cpp` | FFTW single precision when built with `-DUSE_FFTW` (prototypes declared in the file, because only the runtime library is on the host), otherwise the program's plain radix-2 loop |
+| gemm | `search_gpu.cu` | One FP16 matrix product on Tensor Cores for all rungs: messages × 2·tones times 2·tones × 2·rows, where a row is one (rung, window, bin, drift); also with 8-bit integer operands, and with the three shortest rungs left to a direct kernel |
+| fft | `search_gpu.cu` | cuFFT per rung after a fill kernel (de-chirp, zero-pad), shortest rungs by the direct kernel |
+
+Every route has to return the planted message, frequency bin and drift on the whole-block rung.
+
+```bash
+g++ -O3 -march=native -std=c++20 -fopenmp -DUSE_FFTW search_bench.cpp -l:libfftw3f.so.3 -o /tmp/search_bench_fftw
+g++ -O3 -march=native -std=c++20 -fopenmp search_bench.cpp -o /tmp/search_bench
+{ /tmp/search_bench_fftw 12 512 174 960; /tmp/search_bench_fftw 6 512 174 480; /tmp/search_bench 12 512 174 480;
+  /tmp/search_bench_fftw 12 128 174 2048; /tmp/search_bench_fftw 12 2048 174 128; } > results/search_bench.md
+nvcc -O3 -std=c++17 -arch=sm_120 search_gpu.cu -lcublas -lcufft -o search_gpu
+./search_gpu > search_gpu.out                 # 174 bins, batches of 131,072 messages
+./search_gpu 512 696 8 > search_gpu_696bins.out   # scaling check: 8,520 rows, product route only
+./search_gpu sustain gemm 9                   # also gemm8, fft; inside nvidia-smi dmon for telemetry
+```
+
+`results/search_bench.md` holds the five laptop runs (the stored file separates them with
+rules). `results/gpu/` holds the run of 28 November 2026 04:13 UTC on a full RTX PRO 6000
+Blackwell Server Edition: `search_gpu.out`, `search_gpu_696bins.out`, `tele_search_gemm.csv`,
+`tele_search_gemm8.csv`, `tele_search_fft.csv`, `search_bench_pod.out` (the CPU program with the
+plain transform on the pod's EPYC 9554, 27 threads, its CPU quota) and `identity_search.out`.
+One on-demand pod, 0.116 h, about 0.31 USD, verified removed, no persistent volume. The GPU
+program compiled and returned the planted signal on its first run; a second run after a change
+that only added the scaling check gave the same times within 1%, and is the stored one.
+
+Limits: synthetic 4-bit bin values and one planted signal; stock kernels (the library's general
+matrix product and FFT, a plain epilogue); one timing offset timed and multiplied by twenty;
+forming the bin values per timing offset and the presence test are not included; at the two
+rungs below the whole block a drifting reference moves the signal between windows by up to 1.5
+bins, which a real epilogue covers by summing along tilted paths; shorter tones than 10.24 s
+would be summed into sub-blocks before the transform, which is not built (the 2,048-tone run
+shows the cost without it); 16-bit and 10-bit figures are the 24-bit time scaled.
+
+## `search_margins.py`
+
+Block duration divided by search time for five assumed reference classes and 24, 16 and 10 bits,
+for a decode per hypothesis and for the transform search, on the laptop and the GPU. Reads the
+measured times from `results/search_bench.md`, `results/gpu/search_gpu.out`,
+`results/gpu/search_gpu_696bins.out`, `results/decode_bench.md` and
+`results/gpu/decode_gpu.out`. Only the ±1 ppm class at 24 bits is a measurement; the scaling
+rules for the others are in the head of the file. For the adopted configuration it supersedes
+section 3 of `search_ceiling.py`, whose margins assume a decode per hypothesis.
+
+```bash
+python3 -I search_margins.py > results/search_margins.md
+```
+
 ## `literature-calcs/`
 
 Six small programs the four delegated literature searches wrote for their own calculations,
@@ -156,6 +220,9 @@ kept unchanged below a provenance header, with rerun outputs. See its
 [`reviews/`](../../../_ref/algorithms-matrixModem/Fable-5.2/reviews/).
 
 ## `search_ceiling.py`
+
+**Its margins assume one full decode per hypothesis.** That is what a naive search costs, and
+`search_margins.py` replaces it for the adopted configuration.
 
 Arithmetic on the measured rates and on the counting rules of calculation 18 of
 [`../fsk-lattice/`](../fsk-lattice/README.md): decodes that fit into a block's own duration by tone
