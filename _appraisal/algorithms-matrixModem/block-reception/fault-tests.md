@@ -1,4 +1,6 @@
-# Waterfall visibility and recovery of a ten-bit word
+# Optional receiver searches for transmitter and tuning faults
+
+For a misdirected transmit antenna emitting the intended waveform, use the [pointing-loss experiment](pointing-loss.md). The comparisons below use explicit experimental switches. They measure whether the format permits additional recovery when the transmitted tones or the selected sideband differ from the configuration.
 
 A complete sideband reversal left the 34 dB waterfall equally bright in both orientations. The original receiver missed every mirrored word in 64 draws. Searching both orientations recovered all 64. A separate fault moved the centre and compressed the spacing of the transmitted tones. A receiver fitting the strongest tone in each row still missed 42 of 48 words at 27 dB although all 48 records crossed the waterfall threshold. Using row pairs to propose a frequency map and checking the entire coded word against the measured spectrum recovered all 48 on a fresh 27 dB panel for each sign. When two damaged tones in each group of eight were much brighter than the rest, the strongest-row and runner-up proposals both failed. Testing every row pair recovered 32/32 at 27 dB on each of three frequency maps. Smaller successes, false admissions and the computational cost appear with their corresponding controls below.
 

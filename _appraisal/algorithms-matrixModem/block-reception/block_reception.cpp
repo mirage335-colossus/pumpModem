@@ -691,6 +691,7 @@ bool compare_coherent(const FloatPlan& plan, const std::vector<Schedule>& fixtur
 #include "orientation_trial.hpp"
 #include "affine_trial.hpp"
 #include "fault_admission.hpp"
+#include "pointing_trial.hpp"
 } // namespace
 
 int main(int argc, char** argv) {
@@ -699,6 +700,10 @@ int main(int argc, char** argv) {
     for (int ordinal = 0; ordinal < nfixtures; ++ordinal) {
         fixtures.emplace_back(ordinal, 0xaa6218f2);
         other.emplace_back(ordinal, 0xd3d65011);
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--pointing-loss") {
+        check_pointing_loss(plan, fixtures);
+        return 0;
     }
     if (argc == 2 && std::string_view(argv[1]) == "--orientation")
         return check_orientation(plan, fixtures, other) ? 0 : 1;

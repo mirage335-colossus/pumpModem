@@ -2,7 +2,7 @@
 
 This bounded sample-level experiment tests whether a 10-bit block survives the combination of quantization, correlated timing and frequency-width trials, exhaustive message scoring and a presence threshold. It exercises the default HF **lattice** with the draft's FHSS-off option. One block has 64 contiguous tones of 160 ms (32 symbols, two repeats), 352 positions on 6.25 Hz spacing and 1,024 candidate words. The known public calendar selects the block ordinal. [FSK draft](../../matrixModem-FSK.md)
 
-The same native driver also compares waterfall visibility with correct word recovery on reversed spectra, mis-set tone spacing and unmodulated carriers. Build it as shown below. The fault experiments have their own command lines, frozen thresholds, wrong-word controls and measured limits. [Waterfall and receiver fault tests](fault-tests.md)
+The pointing-loss experiment measures whether the ordinary single-orientation receiver can read an intact waveform as its received power falls. The draft receiver uses per-tone and coherent evidence together. The no-argument experiment below is the earlier per-tone-only comparison. Separate, explicitly selected experiments evaluate reversed spectra, mis-set tone spacing and damaged tones. Their extra searches run only in those experiments. [Pointing loss and waterfall visibility](pointing-loss.md) · [Optional receiver fault tests](fault-tests.md)
 
 ## Fixed protocol before sampling
 
