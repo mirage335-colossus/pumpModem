@@ -51,9 +51,9 @@ Draft requirements for the FSK waveform and receiver. [Implementation status](al
 - **Input.** Fixed gain, linear guarded passband, radio blanking and noise reduction off.
   Translate/filter 48 kHz real audio to 3,200 complex samples/s. Allow wider qualified
   capture for offsets, spread and transitions, or filtered 400 samples/s at `j = 3`.
-- **Conditioning.** Estimate Gaussian component noise scale from the lower quartile of
-  complex power. Round I/Q at `0.45σ`. Erase the sample if either code is nonfinite
-  or outside −7…+7.
+- **Conditioning.** Estimate component noise scale under circular Gaussian noise from
+  the lower quartile of complex power. Round I/Q at `0.45σ`. Erase the sample if either
+  code is nonfinite or outside −7…+7.
 - **Coverage.** On the configured sideband, search every word, timing, offset, drift and spread
   hypothesis on active and quiet blocks, including after misses. Require no pilot lock
   or visible trace. Helper may independently narrow search. Fault searches require explicit
