@@ -41,11 +41,15 @@ It extends the method of [`../coherence-limits/`](../coherence-limits/README.md)
 | 17 | Tones without a keyed phase: the cell-rate pulse an observer can add coherently without knowing the positions. (a) Energy per tone needed against observation time, exact, with the carrier frequency known and with 10,000 frequency bins, against the energy observer of section 14. (b) Observer margin over one block. (c) Time-domain Monte Carlo of the pulse and squared-pulse statistics with no key, a two-phase key and a four-phase key. Run with `600 H`; 35 s. Output: `results/lattice_receiver_section17.md` |
 | 18 | Below 9 kHz: frequency-bin and drift-rate spacing rules, bins per coherent window for six assumed reference classes, and decodes needed per second against the measured decode rates. Run with `I`; under a second. Output: `results/lattice_receiver_section18.md` |
 | 19 | [One-bit and ten-bit presence at selectable null-block budgets](results/admission_tradeoff.md). Compares common budgets and a policy that keeps one-bit admission at 10⁻⁶ while relaxing ten-bit admission. Run with `1 J`. |
+| 20 | [Attended HF per-tone duration](results/attended_hf_durations.md). Rounds ten-bit allocations to 32-symbol repeat groups and occupied hop periods for two FHSS profiles. Run with `1 K`. |
+| 21 | [Attended steady-path and coherent-window duration](results/attended_coherent_duration.md). Recalculates the steady-path reference under the stated reception and calendar assumptions. Run with `1 L`. |
 
 ```bash
 cd _appraisal/algorithms-matrixModem/fsk-lattice
 g++ -O3 -march=native -std=c++20 -fopenmp lattice_receiver.cpp -o /tmp/lattice_receiver
 /tmp/lattice_receiver 20000 > results/lattice_receiver.md
+/tmp/lattice_receiver 1 K > results/attended_hf_durations.md
+/tmp/lattice_receiver 1 L > results/attended_coherent_duration.md
 ```
 
 Regenerate the selectable-budget table with `/tmp/lattice_receiver 1 J > results/admission_tradeoff.md`.
@@ -55,6 +59,28 @@ searches must be included in its hypothesis count. A true-template miss of 10⁻
 presence threshold. Successful recovery of the transmitted value also depends on competitors'
 scores. The table gives idealized energy and duration ratios before dwell floors or rounding to the
 agreed transmit schedule.
+
+Section 20 applies the spread-matched per-tone model of section 13b to the HF geometry in
+[the specification](../../../_appraisal/matrixModem-FSK.md#10-sizing-and-expected-duration).
+It compares the earlier per-tone allowance of 10⁻⁶ with 10⁻⁴ and 5 × 10⁻⁵ using identical
+block and hop rounding in all three columns. The last allowance reserves the other half of
+the attended target for coherent attempts, matching the split in the
+[sample-level receiver experiment](../block-reception/README.md#one-false-admission-per-ten-thousand-quiet-blocks).
+Only the per-tone branch contributes to section 20's signal model. Every row gives the
+repeats per symbol, occupied hops and elapsed seconds, including the last hop's edges
+and any unused flat slots. Continuous fading across tones and errors from a competing
+word require separate checks. The 400 nuisance hypotheses are held fixed across durations.
+A search whose timing or frequency-drift grid grows with block length needs a fresh count
+and calibration. The original section 13b retains its 32-tone floor.
+
+A direct cosine sum of the triangularly weighted channel covariance at every sample lag,
+the matched-metric expression `2 Σ(λ − log1p(λ))` and independent normal quantiles
+reproduced all 64 per-tone metrics and all 192 repeat, hop and duration choices in
+section 20. Of those choices, 39 reached the 32-hop floor and 21 used a partially filled
+final hop. Applying section 13b's coarser numerical integration at the same budgets
+and on the same calendar changed the per-tone metric by at most 0.052%. Integer rounding
+then changed 36 durations, with a largest difference of 0.70%. The new table uses the
+full sampled aperture.
 
 With 400 public nuisance hypotheses per payload, the ten-bit threshold at 10⁻⁴ calls for
 3.1–5.4% more energy than one bit at 10⁻⁶ on a steady path, depending on the look count.

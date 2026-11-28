@@ -46,6 +46,27 @@ Operand precision and accumulation range need separate declarations. With `N=32L
 
 ## Choosing tone length and power constraints
 
+The current duration calculation uses the attended target on a block the transmitter can
+actually schedule. In the HF per-tone approximation at 400 nuisance hypotheses per word,
+reserving half of 10⁻⁴ for the per-tone family gives a deflection requirement of 88.75.
+The isolated historical 10⁻⁶ calculation gives 99.98. This is an 11.2% difference before
+rounding. At +10 dB-Hz the 4 s hop still takes at least 128 s, even where the older
+one-cell table quoted 13–14 s. At −10 dB-Hz and 0.1 Hz full Doppler width, the same hop
+takes 58,428 s with one-cell tones and 3,712 s with held tones in this model. The 32-hop
+floor, actual active samples and exactly 32L transmitted tones enter both comparisons.
+These are estimated transmit periods for threshold crossing. An isolated word requires
+another two scored quiet periods for physical closure. [Current specification](../../_appraisal/matrixModem-FSK.md#10-sizing-and-expected-duration) · [Repetition, periods and per-tone metric](../../_appraisal/algorithms-matrixModem/fsk-lattice/results/attended_hf_durations.md)
+
+On the sixteen-position, 10.24 s tone profile below 9 kHz, ideal whole-block coherence at
+−37 dB-Hz gives 3.17 days for transmission. Combining for at most 128 tones at a time
+gives 29.0 days on the same transmitted format. Finite coherence therefore matters even
+when the search finds the correct offset. Each partial final window includes only the
+energy actually sent and contributes its own noise to the test. The theoretical model uses
+the central and noncentral chi-square laws of normalized squared magnitudes in independent
+complex Gaussian noise. Gil, Segura and Temme treat inversion of the corresponding
+noncentral tails. The empirical admission experiment has estimated noise, quantization
+and competing word decisions and needs separate calibration. [Window and hop calculations](../../_appraisal/algorithms-matrixModem/fsk-lattice/results/attended_coherent_duration.md) · [Gil, Segura and Temme](https://arxiv.org/abs/1404.0302) · [Receiver calibration](fsk-presence-calibration.md)
+
 A fixed-duration comparison used the same 10.24 s of diffuse channel and noise for both waveforms, 10 payload bits, 352 positions and equal block energy. The 160 ms format sent 64 tones with two looks per code symbol. The 320 ms format sent 32 tones with one look per symbol. At 18 dB block energy and 0.5 Hz Doppler spread, longer tones raised correct per-tone admissions from 81 to 98 of 120 (24 paired gains, seven losses), and correct joint admissions from 90 to 101. At 20 Hz and the same energy, the joint rules admitted only 0 and 3 correct words. At 22 dB they reached 81 and 85. These results compare two whole profiles in a single frequency-flat Gaussian fading model with 32 Doppler components. Both lack adequate sensitivity on the wider spread at 18 dB. [Shared-input comparison and calibration](../../_appraisal/algorithms-matrixModem/block-reception/README.md#one-cell-versus-two-cell-hf-tones)
 
 The 32-component approximation matters more on the fast path. With block power normalized to mean one, its reciprocal variance measures how much independent fading is averaged over a block. At 0.5 Hz this measure was 9.30 for the fixture and 9.40 for a continuous Gaussian Doppler spectrum. At 20 Hz it was 31.96 versus 363.32. The finite model therefore has substantially more block-to-block power variation at 20 Hz. Its recovery counts apply to this channel realization model. [Channel calculation and experiment geometry](../../_appraisal/algorithms-matrixModem/block-reception/README.md#one-cell-versus-two-cell-hf-tones)

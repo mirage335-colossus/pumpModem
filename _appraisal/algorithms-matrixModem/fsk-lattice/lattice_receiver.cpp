@@ -37,6 +37,9 @@
 //   15 ten bits against one bit under the presence-test sizing; run with "F"
 //   16 hops a block has to span to survive losing a fraction of them; run with "G"
 //   19 selectable null-block budget for the one-bit and ten-bit presence calculation; run with "J"
+//   20 attended HF per-tone duration with integral repeats and complete hop periods; run with "K"
+//
+//   21 steady-path block periods with legal HF and sub-9 kHz geometry; run with "L"
 //
 // Method notes. For a metric L = sum_k q_k |Y_k|^2 over orthonormal analysis functions with
 // independent CN(0,1) noise, the large-alphabet GMI is sup_s sum_k [s q_k (1+lam_k) + ln(1 - s q_k)]
@@ -1073,6 +1076,8 @@ static void section11(int trials) {
     printf("limit 5 log10(N z^2 / S), reached only when n is much larger than N z^2.\n\n");
 }
 
+#include "attended_coherent_duration.hpp"
+
 // ---------- Section 12 ----------
 static void section12() {
     printf("## 12. A keyed phase in every cell of a dwell\n\n");
@@ -1296,10 +1301,14 @@ static void section14() {
 }
 
 // ---------- Section 15 ----------
+static double weak_deflection(double per_template_false, double miss) {
+    const double z = qinv(per_template_false) + qinv(miss);
+    return z * z;
+}
+
 // Required weak-tone Gaussian deflection, then steady-path total E/N0 for 1, 32 and 1024 looks.
 static std::array<double, 4> presence_requirements(double per_template_false, double miss) {
-    const double z = qinv(per_template_false) + qinv(miss);
-    return {z * z, energy_needed(1, per_template_false, miss),
+    return {weak_deflection(per_template_false, miss), energy_needed(1, per_template_false, miss),
             energy_needed(32, per_template_false, miss), energy_needed(1024, per_template_false, miss)};
 }
 
@@ -1499,6 +1508,89 @@ static void section18() {
     }
 }
 
+// Section 20 uses the same per-tone metric as section 13b. The periods here
+// include hop edges. Only complete transmitted flat-cell tones supply evidence.
+static std::vector<double> sampled_tone_bin_powers(const Chan& channel, double power, int cells) {
+    const int samples = cells * CELL;
+    const int half_span = span_bins(channel, samples / FS);
+    std::vector<cd> covariance(samples);
+    for (int lag = 0; lag < samples; ++lag)
+        covariance[lag] = (1.0 - double(lag) / samples) * rho(channel, lag / FS);
+
+    // The N-point rectangular-window bin power is the transform of the
+    // triangularly weighted complex covariance. Combine positive/negative lags.
+    std::vector<double> energy(2 * half_span + 1);
+    for (int k = -half_span; k <= half_span; ++k) {
+        const cd step = std::polar(1.0, -2 * PI * k / samples);
+        cd phase = step;
+        double sum = covariance[0].real();
+        for (int lag = 1; lag < samples; ++lag) {
+            sum += 2 * (phase * covariance[lag]).real();
+            phase *= step;
+        }
+        energy[k + half_span] = std::max(0.0, power * sum / FS);
+    }
+    return energy;
+}
+
+static void attended_hf_durations() {
+    constexpr int symbols = 32, hypotheses = 400, words = 1024;
+    constexpr std::array<double, 3> branch_budgets = {1e-6, 1e-4, 5e-5};
+    std::array<double, branch_budgets.size()> required{};
+    for (size_t i = 0; i < required.size(); ++i)
+        required[i] = weak_deflection(branch_budgets[i] / (hypotheses * words), 1e-3);
+
+    printf("## 20. HF per-tone sizing with whole blocks and hops\n\n");
+    printf("Use the large-alphabet spread-matched per-tone metric and bin span of section 13b.\n");
+    printf("Compute each rectangular aperture's bin powers at all 3,200-Hz sample lags. The test template\n");
+    printf("has the correct Doppler centre and spread. A = 400 is the assumed count of searched\n");
+    printf("nuisance alternatives per word. Count all 1,024 ten-bit words. The three per-tone\n");
+    printf("family allowances are 1e-6 (historical), 1e-4 (full attended budget) and 5e-5\n");
+    printf("(half of 1e-4, as in the two-branch experiment). At true-template miss 1e-3 their\n");
+    printf("Gaussian deflections are %.4f, %.4f and %.4f. The other branch receives the remainder\n",
+           required[0], required[1], required[2]);
+    printf("in the half-budget case. This table sizes reception by the per-tone branch alone.\n\n");
+    printf("For B flat tone slots per hop and d² = 2 × per-tone GMI, use\n");
+    printf("L = max(B, ceil(S / (32 d²))) repeats per symbol, N = 32L transmitted tones and\n");
+    printf("H = ceil(N / B) occupied hops. Each new block starts at a hop boundary. Charge the\n");
+    printf("whole last period if only partially filled. Any unused slots there contribute zero.\n");
+    printf("The floor supplies 32 full hops' worth of data in both profiles. One-cell tones span\n");
+    printf("0.16 s, and a held tone fills both or all 24 flat cells of a 0.4 s or 4 s hop.\n");
+    printf("The edges carry no scored energy. Width is the full two-standard-deviation width of\n");
+    printf("a Gaussian Doppler spectrum. The steady row uses a line at zero offset.\n\n");
+    printf("| C/N₀ (dB-Hz) | Width | Hop (s) | Cells/tone | d²/tone | L at 1e-6 | H | Time (s) |");
+    printf(" L at 1e-4 | H | Time (s) | L at 5e-5 | H | Time (s) |\n");
+    printf("|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    const std::array<NamedChan, 4> channels = {{{"steady", LINE()}, {"0.1 Hz", G(0.1)},
+                                                {"1 Hz", G(1)}, {"10 Hz", G(10)}}};
+    const std::array<Dwell, 2> hops = {{{"short", 0.4, 2}, {"long", 4.0, 24}}};
+    for (double cn0_db : {10.0, 0.0, -10.0, -20.0}) {
+        for (const auto& channel : channels) {
+            for (const auto& hop : hops) {
+                for (int cells : {1, hop.nc}) {
+                    const auto energy = sampled_tone_bin_powers(channel.ch, undb(cn0_db), cells);
+                    const double d2 = 2 * gmi_wp(energy, energy);
+                    const int slots = hop.nc / cells;
+                    printf("| %+.0f | %s | %.1f | %d | %.9g |", cn0_db, channel.name.c_str(),
+                           hop.period, cells, d2);
+                    for (double s : required) {
+                        const long long repeats = std::max<long long>(slots, std::ceil(s / (symbols * d2)));
+                        const long long occupied = (symbols * repeats + slots - 1) / slots;
+                        printf(" %lld | %lld | %.1f |", repeats, occupied, occupied * hop.period);
+                    }
+                    printf("\n");
+                }
+            }
+        }
+    }
+    printf("\nThe additive d² proxy assumes equally useful independent tone observations. Its Gaussian\n");
+    printf("tail and the substitution d² = 2 GMI are weak-tone approximations. Strong tones (the\n");
+    printf("historical screen flags d² > 0.5), few independent looks, shared within-hop fading,\n");
+    printf("finite codes and score quantization can change the required duration. No interference,\n");
+    printf("erased hops, decoding margin, competing-word argmax or quiet-slot completion is modeled.\n");
+    printf("Times are wall seconds for a scheduled data block at fixed flat-interval received power.\n");
+}
+
 static void admission_tradeoff() {
     printf("## 19. Ten-bit and one-bit presence at selectable null-block budgets\n\n");
     printf("One public block has A nuisance hypotheses per payload. Each template receives the same\n");
@@ -1561,12 +1653,16 @@ int main(int argc, char** argv) {
         {"Rician K=1, diffuse 1 Hz", LINE(0.5) + G(1, 0.5)},
         {"Auroral 50 Hz at +20 Hz", G(50, 1, 20)},
     };
+    std::string want = argc > 2 ? argv[2] : "1234567";
     printf("# Matrix Modem FSK lattice: receiver calculations\n\n");
     printf("Generated by `lattice_receiver.cpp`. Complex baseband at 3200 Hz, cell = 512 samples = 160 ms, bin = 6.25 Hz.\n");
-    printf("Dwell period D with nc whole active cells starting 40 ms after the dwell start: A 0.4 s / 2 cells,\n");
-    printf("B 4 s / 24 cells, C 40 s / 249 cells. Phase and fading are independent from dwell to dwell. Known timing\n");
-    printf("and Doppler centre, Gaussian noise, no interference, ideal coding. Theoretical calculation.\n\n");
-    std::string want = argc > 2 ? argv[2] : "1234567";
+    if (want.find_first_not_of("KL") == std::string::npos) {
+        printf("Theoretical calculation. Each section specifies its channel, search and decision assumptions.\n\n");
+    } else {
+        printf("Dwell period D with nc whole active cells starting 40 ms after the dwell start: A 0.4 s / 2 cells,\n");
+        printf("B 4 s / 24 cells, C 40 s / 249 cells. Phase and fading are independent from dwell to dwell. Known timing\n");
+        printf("and Doppler centre, Gaussian noise, no interference, ideal coding. Theoretical calculation.\n\n");
+    }
     auto on = [&](char c) { return want.find(c) != std::string::npos; };
     if (on('1')) section1();
     if (on('2')) section2(chans);
@@ -1587,5 +1683,7 @@ int main(int argc, char** argv) {
     if (on('H')) section17(trials);
     if (on('I')) section18();
     if (on('J')) admission_tradeoff();
+    if (on('K')) attended_hf_durations();
+    if (on('L')) attended_coherent_duration();
     return 0;
 }
