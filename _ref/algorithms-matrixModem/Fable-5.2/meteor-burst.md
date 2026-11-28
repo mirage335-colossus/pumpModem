@@ -11,30 +11,38 @@ by a research subagent; I have not re-read the sources myself.
 
 ## Conclusions
 
-1. **At 2–100 mW with small antennas meteor burst is not a usable path.** The strongest
-   underdense trail (10¹⁴ electrons/m) gives a peak of −6 dB-Hz at 100 mW and −23 dB-Hz at 2 mW
-   between isotropic antennas at 50 MHz over 1,300 km [calc]. No underdense trail delivers even
-   one tone's worth of energy.
-2. **My earlier estimate was wrong.** I had said +10 to +30 dB-Hz at the burst peak for 2–100 mW
-   with 160 to 180 dB of loss. The loss for the strongest underdense class is 176 to 188 dB at
-   50 MHz, and typical trails are 10 to 30 dB weaker. +10 to +30 dB-Hz needs about 10 to 17 dBi
-   at each end at 100 mW.
-3. **With directional antennas at both ends 100 mW becomes marginal.** At 17 dBi each end,
-   23 to 73 bursts an hour carry one tone's worth of energy; at 10 dBi each end, 0 to 15. At
-   2 mW only the 17 dBi case with the most favourable decay time gives any (10 an hour) [calc].
-4. **No published result at 10 W or less was found.** Amateur guidance calls 50–100 W
-   reasonable and says the mode is not suited to very low power [read]. Operational systems use
-   300 W to 2 kW.
-5. **The channel during a burst is clean but brief.** Delay spread is under 100 ns for 90% of
-   the time, the coherence bandwidth is hundreds of kilohertz or more, and the Doppler shift is
-   about 20 Hz at 40 MHz [read]. Half of the bursts on the measured link lasted under 150 ms.
-6. **The modulation question is settled by energy, not by the channel.** The path would carry
-   PSK, and high-power systems use it. At these powers no burst holds enough energy for a
-   carrier, each burst has a new phase and a frequency offset of tens of hertz, and a
-   noncoherent tone about as long as the burst is the fitting signal.
-7. **Three settings of the specification do not fit.** The 20 Hz shift exceeds the 6.25 Hz
-   position spacing, so a per-burst frequency search over several positions is needed. Median
-   bursts are shorter than the 160 ms cell. The evidence clip caps a strong tone.
+Stated for 50 MHz, galactic noise and no gain at the transmitter. The sections below are in the
+order the work was done; later sections correct earlier ones where marked.
+
+1. **Underdense trails are out of reach at 2–100 mW with small antennas.** The strongest gives a
+   peak of −6 dB-Hz at 100 mW and −23 dB-Hz at 2 mW between isotropic antennas over 1,300 km
+   [calc]. They need about 17 dBi at each end.
+2. **Overdense trails are the working case.** They are under 5% of trails and about 30% of
+   throughput on classic links, more as power falls [read]. In 2.2 kHz they present Doppler
+   fading of 1–10 Hz and microseconds of delay spread, which is the diffuse case the FSK design
+   assumes.
+3. **The whole shared sky at 50 to 500 km is the favourable geometry.** 100 mW with no antenna
+   gain gets about two block-worth trails an hour; a 20 dBi all-beam receive array raises that
+   to about 50 and makes 2 mW workable at 3 to 4 [calc]. At 1,300 km the unaided figure is
+   almost nothing.
+4. **Up to about 300 km troposcatter is the better path.** It gives 100 mW a continuous −2 to
+   +11 dB-Hz at 300 km (median), fading slowly; beyond about 400 km meteor trails win [calc
+   from methods not validated at 50 MHz].
+5. **A radar at the transmitting site sees about half the link's trails at 50 km and a tenth at
+   300 km** [calc]. An illuminator received at the far end sees all of them.
+6. **Why a keyed tone and not PSK.** Underdense trails are clean enough for PSK (delay spread
+   under 100 ns for 90% of the time) but no burst at these powers holds the energy for a
+   carrier; overdense trails fade. A wideband keyed-phase mode on underdense trails is
+   physically supported and gains concealment, not sensitivity.
+7. **What the specification would need for meteor burst:** a per-trail frequency search of
+   about ±30 Hz, a cell shorter than 160 ms, a higher evidence clip, and a block collected over
+   one or several trails.
+8. **No published result at 10 W or less was found**, and no literature on a higher-frequency
+   probe. Operational systems use 300 W to 2 kW.
+9. **Corrections of my own estimates made in conversation:** +10 to +30 dB-Hz for 2–100 mW was
+   wrong by 15 to 35 dB without antenna gain; the first overdense levels were about 6 dB too
+   high; the first short-path rate was too low by a factor of two or more; the troposcatter
+   loss was about right.
 
 ## Underdense trail: received power and decay
 
@@ -215,10 +223,448 @@ range; trail formation and absorption losses are left out; the noise is galactic
 - 40 MHz is better than 50 MHz by about a factor of two in throughput. 144 MHz is 14 dB worse in
   loss, with bursts an eighth as long.
 
+## Proposal: radar-selected trails and a wideband keyed-phase signal
+
+Proposed by the user on 27 November 2026, after the results above. Meteor burst is treated as an
+exceptional path: a high-power, highly directional radar near 144 MHz with phased arrays finds
+trails that are strongly reflective and long lasting; data follows near 50 MHz at very low
+power, with energy collected over many bursts; and because the trail has almost no delay spread,
+the signal is a rapid keyed phase sequence over a wide band (hopped, or sampled directly), which
+only a keyed receiver can correlate. My assessment follows. It is reasoning from the figures
+above; nothing in this section is computed.
+
+- **The physics supports the wideband keyed-phase signal for underdense trails.** Delay spread
+  under 100 ns for 90% of the time and a coherence bandwidth of megahertz allow phase steps at
+  rates up to about a megahertz. This is the "specular path" exception of the specification
+  carried to its end: a tone rate near the bandwidth, which is phase keying.
+- **The trails the radar would select are the less clean ones.** 71% of overdense trails showed
+  multipath against 12% of underdense, coherence bandwidth falls to hundreds of kilohertz in
+  wind-shear tails, and delay spreads of 1–7 µs occur. Long-lasting trails also distort in the
+  wind. A rate of about 100 kHz is safe on them; a megahertz is not assured.
+- **Concealment is where the gain is, and it is large.** Spreading 2.2 kHz over 1 MHz lowers the
+  power density by 27 dB. The transmitter can stay silent between trails. And a trail serves
+  only a small ground footprint, so an observer elsewhere needs its own trail.
+- **Sensitivity and throughput do not rise at these powers.** The energy a burst delivers is
+  the same whatever the bandwidth, and a power-limited link gains no capacity from bandwidth. A
+  keyed sequence correlated over a burst and a tone held for the burst collect the same energy.
+  The P.843 law of capacity growing with bandwidth^0.4 is for links with signal to spare.
+- **Energy per burst remains the limit.** 100 mW with 0 dBi at the transmitter needs about 21
+  to 31 dBi at the receiver for a q = 10¹⁴ trail to carry one tone's worth of energy over
+  1,300 km at 50 MHz. 30 dBi at 50 MHz is an aperture of about 2,900 m², some 300 elements.
+  2 mW needs 17 dB more.
+- **A receive array formed digitally keeps the sky coverage that a fixed high-gain antenna
+  gives up.** All beams can be formed at once, which is matrix work. That removes the main
+  penalty of high gain in the tables above, and is the strongest part of the proposal.
+- **Knowing when and where a trail is lets the receiver gate.** Adding energy only while a trail
+  is present avoids adding noise during the 94% or more of the time when there is none, and
+  bursts can be weighted by their strength as hops are weighted by their noise.
+- **A monostatic radar sees different trails.** Forward scatter needs the trail tangent to an
+  ellipsoid with the two ends at its foci; a radar looking back along its own line of sight
+  sees trails at right angles to that line. The illuminator has to share the link's geometry:
+  near one end and received at the other. That is the probe signal of the classic systems. Using
+  144 MHz for it is sound: a trail seen there is 14 dB stronger and about 8 times longer-lived
+  at 50 MHz.
+- **Who has to know.** If the transmitter must know, a signal has to reach it, and the link is
+  no longer one-way. If only the receiver knows, the transmitter sends continuously under its
+  spreading and the one-way property holds. A strong illuminator beside the low-power
+  transmitter would defeat the concealment of that site.
+- **Timing is not free.** Clock drift inside a burst is negligible, but each trail is at a
+  different place, so the path delay differs from burst to burst by up to about a millisecond.
+  At a megahertz that is thousands of delay hypotheses per burst, times some tens of Doppler
+  bins for a shift of ±30 Hz. That delay–Doppler correlation is transform and matrix work and
+  suits Tensor Core hardware. A trail position from the radar would cut it.
+- **Open for this proposal:** the rate and level of overdense trails; measured delay spread and
+  phase stability of the long-lasting trails the radar would select; the array size against
+  sky coverage; the delay–Doppler search volume per burst.
+
+## Overdense trails as the working case
+
+The figures in this section are superseded by "Overdense trails: researched and computed"
+below; the reasoning stands except where that section says otherwise.
+
+The user's reply of 27 November to the assessment above, and my response. The overdense figures
+here use formulas I recalled from Sugar 1964 (peak power ∝ λ³ q^½; duration ≈ re q λ² sec²φ /
+(4π² D)), not read in a source, and hand arithmetic. They are to be verified.
+
+The user's points:
+
+- Rapid PSK on a clean trail keeps full coherence, unlike FSK on a path with spread.
+- Overdense trails are more useful, and must at least be assumed to intrude. Relying on
+  underdense trails wastes an opportunity. It also needs more transmit power, which raises the
+  noise floor around the transmitter and is the greater risk of being noticed or of causing
+  perceived interference.
+- A strong 144 MHz illuminator may give away the transmitting site but not the data
+  transmission, and an adversary may be unable to get close, for instance across a border.
+- Using overdense trails only seems better, and leads back to an FSK modem with rate and
+  spacing chosen for diffuse spread; assuming fully diffuse spread is wise. It may also allow
+  a practical antenna size.
+
+My response:
+
+- **Coherence.** Agreed for the comparison with the default lattice, which adds one-cell tones
+  as energies. Inside one burst a held tone is as coherent as a keyed phase sequence, and
+  neither is coherent from one burst to the next, so the wideband form's advantage over a held
+  tone is concealment.
+- **Overdense trails carry most of the energy.** With trails above q falling as 1/q and energy
+  per overdense trail growing as about q^1.5, the energy arriving grows with the square root of
+  the largest trail counted. Hand figures for 100 mW, 0 dBi at each end, 50 MHz, 1,300 km, on
+  the anchor link's trail rate:
+
+  | q (electrons/m) | Trails an hour above q | Peak C/N₀ | Duration by the formula | Energy over N₀ |
+  | ---: | ---: | ---: | ---: | ---: |
+  | 2×10¹⁴ (transition) | 8.6 | −0.4 dB-Hz | about 1 s | about −3 dB |
+  | 10¹⁵ | 1.7 | +3 dB-Hz | 12 s | about 14 dB |
+  | 10¹⁶ | 0.17 | +8 dB-Hz | 116 s | about 28 dB |
+
+  So one trail of 10¹⁵ carries a tone or two, and one of 10¹⁶ could carry a whole 10-bit block,
+  about once in six hours, with no antenna gain. Real durations are shortened by wind distortion
+  and by loss of electrons, and the trail fades while it lasts; the durations above are upper
+  bounds.
+- **They push back to FSK, for Doppler spread, not delay spread.** Overdense trails fade as the
+  wind distorts them. Their delay spread stays at microseconds and their coherence bandwidth at
+  hundreds of kilohertz, so a 2.2 kHz signal still sees flat fading. What a narrowband modem
+  meets is a Doppler spread of some hertz and a shift of tens of hertz: the diffuse case the
+  specification is built for. Assuming fully diffuse spread is consistent with its principle.
+- **The specified lattice fits overdense trails much better than underdense ones.** A trail of
+  seconds holds many 160 ms cells, and the shortest block (32 tones, about 5 s) fits inside one
+  trail of 10¹⁵ or more. The frequency shift is within the spread bank, which already reaches
+  500 Hz with offset for aurora.
+- **The wideband keyed-phase mode does not carry over.** It relied on the clean underdense
+  trail.
+- **Antenna size.** Agreed: the level no longer has to come from gain. Wide antennas also see
+  more sky than the anchor link's 17 dBi beams, which raises the trail rate above the table.
+- **Illuminator.** The user's judgement on exposure is recorded as stated. Placed at the
+  transmitting site and received at the far end, it shares the link's geometry. A trail
+  overdense at 50 MHz lasts about an eighth as long at 144 MHz, which is still seconds for
+  10¹⁶, so it gives the receiver warning and a measure of strength.
+- **Power and local noise.** Agreed in direction: what is noticed near the transmitter scales
+  with its power, whatever the trail does. Waiting for strong trails trades time for power.
+
+## Overdense trails: researched and computed
+
+Second literature search and an extension of the calculation (section 5 of the results), done
+after the discussion above. Same tags as before. The hand figures in the previous section are
+superseded: their levels were about 6 dB too high, because the underdense and overdense
+formulas do not join, and their durations were the formula's upper bound.
+
+### Formulas
+
+Received power, Hines–Forsyth form [read in two secondary reproductions that agree: a 2026
+simulation paper, eq. 7, and Schilling and Hibshoosh 1988, eq. 2.1.5; Sugar 1964 and Hines and
+Forsyth 1957 themselves were not read]:
+
+`P_R(t) = P_T G_T G_R λ² Γ / [32π² R_T R_R (R_T + R_R)(1 − cos²β sin²φ)] × { [(4Dt + r0²) /
+sec²φ] · ln[ re q λ² sec²φ / (π² (4Dt + r0²)) ] }^½`
+
+- `Γ` polarization factor; other symbols as for the underdense formula.
+- Duration [calc]: `T_ov = re q λ² sec²φ / (4π² D) − r0² / (4D)`. The recalled formula was
+  right, with the `r0` term added.
+- Peak [calc]: `P_peak = P_T G_T G_R λ³ (re q)^½ Γ / [32π³ e^½ R_T R_R (R_T + R_R)(1 − cos²β
+  sin²φ)]`, reached at about `T_ov / e`. λ³ q^½ is confirmed.
+- At q = 2×10¹⁴ the overdense peak is 6.4 dB below the underdense one [calc].
+- Transition density: about 10¹⁴ in the communications literature, 2×10¹⁴ in P.843, 2.4×10¹⁴
+  (Kaiser and Closs 1952, as cited); one source describes mixed behaviour from 10¹³ to 10¹⁶
+  [read]. No source gives it a wavelength dependence. The formula adds one through the initial
+  radius: a reflecting surface needs q > π² r0² / (re λ² sec²φ), which at 144 MHz is about
+  4×10¹³ on a 1,000 km path and 8×10¹⁴ in backscatter [calc].
+
+### What limits real durations
+
+- **Chemistry.** Electrons are lost through reactions with ozone (Baggaley and Cummack 1974, as
+  cited). Median overdense duration peaks 1–3 hours after sunrise and is lowest at sunset
+  [read].
+- **Knee.** A 29.85 MHz radar shows durations turning from diffusion-limited to
+  chemistry-limited at about 2.5 s [read]. Diffusion time grows with sec²φ and chemistry does
+  not, so a forward-scatter link reaches the chemistry limit at a lower density than a radar
+  [calc].
+- **Wind.** Long-lived trails are warped by shear, which produces fading and non-specular
+  echoes [read].
+- **Measured, 45 MHz, 1,150 km, 1 kW (Ostergaard 1990)** [read]: most returns longer than 1 s
+  are overdense; the longest ever seen exceeded 40 s, very rarely; between fades few overdense
+  trails endure more than one second.
+- One simulation caps overdense life at 15 s to represent wind-shear destruction [read].
+- Not found: how often echoes exceed 10 s or 60 s, and any 144 MHz duration distribution.
+
+### How many, and how much they carry
+
+- The arrival-rate slope against signal level is about −1 for underdense and −4 for overdense
+  trails, predicted and measured [read]. With overdense amplitude ∝ q^¼ that is N(>q) ∝ 1/q
+  continuing above the transition [calc], which is what the calculation assumes.
+- q against mass: 10⁻³ g ↔ 10¹⁴, 10⁻² g ↔ 10¹⁵, 1 g ↔ 10¹⁷ electrons/m [read, degraded scan].
+  2×10¹⁴ corresponds to about 5th magnitude [read].
+- **Overdense trails are under 5% of trails and carry about 30% of throughput** (Schanker 1990,
+  as cited) [read].
+- On the 45 MHz Greenland link the overdense duty cycle exceeded the underdense one at every
+  signal level, and "with a transmitter power of 100 W and 10 W the arrival rate will be more
+  and more dominated by overdense trails" [read, Ostergaard 1990].
+- A 6–30 dB change in sensitivity can move a system from underdense to overdense operation
+  [read, NTIA 83-116].
+- Not found: overdense counts per hour for beacon networks or amateur bands, and shower against
+  sporadic rates.
+
+### Fading, Doppler and multipath
+
+- Overdense trails fade at 1–2.5 fades a second; underdense trails show almost none [read,
+  Ostergaard]. Another report gives 2–10 a second within bursts at 50 MHz [read, NBS Technical
+  Note 86]. One example began fading after about 0.6 s.
+- Doppler shift: of order 20 Hz at 40 MHz [read, P.843]. For a 50 m/s wind the bistatic shift
+  is at most about 4 Hz at 50 MHz on a 1,000 km path and 17 Hz in backscatter [calc]. A
+  measuring system was built for ±100 Hz [read].
+- Multipath: 71% of overdense trails show it. Trail warping gives under 1 µs, occasionally
+  5 µs. Two simultaneous trails give up to 1,000 µs on 1–2% of trails; a second component
+  within 6 dB was seen on about 6% [read, Weitzen 1986].
+- Coherence bandwidth: several hundred kilohertz even with warping [read].
+- Not found: a measured Doppler-spread distribution for meteor trails.
+
+### Probe and footprint
+
+- Classic operation: the master repeats a probe, the remote answers on the same or another
+  frequency [read, NTIA 89-241].
+- From 50 to 144 MHz the peak falls 13.8 dB and the duration 8.3 times [calc from the λ laws].
+- No paper was found on a higher-frequency probe predicting a lower-frequency channel, nor on
+  monostatic against bistatic detection for communication. That a radar and a link see
+  different trails is geometry, not a cited result.
+- Footprint of one trail: about 5 × 40 km [read, NTIA 89-241]. Correlation between receivers
+  falls to 0.5 at about 150 km along the path and 30 km across it for single underdense trails
+  [read, via Schilling and Hibshoosh]. Overdense trails act as larger sources with poorer
+  correlation, and a non-specular trail's footprint widens as it expands [read].
+
+### Computed: what 100 mW gets from overdense trails
+
+50 MHz, 100 mW, 0 dBi at each end, galactic noise, trail rate of the anchor link continued as
+1/q. Energy over the noise density for the whole echo by the formula, and with the echo cut at
+15 s and at 3 s [calc]:
+
+| Path | q (e/m) | Trails an hour above q | Peak C/N₀ | T_ov | Whole echo | Cut at 15 s | Cut at 3 s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,300 km | 10¹⁵ | 1.7 | −3.1 dB-Hz | 12 s | 6.5 dB | 6.5 dB | 0.7 dB |
+| 1,300 km | 3×10¹⁵ | 0.56 | −0.7 | 35 s | 13.7 | 10.4 | 1.6 |
+| 1,300 km | 10¹⁶ | 0.17 | +1.9 | 115 s | 21.5 | 11.8 | 2.4 |
+| 500 km | 10¹⁵ | 0.41 | +8.6 | 3.1 s | 12.6 | 12.6 | 12.5 |
+| 500 km | 3×10¹⁵ | 0.14 | +11.0 | 9.4 s | 19.7 | 19.7 | 15.0 |
+| 500 km | 10¹⁶ | 0.04 | +13.6 | 31 s | 27.6 | 24.8 | 16.1 |
+
+One 256-value tone needs about 12 dB and a 10-bit block received per tone on a steady path
+about 20 dB; a fading echo needs more. Other powers and gains add their decibels: 10 dBi at each
+end adds 20 dB, and 2 mW takes off 17 dB.
+
+Reading it:
+
+- **With no antenna gain, 100 mW gets about one tone's worth from a strong overdense trail:**
+  roughly one every two to six hours, on either path length. A whole block in one trail needs
+  10¹⁶ or more with an echo lasting tens of seconds, which is rare and may not occur.
+- **With 10 dBi at each end, every overdense trail carries a block's worth:** 22 dB already at
+  5×10¹⁴ on the long path, about 3 an hour.
+- **At 2 mW, 10 dBi at each end gives about what 100 mW gives with none.**
+- **The short path has the level, the long path the trails and the durations.**
+- **The realistic duration matters more than anything else in the table.** Between 3 s and the
+  formula's value the energy of a strong trail differs by 10 to 20 dB.
+
+### What changes in the earlier response
+
+- "One trail of 10¹⁶ could carry a whole 10-bit block about once in six hours with no antenna
+  gain" was too favourable. By the formula it is marginal (21.5 dB on the long path) and with
+  a realistic duration it is one tone.
+- The statement that overdense trails carry most of the energy is supported: under 5% of trails,
+  about 30% of throughput on classic links, and a growing share as power falls.
+- The statement that the narrowband signal meets Doppler spread, not delay spread, is
+  supported: fading at 1–10 a second, delay spread of microseconds.
+- The fading rate of 1–10 Hz and the shift of up to tens of hertz put the one-cell tone
+  (160 ms, 6.25 Hz) at the edge: several fades can fall inside one tone at the fast end. The
+  spread bank covers it; a shorter cell would fit better.
+
+## Short paths with sky-scanning arrays
+
+The hand figures in this section are superseded by "Whole shared sky: computed" below. They
+were too low for the unaided link (I estimated under one block-worth trail an hour; the
+calculation gives about two).
+
+Proposed by the user on 27 November: phased arrays that scan the sky, with a high-power 144 MHz
+radar, might use every adequate overdense trail in the whole shared sky, over a distance of
+hundreds of miles or less instead of more than a thousand. My assessment is hand arithmetic
+from the formulas and figures above; it is not computed by the program, whose geometry places
+the trail above the path midpoint.
+
+- **The shared sky is nearly the whole sky.** A trail at 95 km is above the horizon out to about
+  1,100 km, so two stations a few hundred kilometres apart see almost the same trails. An array
+  that forms all beams removes the limit a fixed antenna's beam sets on the trail rate.
+- **Rate, from the P.843 flux** (160/q per m² per second, and about 5% of trails usefully
+  oriented): within 300 km of the midpoint, about 8 usable trails an hour above 10¹⁵ and about
+  40 above 2×10¹⁴. The measured long link with 17 dBi beams gave 1.7 and 8.5.
+- **Level rises, duration falls.** With trail distances near 200 km in place of 660 km the
+  level is about 16 dB higher. The forward-scatter angle is small, so the formula's durations
+  shrink to roughly 0.3–0.6 s at 10¹⁵ and 3–6 s at 10¹⁶. Those are short enough to be
+  realistic, so the largest uncertainty of the long-path figures mostly goes away.
+- **What 100 mW then gets, no gain at the transmitter:** a 10¹⁵ trail gives about +12 dB-Hz for
+  half a second, about 8 dB of energy; a 10¹⁶ trail about +17 dB-Hz for some seconds, about
+  23 dB, a block's worth, under one an hour. With a 20 dBi receive array every trail above 10¹⁵
+  carries a block's worth (about 8 an hour) and trails above 2×10¹⁴ carry a tone or more (about
+  40 an hour).
+- **The radar's geometry objection weakens at short range.** As the baseline shrinks against
+  the trail distance, the forward-scatter condition approaches the backscatter one, so a radar
+  at the transmitting site sees more nearly the trails the link uses. For a 150 km baseline and
+  a trail 300 km away the required trail orientation still differs by up to about 14°, which
+  moves the reflecting point by more than a typical trail's length; for 50 km it is within
+  it. Long-lived overdense trails also become non-specular as the wind warps them and then
+  reflect over a wide range of directions.
+- **At 144 MHz a trail needs about 8×10¹⁴ electrons/m to behave as overdense in backscatter.**
+  Weaker trails give only a brief underdense echo there, which a high-power radar still sees.
+- **A competing path appears at these distances.** Troposcatter is continuous out to a few
+  hundred kilometres. I recall its loss at 50 MHz and 300 km as roughly 170 to 180 dB, which
+  would give 100 mW about 0 to +6 dB-Hz continuously with no antenna gain, more than meteor
+  trails deliver on average. That figure is recalled, not checked, and troposcatter has a wide
+  footprint where a trail's is small.
+- The troposcatter figure was checked afterwards; see "Troposcatter as the competing path".
+
+## Whole shared sky: computed
+
+[`meteor_sky.cpp`](../../../_appraisal/algorithms-matrixModem/meteor-burst/meteor_sky.cpp) with
+[its results](../../../_appraisal/algorithms-matrixModem/meteor-burst/results/meteor_sky.md)
+[calc]. A Monte Carlo over trail position and direction on a spherical Earth: straight 25 km
+trails at 95 km, the P.843 flux of 160/q per m² per second continued to 10¹⁶ electrons/m,
+directions as an isotropic sky delivers them through a horizontal surface, the forward-scatter
+condition tested on each trail, both stations required to see the reflecting point at 3° or
+more, the underdense formula below 7.5×10¹³ and the overdense one above with echoes cut at 15 s.
+50 MHz, galactic noise, 0 dBi at the transmitter, the receive gain available in every direction.
+Fading inside an echo, absorption, polarization loss and the annual and daily variation of the
+flux are left out.
+
+**Check.** For the measured long link (500 W, 17 dBi at each end, 1,300 km, 450 trails an hour
+above −125 dBm) the model gives 1,063 an hour with 17 dBi applied over the whole sky. The real
+beams covered part of the sky, so a higher model figure is expected; the factor of 2.4 is
+plausible but not a validation.
+
+Usable trails an hour, by what one echo carries (a tone's worth 12 dB, a block's worth 20 dB, a
+block with 6 dB allowed for fading 26 dB):
+
+| Distance | Power, receive gain | Tone | Block | Block with fading allowance | Mean echo at the block threshold |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 50 km | 100 mW, 0 dBi | 9.1 | 2.0 | 0.5 | 3.2 s |
+| 50 km | 100 mW, 10 dBi | 43 | 12.8 | 4.4 | 1.5 s |
+| 50 km | 100 mW, 20 dBi | 148 | 57 | 24 | 0.4 s |
+| 50 km | 2 mW, 20 dBi | 15 | 3.7 | 1.1 | 2.6 s |
+| 150 km | 100 mW, 0 dBi | 8.9 | 2.0 | 0.5 | 3.6 s |
+| 150 km | 100 mW, 20 dBi | 148 | 56 | 24 | 0.4 s |
+| 300 km | 100 mW, 0 dBi | 8.2 | 1.7 | 0.4 | 5.0 s |
+| 300 km | 100 mW, 10 dBi | 40 | 11.5 | 3.9 | 1.8 s |
+| 300 km | 100 mW, 20 dBi | 146 | 53 | 22 | 0.4 s |
+| 300 km | 2 mW, 20 dBi | 13.6 | 3.2 | 0.9 | 3.7 s |
+| 500 km | 100 mW, 0 dBi | 7.6 | 1.6 | 0.1 | 8.5 s |
+| 500 km | 100 mW, 20 dBi | 142 | 50 | 20 | 0.5 s |
+| 1,000 km | 100 mW, 0 dBi | 3.5 | 0.1 | 0 | 13 s |
+| 1,000 km | 100 mW, 20 dBi | 72 | 23 | 9.2 | 1.7 s |
+| 1,300 km | 100 mW, 0 dBi | 0.6 | 0.01 | 0 | 14 s |
+| 1,300 km | 100 mW, 20 dBi | 24 | 7.2 | 2.9 | 3.1 s |
+
+2 mW with no receive gain gets at most 0.2 tone-worth trails an hour at any distance, and no
+block.
+
+Reading it:
+
+- **The user's expectation holds: the whole shared sky at a few hundred kilometres is far
+  better than a long path.** From 50 to 500 km the figures hardly change with distance; beyond
+  that they fall quickly.
+- **100 mW with no antenna gain at either end gets about two block-worth trails an hour** and
+  eight or nine tone-worth trails, at 50 to 500 km. With the fading allowance it is one block
+  every two to ten hours.
+- **A 20 dBi all-beam receive array raises that to about 50 blocks an hour**, or 20 with the
+  fading allowance, and makes 2 mW workable at 3 to 4 an hour.
+- **Echoes are short where the link has gain** (0.4 s at 20 dBi) because weaker, more numerous
+  trails then suffice, and seconds long where it has none. The 15 s cut rarely matters below
+  500 km.
+- **Only about 1% of trails in view meet the scatter condition** (1.3% at 50 km, 0.7% at
+  500 km, 0.1% at 1,300 km). The "5% in the best region" of P.843 is not the whole-sky figure.
+
+**A radar at the transmitting site.** Share of the link's block-worth trails that also give a
+specular echo to a radar at the transmitter:
+
+| Distance between stations | 50 km | 150 km | 300 km | 500 km | 1,000 km |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Also seen by the radar | 53–57% | 17–21% | 10–11% | 6–7% | 0–3% |
+
+So a radar at the transmitter finds about half the link's trails at 50 km and a tenth at
+300 km, by the specular condition alone. Warped long-lived trails would add to this and are not
+modelled. An illuminator received at the far end sees all of them at any distance.
+
+Limits: the flux law is continued two decades past where it is established; a single trail
+length and height; a steady-path block threshold; the receive gain is taken as available down to
+3° elevation, which a flat array does not give.
+
+## Troposcatter as the competing path at short range
+
+Third delegated search, to check my recalled "170 to 180 dB at 300 km". Same tags.
+
+- **No ITU troposcatter formula is validated at 50 MHz.** The older P.617 climate method is
+  based on 200 MHz to 4 GHz; P.452 starts at about 0.1 GHz; P.617-6 says only "greater than
+  30 MHz"; P.2001 states 30 MHz to 50 GHz; P.1546 covers 30–4,000 MHz by extrapolating below
+  100 MHz [read].
+- **No measured 50 MHz troposcatter path-loss data for 150–500 km was found.**
+- Median basic transmission loss between isotropic antennas, 50 MHz, smooth land, antennas 10 m
+  high [calc by the research agent from the formulas it read]:
+
+  | Method | 150 km | 300 km | 500 km |
+  | --- | ---: | ---: | ---: |
+  | P.617-6 (2025) | 167.6 dB | 183.2 | 194.7 |
+  | P.617-3, climate zone 6 | 155.4 | 170.6 | 184.3 |
+  | P.2001-6, zone 6 | 156.2 | 172.4 | 190.3 |
+  | P.452-18 | 154.2 | 170.4 | 188.3 |
+  | NBS TN101 approximation, without its low-antenna term | 154.2 | 170.0 | 186.6 |
+  | P.1546 land curves, extrapolated to 50 MHz | 166.3 | 179.9 | 196.6 |
+
+- The low figures leave out the loss of low antennas, which NBS TN101 says they underestimate
+  at low frequencies and low heights. The P.1546 curves and P.617-6 are the safer planning
+  values [read]. My recalled 170 to 180 dB at 300 km was about right.
+- Loss not exceeded for 99% of the time: about 15–18 dB above the median at 150 km and 10–13 dB
+  at 500 km (P.617-6: 183.3 / 197.1 / 205.0 dB) [calc].
+- Fading: approximately Rayleigh, "a few fades per minute at lower frequencies" [read,
+  P.617-6]; hourly medians log-normal with 4–8 dB standard deviation. Implied Doppler spread at
+  50 MHz of order 0.01–0.1 Hz [calc, no direct measurement].
+- Amateur practice: 50 MHz troposcatter works but appears weak, mainly because antennas are low
+  in wavelengths [read, OZ1RH].
+
+What 100 mW gets, median, galactic noise (−161.1 dBm/Hz), no antenna gain [calc]:
+
+| Distance | Loss range | C/N₀ | 10-bit block by section 10 of the specification |
+| ---: | --- | ---: | --- |
+| 150 km | 154–168 dB | +13 to +27 dB-Hz | seconds |
+| 300 km | 170–183 dB | −2 to +11 dB-Hz | 15 s to about 20 min |
+| 500 km | 187–197 dB | −16 to −6 dB-Hz | hours to days |
+
+2 mW is 17 dB lower. For 99% availability take off a further 10 to 18 dB.
+
+Against meteor trails with no antenna gain (about two block-worth trails an hour from 50 to
+500 km):
+
+- **Up to about 300 km troposcatter is the better path** for 100 mW: continuous, inside the
+  specification's range, and served by the specified modem as it stands.
+- **From about 400 km meteor trails win**, because troposcatter loss grows about 10 dB per
+  100 km and the meteor figures hardly change.
+- **At 2 mW troposcatter still works at 150 km** (about −4 to +10 dB-Hz) where meteor trails
+  give nothing without an array.
+- **Troposcatter at 50 MHz is a slow-fading path** (0.01–0.1 Hz). The one-cell tone is the slow
+  choice there, by the 12 to 14 dB of time the specification records for 0.1 Hz and below; a
+  held tone of seconds to tens of seconds fits.
+- **Footprint.** Troposcatter covers a wide area, so anyone within range receives it; a meteor
+  trail serves a strip of about 5 × 40 km. Where concealment by geography matters, that
+  favours the trail.
+
+Sources: ITU-R Recommendations P.617-6 (2025), P.617-4, -3 and -1, P.452-18 (2023), P.2001-6
+(2025), P.1546-6 (2019, tabulated values taken from a third-party copy of the P.1546-2
+spreadsheet), P.526-15 — all at <https://www.itu.int/rec/R-REC-P> and read; Rice, Longley,
+Norton and Barsis, "Transmission loss predictions for tropospheric communication circuits",
+NBS Technical Note 101, volume 1 (1965, revised 1967),
+<https://its.ntia.gov/publications/download/TN101v1.pdf> — read (DOIs 10.6028/nbs.tn.101-1 and
+10.70220/4cb052v8 appeared in Crossref results but were not resolved individually);
+Preben-Hansen (OZ1RH), "Troposcatter inside and out",
+<https://www.qsl.net/oz1rh/troposcatter99/troposcatter99.htm> — read. Not obtained: CCIR Report
+238, the TN101 low-antenna curves, any measured 50 MHz data set.
+
 ## Open
 
-- Overdense trails, which are the only ones strong enough at these powers with small antennas:
-  their rate and level were not computed.
+- Overdense trails: the formulas were read only in secondary reproductions; Sugar 1964, Hines
+  and Forsyth 1957 and McKinley 1961 remain unread. No measured distribution of durations
+  beyond 1 s, of Doppler spread, or of overdense rates per hour was found. The 1/q rate above
+  the transition is one link's figure extended.
 - The sky-coverage gain of wide antennas against the level they lose.
 - Block time for a 10-bit block collected over bursts.
 - The sign of the P.843 diurnal factor.
@@ -273,6 +719,56 @@ DOIs marked "verified" returned matching metadata from Crossref during this rese
 - BRAMS project. <https://brams.aeronomie.be/> — read. GB3MBA beacon.
   <https://ukmeteorbeacon.org/Tx> — search snippet only.
 - Morin, S. (1987), MITRE modulation comparison, DTIC ADA196685 — abstract snippet only.
+- Thummala, Flores and Falco (2026), "VHF Reconfigurable Intelligent Surfaces for Meteor Burst
+  Communication", arXiv:2609.38602 — read (overdense formula, eq. 7; 15 s cap). The identifier
+  is as reported by the research agent and was not checked by me.
+- Schilling, D. L. and Hibshoosh, E. (1988), "Communications Using Channels Formed by Meteor
+  Bursts", AFOSR report, DTIC ADA209856 (archive.org mirror) — read.
+- Ostergaard, J. (1990), "Meteor Scatter Communication Between Thule and Station Nord,
+  Greenland", GL-TR-90-0248, DTIC ADA234440 — read.
+- Weitzen, J. A. (1986), "The Multipath and Fading Profile of the High Latitude Meteor Burst
+  Communication Channel", RADC-TR-86-166, DTIC ADA174718. DOI 10.21236/ADA174718 — verified;
+  read.
+- Ye, Q., Brown, P. G., Campbell-Brown, M. D. and Weryk, R. J. (2013), Monthly Notices of the
+  Royal Astronomical Society 436, 675. DOI 10.1093/mnras/stt1605 — verified; read (arXiv
+  1304.7841).
+- Ye, Q., Wiegert, P. A., Brown, P. G., Campbell-Brown, M. D. and Weryk, R. J. (2014), Monthly
+  Notices of the Royal Astronomical Society 437, 3812. DOI 10.1093/mnras/stt2178 — verified;
+  read (arXiv 1311.1733).
+- Šimek, M. (1992), "Diurnal variation of overdense meteor echo duration and ozone", Asteroids,
+  Comets, Meteors 1991, 557–560, NASA NTRS 19930010054 — read.
+- Foschini, L. (1998), "On the interaction of radio waves with meteoric plasma",
+  arXiv:astro-ph/9804279 — read.
+- Berry, J. A. (1959), "Investigation of Certain Aspects of Meteor-Burst Propagation", MS
+  thesis, Georgia Institute of Technology — read.
+- Williams (1992), "Feasibility of Meteor Burst Buoy Relay", Naval Postgraduate School thesis,
+  DTIC ADA248364 — read (source of the Schanker 1990 figures).
+- National Bureau of Standards Technical Note 86, "The NBS Meteor-Burst Propagation Project: A
+  Progress Report". <https://nvlpubs.nist.gov/nistpubs/Legacy/TN/nbstechnicalnote86.pdf> — read.
+- International Meteor Organization, "Theory of Meteor Reflection".
+  <https://www.imo.net/observations/methods/radio-observation/reflection/> — read.
+- Weitzen, J. A. (1990), "A study of the ground illumination footprint of meteor scatter
+  communication", IEEE Transactions on Communications 38, 426–430. DOI 10.1109/26.52652 —
+  verified; abstract only.
+- Hines, C. O. and Forsyth, P. A. (1957), "The forward-scattering of radio waves from overdense
+  meteor trails", Canadian Journal of Physics 35, 1033–1041. DOI 10.1139/p57-115 — verified;
+  not read.
+- Akram, F., Sheikh, N. M., Javed, A. and Grossi, M. D. (1977), IEEE Transactions on
+  Communications 25, 467–470. DOI 10.1109/TCOM.1977.1093831 — verified; not read.
+- Baggaley, W. J. and Cummack, C. H. (1974), Journal of Atmospheric and Terrestrial Physics 36,
+  1759–1773. DOI 10.1016/0021-9169(74)90161-5 — verified; not read.
+- Poulter, E. M. and Baggaley, W. J. (1977), Journal of Atmospheric and Terrestrial Physics 39,
+  757–768. DOI 10.1016/0021-9169(77)90137-4 — verified; not read.
+- Jones, J., McIntosh, B. A. and Šimek, M. (1990), Journal of Atmospheric and Terrestrial
+  Physics 52, 253–258. DOI 10.1016/0021-9169(90)90092-2 — verified; not read.
+- Jones, J. and Šimek, M. (1995), Earth, Moon and Planets 68, 329–338.
+  DOI 10.1007/BF00671524 — verified; not read.
+- McIntosh, B. A. (1968), IAU Symposium 33, 343–351. DOI 10.1017/S0074180900019896 — verified;
+  not read.
+- Kokjer, K. J. and Roberts, T. D. (1986), IEEE Communications Magazine 24(11), 23–29.
+  DOI 10.1109/MCOM.1986.1092982 — verified; not read.
+- No DOI found: Schanker 1990 ("Meteor Burst Communications", Artech House), Kaiser and Closs
+  1952, Carpenter and Ochs 1962.
 - McKinley, D. W. R. (1961), "Meteor Science and Engineering", McGraw-Hill — not accessed.
 - Not reachable: DTIC ADA184433 and ADA209856, the likely sources of the COMET, SNOTEL and
   Alaska system parameter tables.

@@ -214,6 +214,33 @@ verification marks and not-accessed lists:
     each end. The channel in a burst is clean (delay spread under 100 ns, Doppler shift about
     20 Hz at 40 MHz) and brief (median under 150 ms). See [the meteor-burst note](meteor-burst.md).
 
+28. **A wideband keyed-phase mode for meteor burst is physically supported but does not add
+    sensitivity** (user's proposal of 27 November, assessed, not computed). Underdense trails
+    carry phase steps to about a megahertz; a probe sharing the link's geometry and a digitally
+    formed receive array give concealment, gating and gain without loss of sky coverage. Energy
+    per burst remains the limit: 100 mW needs 21 to 31 dBi at the receiver. The strong,
+    long-lasting trails a probe would select show multipath far more often (71% against 12%).
+    See [the meteor-burst note](meteor-burst.md).
+
+29. **Overdense trails are the working case for low-power meteor burst, and they suit the FSK
+    design** (user's direction of 27 November, then researched and computed). They are under 5%
+    of trails and about 30% of throughput on classic links. In 2.2 kHz they present Doppler
+    fading of 1–10 Hz and microseconds of delay spread. At 100 mW and 50 MHz with no antenna
+    gain a strong one carries about one tone's worth of energy every two to six hours; with
+    10 dBi at each end every overdense trail carries a block's worth, about 3 an hour. My first
+    hand figures were about 6 dB too high. Real echo durations are the main uncertainty.
+
+30. **The whole shared sky at a few hundred kilometres is the favourable meteor geometry, and
+    troposcatter competes there** (user's proposal of 27 November, computed and checked). From
+    50 to 500 km a 100 mW link with no antenna gain gets about two block-worth trails an hour;
+    a 20 dBi all-beam receive array raises that to about 50, and makes 2 mW workable at 3 to 4.
+    At 1,300 km the unaided figure is almost nothing. A radar at the transmitter sees about
+    half the link's trails at 50 km and a tenth at 300 km. Up to about 300 km, continuous
+    troposcatter (−2 to +11 dB-Hz at 300 km, median, for 100 mW) is the better path and is
+    served by the specification as it stands; beyond about 400 km meteor trails win. No
+    troposcatter method is validated at 50 MHz. My hand estimates were too low for the unaided
+    meteor link and about right for troposcatter.
+
 ## State of the specification
 
 The specification was rewritten as one consistent document on 27 November 2026, after the
@@ -246,6 +273,22 @@ entry for meteor burst with open decision 16.
 
 The meteor-burst entry of section 12 was then replaced by the researched result (finding 27),
 which lists the path as not supported.
+
+Section 12 also summarises the proposed wideband keyed-phase mode for meteor burst as outside
+this specification (finding 28).
+
+Section 12 now also gives the overdense-trail result (finding 29), and open decision 16 is
+rephrased around it.
+
+Section 12 also carries the whole-sky meteor result and the 50 MHz troposcatter comparison
+(finding 30), with open decision 17.
+
+The specification was reconciled a third time on 27 November after the meteor-burst and
+troposcatter work. Section 12 is now split into supported paths (12.1), phase-stable paths below
+9 kHz (12.2) and meteor burst with 50 MHz troposcatter (12.3); the long-path and whole-sky
+meteor figures no longer stand side by side as if they were the same case; cross-references and
+the limits paragraph were brought into line; and a settled row records that meteor burst, if
+pursued, is an FSK path class on overdense trails.
 
 ## Corrections to earlier Matrix Modem documents
 

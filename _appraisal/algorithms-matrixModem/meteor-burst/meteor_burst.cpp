@@ -5,7 +5,8 @@
 // about 450 trails an hour above a -125 dBm floor), with the P.843 law N(q > q0) proportional to 1/q0.
 // Assumptions: trail above the path midpoint at the P.843 mean height, trail axis normal to the propagation
 // plane (beta = 90 deg), sin^2(alpha) = 1, initial-radius loss a1 included, a2(t0) and absorption a3 left
-// out (both make the result optimistic). Underdense formula used up to q = 2e14 electrons/m only.
+// out (both make the result optimistic). Underdense formula used up to q = 2e14 electrons/m only; section 5 treats
+// overdense trails with the Hines-Forsyth form as reproduced in secondary sources.
 //
 // Build: g++ -O2 -std=c++20 meteor_burst.cpp -o meteor_burst
 // Run:   ./meteor_burst > results/meteor_burst.md
@@ -70,6 +71,28 @@ int main() {
         double cn14 = db(pm) + 2 * G - g.loss14_db - n0_dbm(50.0), e14 = std::pow(10, cn14 / 10) * T / 2;
         printf("| %s | %.0f dBi | %.2f s | %+.1f dB-Hz |\n", pm == 2 ? "2 mW" : "100 mW", G, T, db(K / 3600 * e14 / 1e28 * 2e14));
     }
-    printf("\n");
+    printf("\n## 5. Overdense trails\n\n");
+    printf("Hines-Forsyth form as reproduced in two secondary sources (see the research note):\n");
+    printf("P(t) = P G G lambda^2 / [32 pi^2 R1 R2 (R1+R2)] x sqrt{ (x / sec^2 phi) ln(a / x) }, x = 4 D t + r0^2,\n");
+    printf("a = re q lambda^2 sec^2 phi / pi^2. Peak = P G G lambda^3 sqrt(re q) / [32 pi^3 sqrt(e) R1 R2 (R1+R2)], reached at\n");
+    printf("x = a/e; the echo ends at x = a (duration T_ov). The underdense and overdense formulas do not join: at\n");
+    printf("q = 2e14 the overdense peak is 6.4 dB below the underdense one. Durations are cut at 15 s and at 3 s as\n");
+    printf("well, because wind distortion and electron loss end real echoes early (the longest seen on a measured\n");
+    printf("45 MHz link exceeded 40 s, very rarely, and few lasted over 1 s between fades). Fading inside the echo is\n");
+    printf("not modelled. Rate as in section 3 (anchor link, 1/q). 50 MHz, 100 mW, 0 dBi at each end, galactic noise;\n");
+    printf("add 20 log10 of other power and gain ratios in dB to the level and energy columns.\n\n");
+    for (double d : {1300.0, 500.0}) {
+        Geo g = geo(50.0, d); double lam = C0 / 50e6, R = g.R;
+        printf("**Path %.0f km** (rate %s).\n\n", d, d == 1300 ? "of the anchor link" : "about a quarter of the anchor link's, as measured on a 520 km path; the column uses that");
+        printf("| q (e/m) | trails an hour above q | peak C/N0 | T_ov | energy over N0: whole echo | cut at 15 s | cut at 3 s |\n|---:|---:|---:|---:|---:|---:|---:|\n");
+        for (double q : {2e14, 5e14, 1e15, 3e15, 1e16, 3e16}) {
+            double peak = 0.1 * lam * lam * lam * std::sqrt(RE * q) / (32 * PI * PI * PI * std::sqrt(std::exp(1.0)) * R * R * 2 * R);   // W
+            double cn = db(peak * 1e3) - n0_dbm(50.0), aa = RE * q * lam * lam * g.sec2 / (PI * PI), Tov = (aa - g.r0 * g.r0) / (4 * g.D);
+            auto energy = [&](double cap) { double T = std::min(cap, Tov), e = 0; int n = 20000; for (int i = 0; i < n; ++i) { double t = (i + 0.5) * T / n, x = 4 * g.D * t + g.r0 * g.r0; e += std::sqrt(std::max(0.0, x * std::log(aa / x)) / (aa / std::exp(1.0))); } return std::pow(10, cn / 10) * e * T / n; };
+            printf("| %.0e | %.2f | %+.1f dB-Hz | %.1f s | %.1f dB | %.1f dB | %.1f dB |\n", q, K / q * (d == 1300 ? 1 : 110.0 / 450), cn, Tov, db(energy(1e9)), db(energy(15)), db(energy(3)));
+        }
+        printf("\n");
+    }
+    printf("For scale: one 256-value tone needs about 12 dB, and a 10-bit block received per tone on a steady path\nabout 20 dB (32 tones); a fading echo needs more.\n\n");
     return 0;
 }

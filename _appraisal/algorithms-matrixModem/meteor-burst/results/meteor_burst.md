@@ -101,3 +101,40 @@ adds tones as energies gets less than this from the many weak bursts. 50 MHz, 13
 | 100 mW | 17 dBi | 1.02 s | +4.4 dB-Hz |
 | 100 mW | 17 dBi | 0.10 s | -5.7 dB-Hz |
 
+## 5. Overdense trails
+
+Hines-Forsyth form as reproduced in two secondary sources (see the research note):
+P(t) = P G G lambda^2 / [32 pi^2 R1 R2 (R1+R2)] x sqrt{ (x / sec^2 phi) ln(a / x) }, x = 4 D t + r0^2,
+a = re q lambda^2 sec^2 phi / pi^2. Peak = P G G lambda^3 sqrt(re q) / [32 pi^3 sqrt(e) R1 R2 (R1+R2)], reached at
+x = a/e; the echo ends at x = a (duration T_ov). The underdense and overdense formulas do not join: at
+q = 2e14 the overdense peak is 6.4 dB below the underdense one. Durations are cut at 15 s and at 3 s as
+well, because wind distortion and electron loss end real echoes early (the longest seen on a measured
+45 MHz link exceeded 40 s, very rarely, and few lasted over 1 s between fades). Fading inside the echo is
+not modelled. Rate as in section 3 (anchor link, 1/q). 50 MHz, 100 mW, 0 dBi at each end, galactic noise;
+add 20 log10 of other power and gain ratios in dB to the level and energy columns.
+
+**Path 1300 km** (rate of the anchor link).
+
+| q (e/m) | trails an hour above q | peak C/N0 | T_ov | energy over N0: whole echo | cut at 15 s | cut at 3 s |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2e+14 | 8.45 | -6.6 dB-Hz | 2.3 s | -4.0 dB | -4.0 dB | -4.0 dB |
+| 5e+14 | 3.38 | -4.6 dB-Hz | 5.7 s | 2.0 dB | 2.0 dB | -0.3 dB |
+| 1e+15 | 1.69 | -3.1 dB-Hz | 11.5 s | 6.5 dB | 6.5 dB | 0.7 dB |
+| 3e+15 | 0.56 | -0.7 dB-Hz | 34.5 s | 13.7 dB | 10.4 dB | 1.6 dB |
+| 1e+16 | 0.17 | +1.9 dB-Hz | 115.1 s | 21.5 dB | 11.8 dB | 2.4 dB |
+| 3e+16 | 0.06 | +4.3 dB-Hz | 345.4 s | 28.7 dB | 12.5 dB | 2.9 dB |
+
+**Path 500 km** (rate about a quarter of the anchor link's, as measured on a 520 km path; the column uses that).
+
+| q (e/m) | trails an hour above q | peak C/N0 | T_ov | energy over N0: whole echo | cut at 15 s | cut at 3 s |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2e+14 | 2.07 | +5.1 dB-Hz | 0.6 s | 2.0 dB | 2.0 dB | 2.0 dB |
+| 5e+14 | 0.83 | +7.1 dB-Hz | 1.5 s | 8.0 dB | 8.0 dB | 8.0 dB |
+| 1e+15 | 0.41 | +8.6 dB-Hz | 3.1 s | 12.6 dB | 12.6 dB | 12.5 dB |
+| 3e+15 | 0.14 | +11.0 dB-Hz | 9.4 s | 19.7 dB | 19.7 dB | 15.0 dB |
+| 1e+16 | 0.04 | +13.6 dB-Hz | 31.3 s | 27.6 dB | 24.8 dB | 16.1 dB |
+| 3e+16 | 0.01 | +16.0 dB-Hz | 94.1 s | 34.7 dB | 26.1 dB | 16.8 dB |
+
+For scale: one 256-value tone needs about 12 dB, and a 10-bit block received per tone on a steady path
+about 20 dB (32 tones); a fading echo needs more.
+
