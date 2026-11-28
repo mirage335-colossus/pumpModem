@@ -1,7 +1,7 @@
 # Sub-9 kHz FSK rate and spacing for a 61 m antenna at 10 kW
 
 27–28 November 2026 · Calculations, a block Monte Carlo, CPU and GPU decode measurements, and four
-delegated literature searches
+delegated literature searches · The configuration was adopted in the specification on 28 November
 
 This note answers one question for the
 [FSK specification draft](../../../_appraisal/matrixModem-FSK.md): which FSK tone rate and tone
@@ -19,8 +19,9 @@ physical inputs and is not repeated.
 Evidence labels: [calculated] closed form or exact recursion; [simulated] Monte Carlo of a model;
 [measured] a timing on real hardware; [derived] reasoning from the above, not computed; [earlier
 research] taken from the notes just named, with their own evidence grades; [literature] from a
-delegated search, with the access level of the source in the [source list](#sources). No antenna,
-path or receiver was measured. Nothing here is a qualified receiver.
+delegated search, with the access level of the source in the [source list](#sources) and the
+search's full report in [`reviews/`](#the-delegated-reviews). No antenna, path or receiver was
+measured. Nothing here is a qualified receiver.
 
 ## Answer in brief
 
@@ -30,7 +31,7 @@ path or receiver was measured. Nothing here is a qualified receiver.
 | Positions and total span | 16 positions, 12.5 Hz | About 0.1 dB of loss on an antenna of 64 Hz or more, 0.7 dB on a 24 Hz one; fits between the wandering 50 Hz and 60 Hz mains harmonics together; flat across night echoes of 2 ms; 10 ms timing steps; no few-position loss |
 | Tone length (FSK rate) | 8 cells = 10.24 s, 0.098 tones per second | Equals the best coherent window under the worst spread bound, so plain per-tone reception is the floor; the coherent attempts cost in proportion to the tone rate |
 | Other tone lengths | 1 cell (1.28 s) is the fastest worth offering; 32 cells (40.96 s) for blocks longer than about three hours | Shortest block of 82 s against 11 and 44 minutes; costs below |
-| Keyed phase | One per tone, as the specification requires, but slewed over about 50–100 ms | A phase jump into a high-Q antenna is the transient VLF practice forbids |
+| Keyed phase | One per tone, as the specification requires, but reached by an 80 ms ramp (160 ms for an antenna under about 40 Hz) | A phase step into a high-Q antenna is the transient VLF practice forbids; with the ramp no power flows back into the transmitter and a receiver that follows the ramp loses nothing |
 | Receiver | Per-tone reception, the cells inside a tone, and coherent windows from two tones up to the block, every block | The best window ran from 10 s to the whole block across the spread cases, and to one or two cells beyond them |
 | References | GPS-locked at both ends, corrections logged or the audio re-timed from the recorded PPS | One hypothesis instead of thousands to billions |
 
@@ -62,7 +63,9 @@ path or receiver was measured. Nothing here is a qualified receiver.
    tolerates only ±6 ppm of frequency error.
 6. **Disadvantages of the recommendation.** The shortest block is 11 minutes; a strong link is
    not served faster. A 10 s tone is a narrow line to an observer with a filter bank. It is a
-   second cell length beside the default 160 ms. The transmitter has to slew the keyed phase.
+   second cell length beside the default 160 ms. The transmitter has to ramp the keyed phase,
+   which is calculated and not tested on a transmitter. Where a 16.7 Hz railway supply is in
+   range, one of its harmonics lies inside the 12.5 Hz slot (section 3).
 
 ## 1. The case
 
@@ -80,7 +83,12 @@ path or receiver was measured. Nothing here is a qualified receiver.
   28 dB worse [derived from earlier research]. Most of that range needs coherent reception
   across tones: the specification's per-tone figures at −20 dB-Hz are days.
 - Spread: the Sub9 presets bound the frequency wander at 1, 5 and 50 mHz with echoes of 5 µs,
-  50 µs and 5 ms. The earlier propagation note measured them against the evidence: quiet paths
+  50 µs and 5 ms. They are defined in
+  [`src/tuning_presets.cpp`](../../../src/tuning_presets.cpp) and described in the earlier
+  [method chapter](../../highFidelity-triple_Robust_Modem/Fable-5.2/00-method-and-modem-context.md);
+  the earlier appraisal simulator has other sub-9 kHz scenarios, and no stated derivation of the
+  preset values was found. The earlier propagation note measured them against the evidence:
+  quiet paths
   move at 2 to 22 µHz, terminators at 30 to 120 µHz for about an hour, a median flare onset at
   10.2 kHz at 0.58 mHz for about six minutes, and large flares extrapolate to 0.2 to 7 mHz for
   minutes; measured differential delays are 50 µs to 1.9 ms. The presets are generous stress
@@ -232,11 +240,40 @@ antenna:
   against a 10 kW transmitter. Averaged, it is 231 W at 6.25 tones per second, 58 W at 1.5625,
   and 3.6 W at 0.098. On a 24 Hz antenna it is 66 J and 829, 207 and 13 W [calculated, section
   4].
-- **Remedy [derived, not tested on hardware].** Slew the keyed phase over an interval several
-  times the antenna's time constant, 50 to 100 ms. The cost is about that fraction of the tone:
-  0.02 to 0.04 dB of a 10.24 s tone, 0.2 to 0.35 dB of a 1.28 s tone, and most of a 0.16 s tone.
-  Tone changes need no such care: they are phase-continuous on the lattice, and the positions are
-  a few hertz apart.
+- **Remedy: a phase ramp [calculated; `phase_slew`; not tested on hardware].** The keyed phase
+  moves evenly to its new value over the first `S` of the tone, the shorter way round. In the
+  single-tuned model with a constant-amplitude source:
+
+  | | Plain step | 20 ms | 40 ms | 80 ms | 160 ms |
+  | --- | --- | --- | --- | --- | --- |
+  | Lowest delivered power, 86 Hz antenna | −9.6 kW | +6.6 kW | +8.5 kW | +9.3 kW | +9.6 kW |
+  | Lowest delivered power, 24 Hz antenna | −9.9 kW | −1.3 kW | +2.1 kW | +4.7 kW | +6.4 kW |
+  | Largest angle between drive and current, 86 / 57 / 24 Hz | 180° | 37° / 52° / 108° | 23° / 34° / 69° | 16° / 23° / 49° | 12° / 18° / 38° |
+  | Largest standing-wave ratio, 86 / 57 / 24 Hz | – | 2.1 / 3.1 / – | 1.5 / 1.9 / 6.2 | 1.3 / 1.5 / 2.8 | 1.2 / 1.4 / 2.1 |
+  | Extra loss, 10.24 s tone, receiver assumes a step | 0 | 0.01 dB | 0.02 dB | 0.03 dB | 0.06 dB |
+  | Extra loss, 1.28 s tone, receiver assumes a step | 0 | 0.06 dB | 0.12 dB | 0.24 dB | 0.50 dB |
+
+  - After a plain half turn the current opposes the drive: nearly the full 10 kW flows back into
+    the source for `ln 2/(π·B)`, 2.6 ms at 86 Hz and 9.2 ms at 24 Hz, returning 11 J and 41 J
+    (closed form, `(1 − ln 2)·P/(π·B)`). A quarter turn drops the delivered power to zero and
+    returns nothing.
+  - From 40 ms up nothing is returned on any antenna of 24 Hz or more. For comparison a steady
+    tone on an outer position of the 12.5 Hz span already stands at 8°, 12° and 26°
+    (standing-wave ratio 1.15, 1.23 and 1.62) on antennas of 86, 57 and 24 Hz.
+  - **A receiver whose reference follows the ramp loses nothing**; it does slightly better than
+    with a step, because the antenna's transient is smaller (0.062 against 0.065 dB at 86 Hz).
+    Leaving the ramp interval out costs about twice what assuming a step costs.
+  - The ramp is a phase-continuous frequency excursion of 3.125 Hz (quarter turn) or 6.25 Hz
+    (half turn) lasting 80 ms, which is the kind of shift FSK practice at VLF allows. One
+    commercial class-D VLF transmitter's data sheet rates it for full power up to a
+    standing-wave ratio of 5 [literature, through a delegated read].
+  - Sending a half turn in the direction that moves the frequency towards the centre of the
+    positions does as much as doubling the ramp (80 ms inward equals 160 ms in a keyed
+    direction). The specification keeps the keyed direction, so that the phase still depends
+    only on the key and the time.
+  - **Adopted: 80 ms** (256 samples at 3,200 Hz), and 160 ms for an antenna narrower than about
+    40 Hz. Tone changes need no such care: they are phase-continuous on the lattice, and the
+    positions are a few hertz apart.
 - **Faster keying than the antenna passes is possible but not needed.** Synchronous retuning of
   the antenna with the keying is documented from 1951 (460 words per minute through a 10 kW
   28.5 kHz antenna) to Omega, which hopped 10.2 to 13.6 kHz in segments of about a second with a
@@ -260,6 +297,20 @@ estimate there, and no line amplitude near 8 kHz was measured.]
   The amateur convention of 8,270 Hz is inside it. [Derived.]
 - Wideband blanking of sferics is worth about 20 dB at 8 kHz and is done before the band is
   narrowed. It does not depend on the tone rate.
+- **Railway supply at 16.7 Hz puts a line inside the slot** [earlier research for the
+  frequencies; the consequence is derived here]. In Germany, Austria, Switzerland, Sweden and
+  Norway the railway network runs at 16.7 Hz, and its harmonics near 8.27 kHz fall at about
+  8,250.0, 8,266.7 and 8,283.3 Hz. They are 16.7 Hz apart, so if they wander as the mains
+  harmonics do, no span of 12.5 Hz or 6.25 Hz is clear of them at three standard deviations, and
+  at one standard deviation about 10 Hz is. The amateur convention of 8,270 Hz is 3.3 Hz from
+  the nominal line; the earlier note records only that carriers are placed off these harmonics
+  and recommends measuring line positions. No amplitude was found. This was missed in the first
+  version of this note and found when the earlier notes were
+  [re-read](reviews/review-sub9khz-earlier-notes-cross-check.md).
+- **What that leaves.** A line on one of sixteen positions spoils one sixteenth of the alphabet
+  while it sits there. The keyed placement spreads that over all symbols, the receiver's
+  line excision and per-position normalisation are meant for it, and scale `j` = 4 (6.25 Hz) is
+  the smaller target. None of this was simulated.
 
 ## 4. Spacing
 
@@ -395,8 +446,9 @@ wander, and 27.4 dB with 1.28 s windows at 0.5 Hz of Rayleigh spread (four posit
   is sized for the worst preset, which nothing measured reaches, and keeps the shortest block
   usable at −10 dB-Hz.
 - 1.28 s (one cell) is the fastest tone worth offering here. It keeps the shortest block at
-  82 s for a link that turns out strong, at eight times the ladder work, a floor 4.2 dB worse,
-  and 0.2 to 0.35 dB for the slewed phase.
+  82 s for a link that turns out strong, at eight times the ladder work and a floor 4.2 dB
+  worse. The phase ramp costs it nothing when the receiver's reference follows the ramp, and
+  0.24 dB when the receiver assumes a step.
 - 40.96 s (32 cells) suits blocks longer than about three hours (256 tones or more). It improves
   the floor by another 2.6 dB and quarters the work. Longer tones than that gain little: under
   the moderate bound the best window is already 82 s.
@@ -573,23 +625,36 @@ three times in four. Padovani and Wolf (1986) and the biorthogonal sets are the 
   The transmitter still sends one keyed quarter turn per tone.
 - **It puts information into the phase, which the specification rules out.** That decision was
   taken for diffuse HF paths. Here only the coherent attempts read the phase, and they need a
-  coherent path in any case. It is open decision 20 of the specification, not adopted.
+  coherent path in any case. It is open decision 18 of the specification, not adopted.
 - For this case sixteen positions remain the recommendation: they fit, they give the better
   per-tone floor, and nothing then depends on an open decision. With the option, an antenna of
   6 Hz could carry four positions 0.78125 Hz apart with no coherent loss, and the lattice scale
   `j` = 4 would not be needed.
 
-## 8. What this changes in the specification
+## 8. What this changed in the specification
 
-- Section 3: the lattice scale is no longer only a refit for antennas under 50 Hz. Below 9 kHz
-  `j` = 3 is the recommended scale.
-- Section 4.2: the sub-9 kHz exception gets a tone length and its reason.
-- Section 8, item 8: with held tones the window ladder should run from two tones up, not from
-  1/64 of the block; the cells inside a tone are a further rung.
-- Section 12.2: the configuration, the antenna at 10 kW and the measured search margins.
+The configuration was first written into the specification as a recommendation with three open
+decisions, and adopted on 28 November 2026 at the user's request.
+
+- Sections 1 to 3: the sub-9 kHz configuration is part of the scope, the terms and the lattice
+  table. Below 9 kHz the scale is `j` = 3, with `j` = 2 and 4 as alternatives.
+- Sections 4.1 and 4.2: lattice scale and phase ramp are settings; the sub-9 kHz exception has
+  its tone length (8 cells, with 1 and 32 as alternatives) and its reasons.
+- Section 4.4: the keyed phase is reached by an 80 ms ramp below 9 kHz.
+- Sections 5 and 6: sixteen positions below 9 kHz; shortest block of 64 tones.
+- Section 8, items 7 and 8: timing of 1/(8 × span) for coherent sums across positions; below
+  9 kHz the window ladder runs from two tones up, with the tone and its cells below, and the
+  reference follows the ramp.
+- Sections 9 to 11: mains and railway harmonics, the shortest block against the sizing table,
+  and the concealment that was not evaluated.
+- Section 12.2: the configuration, the antenna at 10 kW, the ramp and the measured search
+  margins.
 - Section 13: the coherent ladder is measured.
-- Sections 14 and 15: new open decisions (this configuration; slewed phase steps; the
-  value-dependent phase) and updated weaknesses.
+- Section 14: three rows settled (configuration; ramp; ladder and references). Still open: the
+  value-dependent phase (18), the carrier and slot where railway or unsteady mains harmonics are
+  in range (19), and the ramp length against a real transmitter (20).
+- Section 15: weaknesses for the assumed antenna, the untested ramp, the slot, and the slow
+  service of a strong link.
 
 The earlier statement that the lattice scale "is worth at most 1.6 dB, and only for an antenna
 narrower than about 50 Hz" compared antenna loss alone at 4 to 16 positions. It stands as a
@@ -606,10 +671,15 @@ receiver's work.
   bushing.
 - **`B*` assumes the whole 10 kW is dissipated in series with the antenna.** A matched source,
   energy recovery or a different coupling network changes the bandwidth by factors of 1.5 to 3.
-- **The slewed phase step is a proposal.** Its loss is a hand estimate and no transmitter was
-  examined. Until it is, the mandatory keyed phase and a high-Q antenna are in conflict.
+- **The phase ramp is calculated, not tested.** It removes the power reversal in a single-tuned
+  model with a constant-amplitude source. No transmitter, matching network, protection circuit
+  or voltage limit was in the model, and a 24 Hz antenna still sees the drive and the current
+  49° apart with the 80 ms ramp. Until a transmitter is examined, the mandatory keyed phase on
+  a high-Q antenna rests on this calculation.
 - **Mains harmonics near 8 kHz were not measured anywhere in the sources.** The slot rests on
   grid-frequency statistics; amplitudes at a real site may make it irrelevant or insufficient.
+- **Railway harmonics leave no clear slot** where a 16.7 Hz supply is in range (section 3), and
+  the earlier notes say line positions should be measured, not computed.
 - **The wander channels are constructed.** No phase spectrum of a carrier below 9 kHz exists in
   the sources. The Sub9 bounds exceed the measured quiet rates by 45 times at the least (the
   best preset) and by about four orders of magnitude at the most (the worst).
@@ -640,7 +710,8 @@ receiver's work.
 
 Access level as reported by the delegated searches: F full text, P part, A abstract, B record or
 snippet, X not accessed. DOIs marked ✓ were checked against Crossref for this note (authors, title
-and year match); the others were checked by the searches.
+and year match); the others were checked by the searches, and again when the reviews were stored
+(below). This list is the selection the note uses; the reviews hold the full lists.
 
 **Antenna, keying and voltage**
 
@@ -785,15 +856,68 @@ and year match); the others were checked by the searches.
 - Not accessed: the GNSS oscillator papers asked for (Gaggero and Borio; Pany and others;
   Curran and others), so the coherence formulas come from the interferometry text.
 
-The delegated reviews themselves are not in the repository: the permission system declined to
-let them be stored as files in this pass. Their full text is in the session transcripts of
-27 November 2026.
+### The delegated reviews
+
+The four searches' reports are in [`reviews/`](reviews/), as returned, each under a header that
+says what was changed on storing and how far it was checked. They were added on 28 November at
+the user's request; the permission system had declined a first attempt, so this note was written
+from the reports before they were stored.
+
+| Review | Covers | Used here in |
+| --- | --- | --- |
+| [Coherent FSK rate, spacing and positions](reviews/review-coherent-fsk-rate-spacing.md) | Orthogonality spacings, coherent and non-coherent capacity against the number of positions, block detection and window ladders, loss against window length, VLF, ELF, amateur and deep-space practice | Sections 4, 5.2, 7 |
+| [VLF antenna bandwidth, keying and voltage limits](reviews/review-vlf-antenna-bandwidth-keying.md), with three sub-searches | The two Navy formulas behind `B*`, station bandwidths, synchronous tuning and direct antenna modulation, keying rules, transmitter tolerance, corona and insulation limits, tuning drift | Section 2 |
+| [Phase stability, Doppler and delay below 9 kHz](reviews/review-sub9khz-phase-stability.md), with four sub-searches | Amateur phase series below 9 kHz, classical and modern VLF phase statistics, mode theory for 3 to 9 kHz, flares, storms and the terminator, design values for spread and delay | Sections 1, 5.1, 9 |
+| [Long-coherence search](reviews/review-long-coherence-search.md) | Template counts and scaling laws, semi-coherent loss, wander tracking, GNSS acquisition, hierarchical screening, the statistical price of searching, oscillators, GPU implementations | Section 6 |
+| [Earlier sub-9 kHz notes: inconsistencies and gaps](reviews/review-sub9khz-earlier-notes-cross-check.md) | What three re-readings of the repository's own antenna, propagation and noise notes found wrong, inconsistent or missing | Sections 1, 3 |
+
+- All 340 distinct DOIs in the four literature reviews resolve (checked on 28 November 2026 at
+  Crossref, one arXiv DOI at doi.org), and the registry's authors match the citations. That
+  shows each DOI exists and belongs to the cited work, not that the work says what is quoted.
+- The searches' own calculations are kept with their outputs in
+  [`literature-calcs/`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/literature-calcs/README.md).
+- The reviews contain more than this note uses. Not carried into the design here, among others:
+  the optimum coherent window against linewidth and C/N₀, the Viterbi and loosely coherent
+  methods for a wandering frequency, the station-by-station bandwidth table, and the mode-theory
+  delay tables.
+
+## Independent check of this note
+
+A separate agent compared the first version of this note, the specification's section 12.2 and the
+index with the program outputs, recomputed the closed forms, and reported what did not match. Its
+report is not kept; what it found and what was done:
+
+| Found | Done |
+| --- | --- |
+| The CPU ladder benchmark parallelised only over a few sampled blocks of the message space, so at 8,192 and 32,768 tones most threads idled, and the result was reported as a property of the device | Benchmark rewritten with one dynamic loop over (repetition, block) tasks; rerun on the laptop and on a second pod; all CPU figures replaced (for example 221 s became 166 s for 32,768 tones) |
+| The 10-bit and 16-bit margins were scaled from 24 bits, and the direct 10-bit timings were slower | Now measured for 10, 16 and 24 bits on the laptop; the search arithmetic reads the measured files |
+| The hypothesis count used timing steps of an eighth of a tone only | 1/(8 × span) added, which governs below 9 kHz; the margin now follows the tone length, not its square |
+| A sentence said a 10-bit block on a sound-card clock is out of reach on any device | Limited to the laptop; the scaled GPU figure keeps up from 10.24 s tones |
+| Window-combining losses were quoted "at these error rates" from the presence-test calculation | The Monte Carlo's own rung differences are quoted (1.0 to 1.3, 2.7 to 3.0, 4.9 to 5.1, 7.2 to 7.6 dB for 4 to 256 windows), with the check's exact values of 1.2, 2.8, 4.9 and 7.4 dB, and the presence-test values kept apart |
+| "Eleven formats on every channel" did not match the outputs | Restated as the formats with eight or more positions, with the 0.5 Hz row and the reciprocal-spacing format named as exceptions |
+| The few-position loss was given three ways; the weakness list said two positions were not simulated for per-tone reception | Earlier and present runs labelled; the weakness corrected |
+| The specification's section 4.2 said the timing search follows the tone rate | Limited to per-tone reception |
+| Smaller items: 22.6 for 22.5 dB, 325 and 330 for 324 mW, "a third" for 40%, "12.5 to 21 Hz" for 16 to 21 Hz, 0.8 for 0.7 dB on the recommended tone, "one cell" for a 1.28 s best window at 0.5 Hz, "6 to 620 Hz" in a paragraph about 8.27 kHz | Corrected in the note, the specification and the index |
+
+- **Checked and found correct:** `B*` for all capacitances and voltages; the radiated powers; all
+  thirty cells of the keyed-tone loss table; the detuning, stored-energy and mains-slot figures;
+  the spacing table; every range of the channel table and the tone-length table; the
+  few-position table; the transcription of every measured decode time; the needed-hypothesis
+  counts and all margin rows.
+- **Not covered by that check:** the phase-ramp calculation and the railway harmonic, which were
+  added afterwards, and the literature itself.
+- Corrections made apart from that check: a row in the index that called the earlier note's
+  radiation-Q range wrong was removed, because that range was right; and the loss of the
+  default ladder depth with short tones, first given as 3.4 to 3.9 dB, is 3.6 to 4.0 dB.
 
 ## Provenance and cost
 
 - Local calculations and the CPU timings: 12-thread Ryzen 5 PRO 5650U.
+- The phase-ramp calculation and the reruns of the searches' scratch calculations: the same
+  laptop, 28 November.
 - GPU and second CPU timings: two on-demand RTX PRO 6000 Blackwell Server Edition pods, 0.076 h
   and 0.095 h, about 0.46 USD together, both verified removed, no persistent volume. The second
-  reran both programs after the CPU benchmark was corrected; its outputs are the stored ones. Device, driver, toolkit, host CPU and
-  source and binary hashes are in
+  reran both programs after the CPU benchmark was corrected; its outputs are the stored ones.
+  No Linode instance was used. Device, driver, toolkit, host CPU and source and binary hashes
+  are in
   [`results/gpu/identity.out`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/results/gpu/identity.out).

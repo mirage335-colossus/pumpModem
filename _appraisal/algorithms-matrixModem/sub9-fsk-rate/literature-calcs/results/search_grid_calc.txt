@@ -1,0 +1,32 @@
+freq step 0.500/Tw: worst -0.91 dB, mean -0.29 dB
+freq step 0.250/Tw: worst -0.22 dB, mean -0.07 dB
+freq step 0.160/Tw: worst -0.09 dB, mean -0.03 dB
+freq step 0.125/Tw: worst -0.06 dB, mean -0.02 dB
+time step T/8: worst -0.56 dB, mean -0.27 dB (neighbour tone different)
+time step T/16: worst -0.28 dB, mean -0.14 dB (neighbour tone different)
+time step T/40: worst -0.11 dB, mean -0.05 dB (neighbour tone different)
+single-pole: |H| and phase and group delay vs offset/B
+  df/B=0.000 |H|=-0.00 dB phase=-0.0 deg group delay=1.000/(pi B)
+  df/B=0.100 |H|=-0.17 dB phase=-11.3 deg group delay=0.962/(pi B)
+  df/B=0.250 |H|=-0.97 dB phase=-26.6 deg group delay=0.800/(pi B)
+  df/B=0.254 |H|=-1.00 dB phase=-26.9 deg group delay=0.795/(pi B)
+  df/B=0.500 |H|=-3.01 dB phase=-45.0 deg group delay=0.500/(pi B)
+  df/B=1.000 |H|=-6.99 dB phase=-63.4 deg group delay=0.200/(pi B)
+transient power loss for step (amplitude loss a*tau/T): BT, 90deg/wide-FSK (a=1), 180deg (a=2)
+  B*T=2: tau/T=0.1592  a=1: -1.51 dB  a=2: -3.33 dB
+  B*T=5: tau/T=0.0637  a=1: -0.57 dB  a=2: -1.18 dB
+  B*T=10: tau/T=0.0318  a=1: -0.28 dB  a=2: -0.57 dB
+  B*T=20: tau/T=0.0159  a=1: -0.14 dB  a=2: -0.28 dB
+  B*T=50: tau/T=0.0064  a=1: -0.06 dB  a=2: -0.11 dB
+  B*T=100: tau/T=0.0032  a=1: -0.03 dB  a=2: -0.06 dB
+  CPFSK jump df/B=0.05: fraction of tau/T lost = 0.010
+  CPFSK jump df/B=0.10: fraction of tau/T lost = 0.038
+  CPFSK jump df/B=0.25: fraction of tau/T lost = 0.200
+  CPFSK jump df/B=0.50: fraction of tau/T lost = 0.500
+  CPFSK jump df/B=1.00: fraction of tau/T lost = 0.800
+d2 bound binary CPFSK h=0.715: 2.434 -> 0.85 dB vs d2=2
+R0-limit Eb/N0 coherent orthogonal M=2: 4.43 dB
+R0-limit Eb/N0 coherent orthogonal M=4: 2.67 dB
+R0-limit Eb/N0 coherent orthogonal M=8: 2.00 dB
+R0-limit Eb/N0 coherent orthogonal M=16: 1.70 dB
+R0-limit antipodal/unconstrained: 1.42 dB

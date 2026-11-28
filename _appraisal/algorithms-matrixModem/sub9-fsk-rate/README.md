@@ -1,4 +1,4 @@
-# Sub-9 kHz FSK rate and spacing: calculations and decode-rate measurements (Fable-5.2 pass, 27 November 2026)
+# Sub-9 kHz FSK rate and spacing: calculations and decode-rate measurements (Fable-5.2 pass, 27–28 November 2026)
 
 Standalone programs behind the
 [sub-9 kHz rate and spacing note](../../../_ref/algorithms-matrixModem/Fable-5.2/sub9khz-fsk-rate-and-spacing.md)
@@ -6,11 +6,13 @@ and section 12.2 of the [FSK specification draft](../../matrixModem-FSK.md). The
 aids, not modem code: nothing here is linked into the application or depends on repository
 sources.
 
-**Purpose and retention.** `antenna_keying.cpp`, `coherent_block_mc.cpp` and `search_ceiling.py`
-are theoretical calculations (the second with a Monte Carlo part); their outputs are the reference
-for the specification's sub-9 kHz spacing, tone length and search figures. `decode_bench.cpp`,
-`decode_gpu.cu` and `results/gpu/` are measurements with provenance. Keep them as research
-material under the [research-material rule](../../../docs/development.md#research-material).
+**Purpose and retention.** `antenna_keying.cpp`, `phase_slew.cpp`, `coherent_block_mc.cpp` and
+`search_ceiling.py` are theoretical calculations (the third with a Monte Carlo part); their
+outputs are the reference for the specification's sub-9 kHz spacing, tone length, phase ramp and
+search figures. `decode_bench.cpp`, `decode_gpu.cu` and `results/gpu/` are measurements with
+provenance. [`literature-calcs/`](literature-calcs/README.md) holds the scratch calculations of
+the delegated literature searches. Keep them as research material under the
+[research-material rule](../../../docs/development.md#research-material).
 
 ## `antenna_keying.cpp`
 
@@ -33,6 +35,32 @@ g++ -O2 -std=c++20 antenna_keying.cpp -o /tmp/antenna_keying
 ```
 
 About five minutes on one thread. Deterministic (fixed key sequence).
+
+## `phase_slew.cpp`
+
+The keyed phase reached by a linear ramp instead of a step, through the same single-tuned
+antenna model, for sixteen positions 0.78125 Hz apart centred on the resonance. Added on
+28 November when the specification adopted the ramp; it replaces the hand estimate of the first
+version of the note.
+
+| Part | What it computes |
+| --- | --- |
+| Static reference | Angle between drive and current, and standing-wave ratio against the resonant resistance, for a steady tone on an outer position |
+| Receiver | Coherent loss with one phase for all positions, and mean energy per tone, for ramps of 0, 20, 40, 80 and 160 ms, antennas of 24, 57, 86 and 174 Hz and tones of 10.24 s and 1.28 s: for a reference that follows the ramp, one that assumes a plain step, and one that leaves the ramp interval out |
+| Transmitter | Largest angle between drive and current, lowest delivered power, energy returned to the source per tone, largest standing-wave ratio, for a half turn in a keyed direction and for one towards the centre of the positions |
+| Closed forms | Reverse-power time and returned energy after a plain half turn |
+
+```bash
+g++ -O3 -march=native -std=c++20 -fopenmp phase_slew.cpp -o /tmp/phase_slew
+/tmp/phase_slew > results/phase_slew.md
+```
+
+Two minutes on 12 threads. Deterministic. With no ramp it reproduces `antenna_keying`'s coherent
+losses (0.73 and 0.07 dB for 10.24 s tones on 24 and 86 Hz antennas).
+
+Limits: a constant-amplitude source and one tuned circuit; no transmitter, matching network,
+protection or voltage limit; "standing-wave ratio" is the ratio the load `R·x/y` would give
+against `R`, an indicator and not a measurement; a linear ramp only.
 
 ## `coherent_block_mc.cpp`
 
@@ -119,6 +147,13 @@ Limits: stock kernels without tuning; the GPU ladder kernel does a tenth of the 
 lookups per second and can probably be improved; the GPU was timed for 24 bits only; the large
 CPU cases are scaled from a timed sample; no transform stage, no accumulation stage and no real
 tables.
+
+## `literature-calcs/`
+
+Six small programs the four delegated literature searches wrote for their own calculations,
+kept unchanged below a provenance header, with rerun outputs. See its
+[README](literature-calcs/README.md). The searches' reports are in
+[`reviews/`](../../../_ref/algorithms-matrixModem/Fable-5.2/reviews/).
 
 ## `search_ceiling.py`
 

@@ -1,0 +1,47 @@
+min Re rho at h=0.7151 rho=-0.2172 gain over orth 0.854 dB, vs antipodal -2.157 dB
+h=0.250 Re rho=0.6366 |rho|=0.9003  coherent d2/2E=0.3634 (-4.40 dB vs orth)  noncoh |rho|^2=0.811
+h=0.500 Re rho=0.0000 |rho|=0.6366  coherent d2/2E=1.0000 (0.00 dB vs orth)  noncoh |rho|^2=0.405
+h=0.715 Re rho=-0.2172 |rho|=0.3474  coherent d2/2E=1.2172 (0.85 dB vs orth)  noncoh |rho|^2=0.121
+h=0.750 Re rho=-0.2122 |rho|=0.3001  coherent d2/2E=1.2122 (0.84 dB vs orth)  noncoh |rho|^2=0.090
+h=1.000 Re rho=-0.0000 |rho|=0.0000  coherent d2/2E=1.0000 (0.00 dB vs orth)  noncoh |rho|^2=0.000
+M=2 penalty 3.010 dB; brickwall Eb/N0 1.419 dB; lowSNR noncoh fraction coefficient (M-1)/(2M)=0.2500
+M=4 penalty 1.249 dB; brickwall Eb/N0 -0.342 dB; lowSNR noncoh fraction coefficient (M-1)/(2M)=0.3750
+M=8 penalty 0.580 dB; brickwall Eb/N0 -1.012 dB; lowSNR noncoh fraction coefficient (M-1)/(2M)=0.4375
+M=16 penalty 0.280 dB; brickwall Eb/N0 -1.311 dB; lowSNR noncoh fraction coefficient (M-1)/(2M)=0.4688
+M=32 penalty 0.138 dB; brickwall Eb/N0 -1.454 dB; lowSNR noncoh fraction coefficient (M-1)/(2M)=0.4844
+M=64 penalty 0.068 dB; brickwall Eb/N0 -1.523 dB; lowSNR noncoh fraction coefficient (M-1)/(2M)=0.4922
+M=256 penalty 0.017 dB; brickwall Eb/N0 -1.575 dB; lowSNR noncoh fraction coefficient (M-1)/(2M)=0.4980
+Wiener/Lorentzian: dnu*T, gain dB
+  0.01  -0.045 dB
+  0.02  -0.090 dB
+  0.05  -0.224 dB
+  0.10  -0.443 dB
+  0.20  -0.863 dB
+  0.30  -1.262 dB
+  0.50  -1.999 dB
+  1.00  -3.539 dB
+  2.00  -5.723 dB
+  5.00  -9.237 dB
+Gaussian: sigma*T, FWHM*T, gain dB
+  0.020  0.047  -0.006 dB
+  0.053  0.125  -0.040 dB
+  0.100  0.235  -0.140 dB
+  0.150  0.353  -0.306 dB
+  0.200  0.471  -0.523 dB
+  0.250  0.589  -0.779 dB
+  0.300  0.706  -1.062 dB
+  0.400  0.942  -1.661 dB
+  0.425  1.001  -1.811 dB
+  0.500  1.177  -2.252 dB
+  0.750  1.766  -3.547 dB
+  1.000  2.355  -4.581 dB
+optimal coherent window (Wiener linewidth dnu) for given C/N0: maximise (g*r)^2/(1+2 g r)/T
+  C/N0=-10 dBHz dnu=0.001 Hz: Topt=68 s (dnu*T=0.07) window SNR g*r=6.33 (8.0 dB), coherent loss -0.30 dB, efficiency vs fully coherent -0.6 dB
+  C/N0=-10 dBHz dnu=0.003 Hz: Topt=38 s (dnu*T=0.11) window SNR g*r=3.40 (5.3 dB), coherent loss -0.51 dB, efficiency vs fully coherent -1.1 dB
+  C/N0=-10 dBHz dnu=0.010 Hz: Topt=20 s (dnu*T=0.20) window SNR g*r=1.63 (2.1 dB), coherent loss -0.86 dB, efficiency vs fully coherent -2.0 dB
+  C/N0=-20 dBHz dnu=0.001 Hz: Topt=202 s (dnu*T=0.20) window SNR g*r=1.65 (2.2 dB), coherent loss -0.87 dB, efficiency vs fully coherent -2.0 dB
+  C/N0=-20 dBHz dnu=0.003 Hz: Topt=105 s (dnu*T=0.31) window SNR g*r=0.77 (-1.1 dB), coherent loss -1.32 dB, efficiency vs fully coherent -3.5 dB
+  C/N0=-20 dBHz dnu=0.010 Hz: Topt=47 s (dnu*T=0.47) window SNR g*r=0.30 (-5.2 dB), coherent loss -1.88 dB, efficiency vs fully coherent -6.1 dB
+  C/N0=-30 dBHz dnu=0.001 Hz: Topt=473 s (dnu*T=0.47) window SNR g*r=0.31 (-5.2 dB), coherent loss -1.90 dB, efficiency vs fully coherent -6.1 dB
+  C/N0=-30 dBHz dnu=0.003 Hz: Topt=194 s (dnu*T=0.58) window SNR g*r=0.11 (-9.4 dB), coherent loss -2.28 dB, efficiency vs fully coherent -9.6 dB
+  C/N0=-30 dBHz dnu=0.010 Hz: Topt=65 s (dnu*T=0.65) window SNR g*r=0.04 (-14.4 dB), coherent loss -2.51 dB, efficiency vs fully coherent -14.2 dB

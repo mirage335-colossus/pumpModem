@@ -1,0 +1,40 @@
+Coherent (M=1), P_FA=1e-6 overall, P_miss=1e-3
+  N_h=        1  P_th= 13.82  E/N0=  34.21 (15.34 dB)  +0.00 dB vs 1 trial
+  N_h=    1e+03  P_th= 20.72  E/N0=  44.79 (16.51 dB)  +1.17 dB vs 1 trial
+  N_h=    1e+06  P_th= 27.63  E/N0=  54.78 (17.39 dB)  +2.05 dB vs 1 trial
+  N_h=    1e+09  P_th= 34.54  E/N0=  64.41 (18.09 dB)  +2.75 dB vs 1 trial
+  N_h=    1e+12  P_th= 41.45  E/N0=  73.78 (18.68 dB)  +3.34 dB vs 1 trial
+  N_h=  1.7e+07  P_th= 30.46  E/N0=  58.77 (17.69 dB)  +2.35 dB vs 1 trial
+  N_h=  1.7e+10  P_th= 37.37  E/N0=  68.28 (18.34 dB)  +3.00 dB vs 1 trial
+  N_h=  1.7e+13  P_th= 44.28  E/N0=  77.56 (18.90 dB)  +3.56 dB vs 1 trial
+  N_h=  1.7e+16  P_th= 51.19  E/N0=  86.66 (19.38 dB)  +4.04 dB vs 1 trial
+Same at P_FA=1e-6, P_miss=0.1 (90% detection)
+  N_h=        1  E/N0=  20.81 (13.18 dB)  +0.00 dB
+  N_h=    1e+03  E/N0=  29.25 (14.66 dB)  +1.48 dB
+  N_h=    1e+06  E/N0=  37.44 (15.73 dB)  +2.55 dB
+  N_h=    1e+09  E/N0=  45.47 (16.58 dB)  +3.39 dB
+Non-coherent sum of M segments (total E/N0 required), per-trial p=1e-6/N_h, P_miss=1e-3
+  N_h=      1 M=    1  E_tot/N0=   34.21 (15.34 dB) loss vs coherent  0.00 dB ; 5log10(M)= 0.00; alpha_eff=1.000
+  N_h=      1 M=    2  E_tot/N0=   37.46 (15.74 dB) loss vs coherent  0.39 dB ; 5log10(M)= 1.51; alpha_eff=0.869
+  N_h=      1 M=    4  E_tot/N0=   42.08 (16.24 dB) loss vs coherent  0.90 dB ; 5log10(M)= 3.01; alpha_eff=0.851
+  N_h=      1 M=    8  E_tot/N0=   48.64 (16.87 dB) loss vs coherent  1.53 dB ; 5log10(M)= 4.52; alpha_eff=0.831
+  N_h=      1 M=   16  E_tot/N0=   57.96 (17.63 dB) loss vs coherent  2.29 dB ; 5log10(M)= 6.02; alpha_eff=0.810
+  N_h=      1 M=   64  E_tot/N0=   89.76 (19.53 dB) loss vs coherent  4.19 dB ; 5log10(M)= 9.03; alpha_eff=0.768
+  N_h=      1 M=  256  E_tot/N0=  153.01 (21.85 dB) loss vs coherent  6.51 dB ; 5log10(M)=12.04; alpha_eff=0.730
+  N_h=      1 M= 1024  E_tot/N0=  278.93 (24.45 dB) loss vs coherent  9.11 dB ; 5log10(M)=15.05; alpha_eff=0.697
+  N_h=  1e+06 M=    1  E_tot/N0=   54.78 (17.39 dB) loss vs coherent  0.00 dB ; 5log10(M)= 0.00; alpha_eff=1.000
+  N_h=  1e+06 M=    2  E_tot/N0=   58.48 (17.67 dB) loss vs coherent  0.28 dB ; 5log10(M)= 1.51; alpha_eff=0.906
+  N_h=  1e+06 M=    4  E_tot/N0=   63.92 (18.06 dB) loss vs coherent  0.67 dB ; 5log10(M)= 3.01; alpha_eff=0.889
+  N_h=  1e+06 M=    8  E_tot/N0=   71.89 (18.57 dB) loss vs coherent  1.18 dB ; 5log10(M)= 4.52; alpha_eff=0.869
+  N_h=  1e+06 M=   16  E_tot/N0=   83.49 (19.22 dB) loss vs coherent  1.83 dB ; 5log10(M)= 6.02; alpha_eff=0.848
+  N_h=  1e+06 M=   64  E_tot/N0=  123.90 (20.93 dB) loss vs coherent  3.54 dB ; 5log10(M)= 9.03; alpha_eff=0.804
+  N_h=  1e+06 M=  256  E_tot/N0=  205.24 (23.12 dB) loss vs coherent  5.74 dB ; 5log10(M)=12.04; alpha_eff=0.762
+  N_h=  1e+06 M= 1024  E_tot/N0=  367.69 (25.65 dB) loss vs coherent  8.27 dB ; 5log10(M)=15.05; alpha_eff=0.725
+  N_h=  1e+09 M=    1  E_tot/N0=   64.41 (18.09 dB) loss vs coherent  0.00 dB ; 5log10(M)= 0.00; alpha_eff=1.000
+  N_h=  1e+09 M=    2  E_tot/N0=   68.25 (18.34 dB) loss vs coherent  0.25 dB ; 5log10(M)= 1.51; alpha_eff=0.916
+  N_h=  1e+09 M=    4  E_tot/N0=   73.97 (18.69 dB) loss vs coherent  0.60 dB ; 5log10(M)= 3.01; alpha_eff=0.900
+  N_h=  1e+09 M=    8  E_tot/N0=   82.45 (19.16 dB) loss vs coherent  1.07 dB ; 5log10(M)= 4.52; alpha_eff=0.881
+  N_h=  1e+09 M=   16  E_tot/N0=   94.88 (19.77 dB) loss vs coherent  1.68 dB ; 5log10(M)= 6.02; alpha_eff=0.860
+  N_h=  1e+09 M=   64  E_tot/N0=  138.60 (21.42 dB) loss vs coherent  3.33 dB ; 5log10(M)= 9.03; alpha_eff=0.816
+  N_h=  1e+09 M=  256  E_tot/N0=  227.05 (23.56 dB) loss vs coherent  5.47 dB ; 5log10(M)=12.04; alpha_eff=0.773
+  N_h=  1e+09 M= 1024  E_tot/N0=  403.97 (26.06 dB) loss vs coherent  7.97 dB ; 5log10(M)=15.05; alpha_eff=0.735

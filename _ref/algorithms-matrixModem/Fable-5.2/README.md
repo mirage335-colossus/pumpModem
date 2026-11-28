@@ -1,6 +1,6 @@
 # Matrix Modem FSK research pass (Fable-5.2)
 
-26–28 November 2026 · Research, calculations, two GPU runs and four literature reviews
+26–28 November 2026 · Research, calculations, GPU runs and eight literature reviews
 
 This pass supports the [FSK specification draft](../../../_appraisal/matrixModem-FSK.md). It
 builds on the [Sol-6.2](../Sol-6.2/README.md) and [Opus-5.5](../Opus-5.5/README.md) passes and
@@ -15,7 +15,7 @@ exists yet.
 | [FSK lattice design](fsk-lattice-design.md) | Which cell, dwell, alphabet and precision, and how long does a block take? | Exact large-alphabet calculations and Monte Carlo ([`fsk-lattice/`](../../../_appraisal/algorithms-matrixModem/fsk-lattice/README.md)) |
 | [OTHR and interference tolerance](othr-and-interference-tolerance.md) | What keeps the link alive under over-the-horizon radar, and how much margin does it take? | Time-domain simulation of model radars ([`othr-interference/`](../../../_appraisal/algorithms-matrixModem/othr-interference/README.md)) and the OTHR review |
 | [Coding and message structure](coding-and-message-structure.md) | Is the 10-bit minimum sound, and which code for short and long blocks? | Exact finite-length energy tables ([`short-message-energy/`](../../../_appraisal/algorithms-matrixModem/short-message-energy/README.md)) and the coding review |
-| [Computation and simulation speed](computation-and-simulation-speed.md) | Can a DFT beat an FFT, where do Tensor Cores help, how fast is simulation? | One run on a full RTX PRO 6000 Blackwell ([`fsk-lattice/results/gpu/`](../../../_appraisal/algorithms-matrixModem/fsk-lattice/README.md#gpu-run)) and the DFT/FFT review |
+| [Computation and simulation speed](computation-and-simulation-speed.md) | Can a DFT beat an FFT, where do Tensor Cores help, how fast is simulation? | One run on a full RTX PRO 6000 Blackwell ([`fsk-lattice/results/gpu/`](../../../_appraisal/algorithms-matrixModem/fsk-lattice/README.md#lattice_gpucu)) and the DFT/FFT review |
 | [Meteor burst](meteor-burst.md) | Is meteor burst a usable path at 2–100 mW, and which modulation suits it? | ITU-R P.843 and P.372 formulas, one measured 500 W link, a delegated literature search with verified DOIs, and a link calculation |
 | [Sub-9 kHz FSK rate and spacing](sub9khz-fsk-rate-and-spacing.md) | Which tone rate and spacing for a coherent sub-9 kHz link through a 61 m antenna at 10 kW, and what does the rate do to the computational ceiling? | Antenna calculation, a block Monte Carlo with phase and frequency wander, CPU and GPU decode timings ([`sub9-fsk-rate/`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/README.md)), and four delegated literature searches |
 
@@ -26,6 +26,24 @@ verification marks and not-accessed lists:
 - [FT8 and Q65 design evidence](reviews/review-ft8-q65-design.md)
 - [Direct DFT versus FFT](reviews/review-dft-fft-computation.md)
 - [Coding, look combining, interleaving and termination](reviews/review-coding-interleaving.md)
+- [Coherent FSK tone rate, spacing and positions](reviews/review-coherent-fsk-rate-spacing.md)
+- [VLF antenna bandwidth, keying and voltage limits](reviews/review-vlf-antenna-bandwidth-keying.md),
+  with three sub-searches (station bandwidths and voltages; FSK transients and tuning drift;
+  direct antenna modulation)
+- [Phase stability, Doppler and delay below 9 kHz](reviews/review-sub9khz-phase-stability.md),
+  with four sub-searches (classical and modern phase statistics; mode theory; transients)
+- [Long-coherence weak-signal search](reviews/review-long-coherence-search.md)
+
+The last four were returned on 27 November for the sub-9 kHz note and stored on 28 November as
+returned, each under a header that says what was changed and how far it was checked; all 340 of
+their DOIs resolve. Their scratch calculations are in
+[`sub9-fsk-rate/literature-calcs/`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/literature-calcs/README.md).
+
+A cross-check of the repository's own earlier research, not a literature review:
+
+- [Earlier sub-9 kHz notes: inconsistencies and gaps](reviews/review-sub9khz-earlier-notes-cross-check.md):
+  what three re-readings of the earlier antenna, propagation and noise notes found inconsistent,
+  wrongly assumed or missing. Nothing in those notes was changed.
 
 ## Findings that change the design
 
@@ -272,10 +290,13 @@ verification marks and not-accessed lists:
     0.16 s tones and seven times too slow at 10.24 s, and the GPU keeps up from 2.56 s tones.
     Coherent sums across positions need the timing to 1/(8 × span), 10 ms at 12.5 Hz, which the
     earlier search count had left out.
-36. **A keyed phase jump into a high-Q antenna is the transient VLF practice forbids.**
-    MIL-STD-188-140A excludes PSK at VLF for it. At 10 kW and 86 Hz a quarter or half turn
-    exchanges two or four times the 18.5 J stored. A slew of 50 to 100 ms is proposed; it is
-    affordable only with tones of seconds.
+36. **A keyed phase jump into a high-Q antenna is the transient VLF practice forbids, and an
+    80 ms ramp removes it.** MIL-STD-188-140A excludes PSK at VLF for it. At 10 kW and 86 Hz a
+    half turn sends nearly the whole 10 kW back into the source for 2.6 ms (11 J of the 18.5 J
+    stored; 9.2 ms and 41 J at 24 Hz). With the keyed phase reached by an 80 ms ramp nothing
+    flows back, the drive and the current stay within 16° at 86 Hz and 49° at 24 Hz, and a
+    receiver whose reference follows the ramp loses nothing (0.03 dB with 10.24 s tones if it
+    assumes a step). Calculated for a single-tuned antenna; no transmitter was examined.
 37. **Spacing at the reciprocal of a long tone has no fallback.** Sixteen positions 0.098 Hz
     apart decode as well as the others up to the worst spread bound, and not at all at ten
     times it, where 0.78 Hz spacing loses 5 dB and decodes.
@@ -288,6 +309,11 @@ verification marks and not-accessed lists:
     (scaled from 13 to 40 kHz). Night echoes of 0.2 to 1.9 ms on short and medium paths are a
     further reason for a span near 12.5 Hz. No phase spectrum for seconds to minutes exists at
     any VLF frequency in the sources found.
+39. **A 16.7 Hz railway supply puts a harmonic inside the sub-9 kHz slot.** Its harmonics fall
+    near 8,250.0, 8,266.7 and 8,283.3 Hz, 16.7 Hz apart, so where such a railway is in range no
+    12.5 Hz span is clear of them if they wander as the mains harmonics do. The earlier antenna
+    note already had the frequencies; the first version of the sub-9 kHz note missed them, and a
+    re-reading of the earlier notes found it. No line amplitude near 8 kHz is in any source.
 
 ## State of the specification
 
@@ -348,11 +374,28 @@ four parts.
 
 On 28 November the sub-9 kHz rate and spacing work was added (findings 31 to 38). Section 12.2
 was rewritten around a recommended configuration, the antenna at 10 kW, the Monte Carlo and the
-measured decode rates. Sections 3, 4.2, 8 (item 8), 9, 13, 14 (open decisions 9, 12 and 18 to 20)
+measured decode rates. Sections 3, 4.2, 8 (item 8), 9, 13, 14 (open decisions 9, 12 and three new ones)
 and 15 were brought into line. Three statements left the specification and remain in the lattice
 design note and calculation 18: the antenna roll-off with 4 to 16 positions on the default
 lattice, the comparison of the search volume with 8,400 and 65 decodes a second, and the 422,000
 hypotheses of a 5.8 h window with unseen slewing.
+
+Later on 28 November the sub-9 kHz configuration was adopted in the specification at the user's
+request, where it had been a recommendation with open decisions.
+
+- Settled now: FHSS off, lattice scale `j` = 3, sixteen positions in 12.5 Hz, tones of 8 cells
+  (10.24 s); the keyed phase reached by an 80 ms ramp; the window ladder from two tones up;
+  GPS-locked references assumed.
+- Changed for it: sections 1 to 3 (scope, terms, lattice table), 4.1, 4.2 and 4.4 (settings,
+  tone length, phase ramp), 5 and 6 (sixteen positions, shortest block), 8 (timing of
+  1/(8 × span), ladder), 9 to 11 (railway harmonics, sizing, concealment), 12.2, 14 and 15.
+- Open decisions were renumbered: 18 is now the value-dependent phase, which stays open because
+  it would put information into the phase; 19 is the carrier and slot where railway or unsteady
+  mains harmonics are in range; 20 is the ramp length against a real transmitter.
+- The phase ramp was calculated for this
+  ([`phase_slew`](../../../_appraisal/algorithms-matrixModem/sub9-fsk-rate/results/phase_slew.md)),
+  where the first version of the note had a hand estimate.
+- Finding 39 and the present form of finding 36 date from this step.
 
 ## Corrections to earlier Matrix Modem documents
 
@@ -395,11 +438,12 @@ Found by the reviews of this pass. The first four are annotated where they occur
    transmitter filters and narrow antennas, the timing loss at sample level, and its bearing on
    emission classification.
 
-10. Below 9 kHz: the top-voltage limit of a real 61 m installation; a transmitter's tolerance
-    of the keyed phase and the slew that avoids the transient; mains-harmonic amplitudes near
-    8 kHz at a receiving site; a measured phase spectrum of a sub-9 kHz carrier; the transform
-    across tone sums and tiered screening as ways to cut the frequency search; a tuned GPU
-    kernel for the full ladder.
+10. Below 9 kHz: the top-voltage limit of a real 61 m installation; a real transmitter's
+    tolerance of the 80 ms phase ramp; mains and railway harmonic amplitudes near 8 kHz at a
+    receiving site, and the carrier to use where no slot is clear; the night mode cut-offs near
+    5.17 and 8.27 kHz; a measured phase spectrum of a sub-9 kHz carrier; the transform across
+    tone sums and tiered screening as ways to cut the frequency search; a tuned GPU kernel for
+    the full ladder; concealment of 10 s tones on sixteen positions.
 
 ## Cost and provenance of the GPU run
 
@@ -407,7 +451,9 @@ Three on-demand RTX PRO 6000 Blackwell pods, 0.135 h, 0.061 h and 0.090 h, about
 together, all verified removed, no persistent volume. The calculations of 27 November used no
 remote compute. The sub-9 kHz decode timings of 28 November (UTC) used two more pods of the same
 type for 0.076 h and 0.095 h, about 0.46 USD together, both verified removed. The second reran
-the timings after an independent check found that the first CPU benchmark had left threads idle. The text of 47 CFR 15.247 was read once through a delegated web fetch (Cornell LII
+the timings after an independent check found that the first CPU benchmark had left threads idle.
+The adoption work of 28 November (phase-ramp calculation, DOI checks, storing the reviews) used
+no remote compute. The text of 47 CFR 15.247 was read once through a delegated web fetch (Cornell LII
 and the GovInfo 2023 annual edition). Device, software, hashes and method are in the
 [computation note](computation-and-simulation-speed.md#the-run). All other calculations ran on the
 local 12-thread Ryzen 5 PRO 5650U.
