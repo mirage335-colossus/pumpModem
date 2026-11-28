@@ -19,6 +19,12 @@ The primary 18 dB holdout exposed a large loss with the delayed, +2-bin ray. Bef
 
 ## Reproduce
 
+The [fractional-timing comparison](timing-coverage.md) extends the coherent
+experiment with a separately calibrated 513-point timing bank. It tests arrivals
+between the five historical coherent timing candidates and keeps the per-tone
+fallback. Its own protocol, deterministic controls, results and commands are
+separate from the historical comparisons below.
+
 From the repository root with a C++20 compiler, build the two-source experimental binary and run each fixed experiment.
 
 ```sh

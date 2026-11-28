@@ -13,6 +13,19 @@ The original brief asks for a one-way modem that can keep up when reception is d
 
 ## Receiver evidence
 
+**Timing coverage is separate from an offset relative to the central FFT.** The
+original coherent and pointing trials use ±32-sample arrivals, both present in
+their five-candidate coherent timing bank. The [fractional-timing study](fsk-timing-coverage.md)
+tests arrivals between those candidates with a separately calibrated 513-point
+bank, retaining the per-tone fallback and every word and coherent rung. It also
+keeps phase correction separate from moving an observation's boundary samples.
+On paired uniform fractional arrivals at 15 dB, correct joint admission rose
+from 15/120 to 106/120; on the old grid-matched arrivals it fell from 105/120
+to 92/120 after recalibration. Both protected the same 100/120 phase-reset
+recoveries through the per-tone route. These conditional gains and losses,
+the 3/400 quiet admissions for each bank, and the measured work belong together;
+the wider bank has no attended-target qualification.
+
 At 18 dB of block energy over noise density, the original six-hypothesis per-tone-only receiver for ten-bit words admitted the correct word on 125/160 one-path blocks and 12/160 two-path blocks. The second fixture splits the same nominal power between a direct ray and an echo delayed 2.5 ms and shifted by 12.5 Hz. It retained the same samples across timing and spectral hypotheses. On a fresh paired holdout, adding two-bin apertures raised the count from 15 to 40 of 160 on that echo. The expanded search lost ten single-path admissions, and the counts were 20 and 19 on a 9.375 Hz echo. Both thresholds were trained for a nominal 1% false-presence budget. Five of 400 independent noise-only blocks crossed the original threshold. These are decisions on a specified configured calendar with public test schedules and nominal transmitted energy, including both frontend and decoder losses. [Test protocol and counts](../../_appraisal/algorithms-matrixModem/block-reception/README.md)
 
 A second comparison gave a more transferable gain on these fixtures. The receiver tried a six-rung coherent sum over all 1,024 candidate words and reserved half the nominal 1% false-admission budget for its per-tone fallback. At 18 dB, correct two-ray admissions rose from 15/120 with the per-tone baseline to 115/120 with the joint decision. At 15 dB they reached 39/120 on the two-ray path. On a path that reset phase every tone, allocating the smaller per-tone budget reduced correct admissions at 18 dB from 105/120 to 91/120. The joint rule had 3/400 false admissions on its noise holdout. These paired results show why the division of the false-word budget must be tested on the weakest required path even when both families use the same input. [Coherent and per-tone comparison](../../_appraisal/algorithms-matrixModem/block-reception/README.md#coherent-branch-and-protected-per-tone-fallback)

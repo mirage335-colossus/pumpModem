@@ -822,7 +822,8 @@ stated success probabilities, with uncertainty. [Link model and field precedents
 
 The pointing-loss experiment supplied the nominal block start, ordinal and sideband.
 Each ten-bit word occupied 10.24 s on a steady path with hopping off. The true start
-differed from nominal by ±10 ms and the carrier by ±0.0244 Hz. Both observers used the
+differed from nominal by ±10 ms, exactly matching two of the five coherent timing
+candidates, and the carrier by ±0.0244 Hz. Both observers used the
 same padded capture. The decoder could shift its 10.24 s observation by up to 20 ms
 and searched all 1,024 words. Its per-tone and coherent thresholds (7.04483 and 16.19958)
 came from the second-largest score in each branch on a separate 39,999-block quiet
@@ -839,6 +840,18 @@ there. No visible word was missed or decoded incorrectly at any of the nine samp
 levels. The same 160 draws were reused across levels. Human recognition, a moving antenna
 pattern, blind calendar acquisition and field sensitivity remain unmeasured.
 [Paired measurements and reproduction](algorithms-matrixModem/block-reception/pointing-loss.md)
+
+These counts do not establish sensitivity between timing candidates. The
+[fractional-timing study](../_ref/algorithms-matrixModem/fsk-timing-coverage.md)
+compares the historical bank with a separately calibrated 513-point search over
+the same ±20 ms range. It retains all words, frequency hypotheses and coherence
+windows and checks the residual error from reusing finite FFT apertures.
+At 15 dB with uniform fractional arrivals, this diagnostic raised correct joint
+admissions from 15/120 to 106/120, while the old grid-matched control fell from
+105/120 to 92/120 after recalibration. Both retained 100/120 phase-reset
+recoveries through the per-tone fallback. Each admitted 3/400 quiet blocks,
+with a one-sided 95% upper rate of 1.927%. These are nominal 1% diagnostic
+thresholds; they do not replace the ordinary attended-target calibration.
 
 ## 9. Margin, interference and lost hops
 
@@ -1944,6 +1957,12 @@ trials where practical while preserving the physical model and decision under te
   57 µs, or 0.18 sample at 3,200 complex samples/s. One 20 ms coarse interval contains
   about 352 such spacings. Integer shifts of a decimated input cannot realize that grid.
   Validate a fractional-delay reference or equivalent window correction across boundaries.
+  A native ten-bit 513-point comparison now tests signed fractional phase correction
+  and random arrivals over ±20 ms. It reuses the nearest of three FFT apertures,
+  so finite-window boundary mismatch remains; warmed paired scoring took about
+  0.192–0.209 s per configured block on the 5650U. This does not qualify the
+  proposed full fine grid, 16/24-bit searches or complete stream service.
+  [Timing protocol and results](algorithms-matrixModem/block-reception/timing-coverage.md)
   The historical 9.7 s laptop and 66 ms GPU figures cover kernels for one coarse interval.
   Sensitivity and throughput of the complete fine search remain open.
 - **Broad oscillator uncertainty can exceed the computational ceiling.** The earlier

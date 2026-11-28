@@ -35,6 +35,12 @@ The seven chapters from the earlier `_ref/algorithms_matrixModem/Astra-6/` resea
 
 ## Implication for first implementation
 
+The [fractional-timing continuation](../fsk-timing-coverage.md) tests a specific
+gap in the current FSK receiver: its successful ±32-sample arrivals coincide
+with the coherent timing candidates. It connects a signed-frequency correction,
+an all-word fine search, finite-aperture controls and paired calibrated outcomes.
+This is evidence for a bounded ten-bit calendar, not full receiver qualification.
+
 Use a bounded configured calendar and explicit tone passband in a standalone native appraisal. Preserve the timing/frequency uncertainty coverage across arithmetic and detector variants. Start with directly checkable short quiet/active/missing slot cases, then test physical delays and independent channel evolution on the same TX energy and complete-codeword deadlines. Keep fixed-bank energy as a calibrated fallback while comparing segmented and covariance scoring. Carry the strict INT4 interpretation from the original brief as a distinct research constraint. The wide-accumulator GPU comparator cannot silently settle that operating decision. [Evaluation sequence](receiver-and-evaluation-review.md#bounded-validation-sequence), [original Matrix brief](../../../_appraisal/matrixModem.md).
 
 The present work supports narrowing the next experiments. A complete Matrix Modem, field coverage, successful acquisition of unknown epochs, strict-INT4 deployment, and operational LPI remain unqualified. Accept any later candidate on calibrated communication and false-alarm outcomes, physical completion and full receiver service through moderate and difficult cases. Peak fit or average cost alone is insufficient where an uncontrolled case can cause abrupt sensitivity loss or sustained backlog.

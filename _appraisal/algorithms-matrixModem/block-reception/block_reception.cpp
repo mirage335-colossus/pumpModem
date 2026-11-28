@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -109,6 +110,36 @@ void transmit(std::span<Sample> samples, int start, const Schedule& schedule, in
     }
 }
 
+bool transmit_fractional(std::span<Sample> samples, double start, const Schedule& schedule, int word,
+                         double db_energy, bool two_ray, double phase, double echo_phase,
+                         double carrier_cycles, mm::Rng* phase_resets = nullptr) {
+    const double end = start + nsamples;
+    const int last = int(std::ceil(end)) - 1 + (two_ray ? delay : 0);
+    if (start < 0. || last >= int(samples.size())) return false;
+    const double amplitude = std::sqrt(mm::undb(db_energy) / (nsamples * (two_ray ? 2 : 1)));
+    for (int t = 0; t < tones; ++t) {
+        const double boundary = start + t * nfft;
+        double initial = phase + tau * schedule.quarter_phase[t] / 4
+            + tau * carrier_cycles * t / tones;
+        if (phase_resets) initial += tau * phase_resets->uniform();
+        const double hz = double(schedule.position[t][word] - 176) / nfft;
+        for (int n = int(std::floor(boundary)); n < int(std::ceil(boundary + nfft)); ++n) {
+            if (n < boundary || n >= boundary + nfft) continue;
+            const double rel = n - boundary;
+            const double carrier = carrier_cycles * rel / nsamples;
+            const Sample direct = static_cast<Sample>(std::polar(amplitude,
+                initial + tau * (hz * rel + carrier)));
+            samples[n] += direct;
+            if (two_ray) {
+                const Sample echo = direct * static_cast<Sample>(std::polar(1., echo_phase
+                    + tau * 2. * (n - start) / nfft));
+                samples[n + delay] += echo;
+            }
+        }
+    }
+    return true;
+}
+
 float quantile(std::span<float> scratch, size_t rank) {
     std::nth_element(scratch.begin(), scratch.begin() + rank, scratch.end());
     return scratch[rank];
@@ -195,6 +226,8 @@ void coherent_search(const ProjectionBlock& bins, const Schedule& schedule,
         }
     }
 }
+
+#include "timing_trial.hpp"
 
 template <int held_cells, size_t rows, size_t bins>
 void score_energy(std::array<std::array<float, bins>, rows>& energy, const Schedule& schedule,
@@ -308,7 +341,8 @@ void observe_row(const std::array<Sample, nfft>& spectrum, double* waterfall_sum
 template <size_t orientations>
 std::array<BankResult, orientations> search_banks(std::span<const Sample> samples,
         const Schedule& schedule, const FloatPlan& plan, bool include_pairs, bool include_coherent,
-        const FloatPlan* held_plan, double* waterfall, Ridge* ridge, RidgeEnergy* ridge_energy) {
+        const FloatPlan* held_plan, double* waterfall, Ridge* ridge, RidgeEnergy* ridge_energy,
+        TimingCapture* timing_capture = nullptr) {
     static_assert(orientations == 1 || orientations == 2);
     // Include both guard bins on each side in each normalization.
     constexpr int bins = positions + 4;
@@ -320,6 +354,7 @@ std::array<BankResult, orientations> search_banks(std::span<const Sample> sample
         if (ridge_energy) ridge_energy->fill({});
         return result;
     }
+    if (timing_capture) timing_capture->valid = true;
     std::optional<std::array<ProjectionBlock, orientations>> coherent_bins;
     if (include_coherent) coherent_bins.emplace();
     using Energy = std::array<std::array<float, bins>, tones>;
@@ -355,6 +390,9 @@ std::array<BankResult, orientations> search_banks(std::span<const Sample> sample
                         if (orientation != 0) z = std::conj(z);
                         (*coherent_bins)[orientation][t][p] = {quant(z.real()), quant(z.imag())};
                     }
+                    if (timing_capture && orientation == 0)
+                        timing_capture->projection[offset_index(offset)][t] =
+                            (*coherent_bins)[orientation][t];
                 }
                 if (!held_plan)
                     for (int p = 0; p < bins; ++p)
@@ -380,9 +418,14 @@ std::array<BankResult, orientations> search_banks(std::span<const Sample> sample
 
 BankResult score_banks(std::span<const Sample> samples, const Schedule& schedule,
                        const FloatPlan& plan, bool include_pairs, bool include_coherent = false,
-                       const FloatPlan* held_plan = nullptr) {
-    return search_banks<1>(samples, schedule, plan, include_pairs, include_coherent,
-                           held_plan, nullptr, nullptr, nullptr)[0];
+                       const FloatPlan* held_plan = nullptr, TimingResults* timing = nullptr, bool audit = false) {
+    std::unique_ptr<TimingCapture> capture;
+    if (timing) capture = std::make_unique<TimingCapture>();
+    auto result = search_banks<1>(samples, schedule, plan, include_pairs,
+                           include_coherent || timing, held_plan, nullptr, nullptr, nullptr,
+                           capture.get())[0];
+    if (timing) *timing = capture->valid ? score_timing(*capture, schedule, audit) : TimingResults{};
+    return result;
 }
 
 std::array<BankResult, 2> score_orientations(std::span<const Sample> samples,
@@ -692,6 +735,8 @@ bool compare_coherent(const FloatPlan& plan, const std::vector<Schedule>& fixtur
 #include "affine_trial.hpp"
 #include "fault_admission.hpp"
 #include "pointing_trial.hpp"
+
+#include "timing_experiment.hpp"
 } // namespace
 
 int main(int argc, char** argv) {
@@ -700,6 +745,30 @@ int main(int argc, char** argv) {
     for (int ordinal = 0; ordinal < nfixtures; ++ordinal) {
         fixtures.emplace_back(ordinal, 0xaa6218f2);
         other.emplace_back(ordinal, 0xd3d65011);
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--timing-checks")
+        return timing_checks(plan, fixtures) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--timing-unrelated")
+        return timing_unrelated(plan, fixtures, other);
+    if ((argc == 2 || argc == 3) && std::string_view(argv[1]) == "--timing-pilot") {
+        int trials = 1;
+        if (argc == 3) {
+            try { trials = std::stoi(argv[2]); } catch (...) { return 2; }
+            if (trials < 1 || trials > 3) return 2;
+        }
+        return timing_pilot(plan, fixtures, trials);
+    }
+    if ((argc == 2 || argc == 3) && std::string_view(argv[1]) == "--timing-coverage") {
+        int workers = std::max(1u, std::thread::hardware_concurrency());
+        if (argc == 3) {
+            try {
+                size_t used = 0;
+                workers = std::stoi(argv[2], &used);
+                if (used != std::string_view(argv[2]).size()) return 2;
+            } catch (...) { return 2; }
+        }
+        if (workers < 1 || workers > 256) return 2;
+        return timing_coverage(plan, fixtures, workers);
     }
     if (argc == 2 && std::string_view(argv[1]) == "--pointing-loss") {
         check_pointing_loss(plan, fixtures);

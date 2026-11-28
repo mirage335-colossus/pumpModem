@@ -18,6 +18,9 @@ only at the user's explicit request.
 The [Matrix FSK specification](../_appraisal/matrixModem-FSK.md) gives the current
 experimental waveform and receiver decisions. The [receiver design review](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
 links each decision to its measurements, calculations and known limits.
+The [fractional-timing study](../_ref/algorithms-matrixModem/fsk-timing-coverage.md)
+separates arrivals matched to a search grid from coverage between its points,
+including the cost of a denser search and its finite-window approximation.
 
 Start with the [Matrix research overview](../_ref/algorithms-matrixModem/Sol-6.2/README.md)
 for the proposed standalone modem, then use its

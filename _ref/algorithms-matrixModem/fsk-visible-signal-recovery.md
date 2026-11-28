@@ -21,6 +21,12 @@ Two field observations illustrate the distinction between a visible data trace a
 
 ### Measured recovery on the ordinary receiver
 
+The ±32-sample arrivals below coincide with two of the receiver's five coherent
+timing candidates. They are offset from the central FFT aperture but are not
+between coherent timing hypotheses. The [fractional-timing comparison](fsk-timing-coverage.md)
+tests the resulting coverage gap and the additional search cost; the historical
+counts retain their original calibration and geometry.
+
 The ten-bit experiment kept the pointing gain constant across each 10.24-second word. The ordinary receiver knew the public calendar, schedule and sideband and searched the configured timing and residual-frequency offsets. A separate observer used 64 waterfall rows of 160 ms at 6.25 Hz resolution. The receiver recovered 157/160 words at 16.5 dB received block E/N₀, where this observer flagged none. At 18 dB all 160 decoded and two were flagged. At 24 dB all 160 decoded and 104 were flagged. At the prespecified 27 dB point every word was visible and correctly decoded, giving a one-sided 95% upper bound of about 1.86% on failure given visibility there. There were no visible misses on the sampled grid. These grid points share noise and payloads across energies and give no continuous reception threshold. [Paired decisions, thresholds and uncertainty](../../_appraisal/algorithms-matrixModem/block-reception/pointing-loss.md)
 
 Block energy and the waterfall noise floor use different units. With ten bits in 10.24 s, the active payload rate is about 0.98 bit/s. For the 18 dB block, the received C/N₀ is 7.90 dB-Hz. This gives a mean signal-to-noise power ratio of about −25.5 dB in 2.2 kHz or −0.06 dB in an ideal 6.25 Hz tone bin. At 24 dB block E/N₀ the ideal occupied-bin ratio is +5.94 dB. Each tone lasts just one row, and the display chooses its brightest bin among 357. These conversions refer to the pre-quantization signal and noise powers. The observed flag counts include noise peaks, quantization and timing offsets. [Waveform, window and display statistic](../../_appraisal/algorithms-matrixModem/block-reception/pointing-loss.md)
