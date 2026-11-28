@@ -11,6 +11,42 @@ The original brief asks for a one-way modem that can keep up when reception is d
 | For operator-read short words, size initially to 10⁻⁴ raw false admissions per quiet block. Express the achieved rate per listening day and measure wrong active words separately. | [Listening exposure and interpretation of decrypted words](fsk-presence-calibration.md#how-often-an-operator-sees-a-false-word) · [one-bit and ten-bit sizing](../../_appraisal/algorithms-matrixModem/fsk-lattice/results/admission_tradeoff.md) · [frozen-threshold experiment](../../_appraisal/algorithms-matrixModem/block-reception/README.md#one-false-admission-per-ten-thousand-quiet-blocks) |
 | For an intact signal weakened by antenna mispointing, size the profile for off-axis received power. Compare waterfall visibility and ordinary word recovery on the same samples. Keep distortion searches opt-in so weak or quiet blocks retain the full ordinary receiver budget. | [Specification §8.1](../../_appraisal/matrixModem-FSK.md#81-reception-after-antenna-pointing-loss) · [Pointing loss and optional fault searches](fsk-visible-signal-recovery.md) · [Paired pointing-loss test](../../_appraisal/algorithms-matrixModem/block-reception/pointing-loss.md) · [Optional fault experiments](../../_appraisal/algorithms-matrixModem/block-reception/fault-tests.md) |
 
+## Keeping findings outside the specification
+
+The specification records the proposed format and receiver requirements. Its
+supporting lessons must remain understandable in the relevant research and
+experiment documents without requiring a reader to reconstruct them from the
+specification.
+
+- **Scientific reasoning and interpretation:** extend the relevant topic note in
+  `_ref/algorithms-matrixModem/`. Keep the mechanism, assumptions, literature
+  citations, theoretical counterexamples, competing explanations and applicability
+  limits together. Record why an alternative was rejected or remains conditional,
+  and what evidence would justify reconsidering it. The [topic notes and literature
+  reviews](Fable-5.2/README.md#notes) and [broader research evidence map](Sol-6.2/research-pass-index.md#evidence-map)
+  provide homes for waveform, coding, interference, propagation and computation
+  findings beyond the receiver topics above.
+- **Experimental evidence:** keep new native experiment code, protocols and test
+  documentation under `_appraisal/algorithms-matrixModem/`. The relevant record
+  carries the configuration, frozen decisions, controls, positive and negative
+  outcomes, uncertainty, source identity and reproduction commands. Link the
+  interpretation to that record; a favorable count alone is not the finding.
+- **Current design consequences:** reconcile the result into this review and its
+  topic guide, then link the specification's requirement or open decision to that
+  explanation. Update the existing indexes when a new research topic needs a
+  discovery path. New research documents belong under
+  `_ref/algorithms-matrixModem/`; `docs/` continues to distinguish experimental
+  Matrix findings from the application's qualified operating contracts.
+
+Preserve dated research and its citations when later evidence changes the
+interpretation. Add a correction and cross-reference with its source and scope;
+do not silently replace the earlier result. In particular, keep a measured gain
+beside its losses, computational cost, failed checks and untested regimes. The
+[fractional-timing interpretation](fsk-timing-coverage.md) and its
+[experiment record](../../_appraisal/algorithms-matrixModem/block-reception/timing-coverage.md)
+illustrate this division: the former explains phase coverage and aperture limits;
+the latter retains paired outcomes, calibration, controls and provenance.
+
 ## Receiver evidence
 
 **Timing coverage is separate from an offset relative to the central FFT.** The

@@ -4,6 +4,9 @@ This draft gives the current experimental design for Matrix FSK. The [original b
 records the design goals. The [receiver design review](../_ref/algorithms-matrixModem/fsk-reconciliation.md)
 links the choices here to their measurements, calculations and limits. The initial draft
 and its retained calculations date from 26–28 November 2026 (UTC).
+Keep supporting research and experimental conclusions in their
+[topic and evidence documents](../_ref/algorithms-matrixModem/fsk-reconciliation.md#keeping-findings-outside-the-specification),
+with the design consequence and a link here.
 The native ten-bit reference takes the public calendar and block ordinal as configured,
 searches residual timing and frequency uncertainty, and closes reception after two scored
 quiet blocks. Acquisition with an unknown calendar or ordinal, interoperable waveform and

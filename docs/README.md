@@ -33,6 +33,12 @@ These studies inform future design; their calculations and isolated experiments
 do not qualify a complete Matrix Modem. The current application's operating
 contracts and validation remain in the component guides below.
 
+When adding findings, follow the [research and evidence placement guide](../_ref/algorithms-matrixModem/fsk-reconciliation.md#keeping-findings-outside-the-specification):
+scientific explanations and literature belong in the relevant `_ref/` topic note,
+while experiment methods, outcomes and provenance belong with their `_appraisal/`
+experiment. Reconcile the design consequence and link it from the specification;
+do not leave the substantive lesson only in that specification or a chat.
+
 ## Current Robust modem
 
 Use the [Robust operating guide and experimental lessons](indexes/robust.md)
