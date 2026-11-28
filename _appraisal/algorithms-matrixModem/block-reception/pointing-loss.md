@@ -13,6 +13,8 @@ Use a single stable path, 3,200 complex samples/s, 64 contiguous 160 ms tones on
 
 Reproduce from the repository root with the [native C++20 build command](README.md#reproduce), then run `/tmp/matrix-block-reception --pointing-loss`. [Experiment source](pointing_trial.hpp)
 
+The pointing-loss and optional fault studies ran locally on a Ryzen 5 PRO 5650U with **$0 cloud spend**. For these studies the available cloud allowance was up to eight hours at up to $30 per hour. RunPod was preferred for short jobs to avoid a full-hour charge, with a 256-CPU Linode as an alternative. The requested transfer budget was a few minutes per upload, with builds of several hundred megabytes or more cached on an inexpensive persistent RunPod volume when transfers became slow. [Optional fault study and compute provenance](fault-tests.md#reproduce)
+
 ## Results
 
 Each row contains 160 paired records. The last column counts ordinary-visible records on which the receiver missed the true word or admitted a different word. No receiver decision was wrong on these active records. The fraction of all words recovered includes all misses, regardless of the display.

@@ -19,6 +19,11 @@ choices from evidence about their performance.
   antenna gains and noise density. The +10 to −20 dB-Hz study points, and the −37 dB-Hz
   coherent sub-9 kHz comparison, are research inputs. The proposed format has no field
   sensitivity measurement at these limits.
+- **Receive through transmit-antenna pointing loss.** If an intact transmission from a
+  misdirected high-gain antenna produces visible data tones on the receiving station's
+  waterfall, the design goal is for the ordinary receiver to deliver the message. Choose
+  payload rate, tone duration, bandwidth and repetitions for the expected off-axis C/N₀,
+  path coherence and delivery deadline. [How to measure this goal](#81-reception-after-antenna-pointing-loss)
 - **Constant amplitude on the active flat interval.** The proposed transmitter uses its available
   peak power throughout that interval. Hopping has ramps and quiet guards. Bandwidth, oscillator
   error, antenna response and channel nulls can independently limit reception. Use conducted,
@@ -638,6 +643,15 @@ select the geometry of the next public block.
 8. **Coherent attempts and the per-tone fallback.** Evaluate the configured coherent
    windows over all used positions and the per-tone branch on every scorable block, including
    quiet blocks. Both count towards the receiver deadline. Use item 9 to make one decision.
+   Score the data in the configured sideband across the supported timing and frequency
+   ranges without waiting for pilot lock, a Helper indication or a visible trace. After a
+   miss, score the next eligible public block. Dedicated searches for a reversed spectrum,
+   mis-set tone spacing or damaged tones require explicit selection. In ordinary operation,
+   neither a miss nor a persistent bright trace triggers these searches. The format may accommodate
+   optional recovery without extra airtime or redundancy. With the option off, preserve
+   the ordinary receiver's sensitivity, false-word performance, available DSP workspace
+   and maximum sustained throughput, including during prolonged unsuccessful acquisition.
+   [Optional fault experiments and their measured costs](algorithms-matrixModem/block-reception/fault-tests.md)
    - **Span.** Undo the phase key first. Without FHSS the maximum span is the block. With
      FHSS, allow an unknown phase for each retune, combine coherently only inside each hop,
      then add hop energies. A held tone occupying the entire active hop has no second
@@ -770,6 +784,28 @@ Properties to test:
 - Simulation: on both experiment machines of [13.5](#135-simulation) a run reports its
   throughput, per-stage times and utilization, and its per-configuration work is done once
   whatever the number of trials.
+
+### 8.1 Reception after antenna pointing loss
+
+For a steady, frequency-flat pointing loss on a single path, reduce the received power
+of every transmitted tone by the same number of decibels and hold receiver noise fixed.
+Report the resulting C/N₀ or block E/N₀. A claim in degrees off boresight also needs the
+antenna pattern. Give the waterfall and the decoder the same capture, passband and
+observation time. State the display's time and frequency resolution, visibility rule and
+false-alarm rate, and the receiver's timing, frequency and public-calendar uncertainty.
+Count correct, wrong and missed words both across all transmissions and among visible
+blocks. Check false words on quiet and unrelated traffic, and message completion on
+continuous input. A claimed dB gap needs both visibility and decoding thresholds at
+stated success probabilities, with uncertainty. [Link model and field precedents](../_ref/algorithms-matrixModem/fsk-visible-signal-recovery.md#what-a-pointing-loss-does-to-the-samples)
+
+On the configured ten-bit calendar, each simulated word occupied 10.24 s on a steady
+path. At 16.5 dB block E/N₀ the ordinary receiver recovered 157/160 words while the
+software waterfall flagged none. At 24 dB it recovered 160/160, including all 104
+visible words. At the prespecified 27 dB point all 160 were visible and decoded
+correctly, giving a one-sided 95% upper bound of 1.855% on failure given visibility
+there. No visible word was missed or decoded incorrectly at any of the nine sampled
+levels. Human recognition, a moving antenna pattern, blind calendar acquisition and
+field sensitivity remain unmeasured. [Paired measurements and reproduction](algorithms-matrixModem/block-reception/pointing-loss.md)
 
 ## 9. Margin, interference and lost hops
 
@@ -1679,7 +1715,7 @@ trials where practical while preserving the physical model and decision under te
 
 | Decision | Where |
 | --- | --- |
-| Choose the HF transmit profile for the specified path and deadline. One-cell tones are the reference, held tones an alternative. Section 10 charges whole blocks and hop periods | 4.1, 4.2, 10 |
+| Size the HF profile for the expected off-axis power, path and deadline, counting whole blocks and hop periods. One-cell tones are the reference and held tones an alternative | 4.1, 4.2, [8.1](#81-reception-after-antenna-pointing-loss), 10 |
 | FHSS is optional. The receiver allows a phase discontinuity on retuning and preserves the codeword and public calendar across hops. Helper is optional and independent | 1, 4.3 |
 | Evaluate per-tone evidence and the distinct coherent windows available on each scorable block. In the reference rule per-tone acceptance takes priority on a word disagreement | 1, 8 |
 | With FHSS, a block spans at least 32 hops. Erasure budgets require the assumed hop correlation and symbol coverage | 6, 9 |
@@ -1797,11 +1833,15 @@ trials where practical while preserving the physical model and decision under te
 
 - **Complete-format performance is open.** A native 10-bit experiment now connects samples,
   the modeled schedule, exhaustive codeword search, calibrated admission and two-quiet closure.
-  The 1% diagnostic exercised physical closure on a configured calendar. The 10⁻⁴ trial
-  measured individual quiet, active and wrong-schedule blocks within its finite search and
-  channel models. Qualification of continuous message completion at the attended target
-  remains open. Durations in section 10 remain model estimates.
-  [Experiment design and holdouts](algorithms-matrixModem/block-reception/README.md)
+  The 1% diagnostic exercised physical closure on a configured calendar. With the ordinary
+  receiver's attended thresholds and an intact 18 dB block E/N₀ signal, all 64 five-block
+  pointing-loss trials delivered both initial words, closed on the second quiet block and
+  reopened on the next word. Its independent quiet-only holdout admitted one false
+  word in 30,000 blocks. The one-sided 95% upper bound of 1.58 × 10⁻⁴ exceeds the 10⁻⁴
+  target. Long-run false closures and false messages under field interference remain open.
+  Durations in section 10 remain model estimates.
+  [Continuous-stream outcomes](algorithms-matrixModem/block-reception/pointing-loss.md#results) ·
+  [Original quiet and wrong-schedule controls](algorithms-matrixModem/block-reception/fault-tests.md#false-words-at-the-attended-target)
 - **One cell per tone is the slower choice for weak signals with per-tone reception.** Against
   the bound it stands at 14.2, 5.7 and 1.2 dB at 0.1, 1 and 10 Hz of spread (−10 dB-Hz, 4 s
   hop), where the flat part of a held tone gives 2.2, 0.6 and 0.2 dB. These are airtime
